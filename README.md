@@ -92,8 +92,9 @@ build step for the server and worker.
 
 ## Releases
 
-Releases are signed tags; images and the Helm chart are signed by the release
-workflow. See [docs/releasing.md](docs/releasing.md) for how to cut and verify one.
+Releases use changesets, like cloudflare/workers-sdk: merging the
+**chore: version packages** pull request releases the images and the Helm
+chart, signed by the release workflow. See [docs/releasing.md](docs/releasing.md).
 
 ## License
 

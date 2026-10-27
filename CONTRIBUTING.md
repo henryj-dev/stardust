@@ -56,6 +56,12 @@ If a change needs to break a rule, discuss it in an issue first.
 - Never commit environment-specific values (real hostnames, IP addresses,
   account names) or secrets. Configuration examples use `example.com`.
 
+## Changesets
+
+A pull request that changes behaviour adds a changeset (`pnpm changeset`,
+then pick `stardust`). It becomes the changelog entry of the next release.
+See [docs/releasing.md](docs/releasing.md).
+
 ## Commits
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)

@@ -7,15 +7,20 @@
     "node": ">=26"
   },
   "scripts": {
-    "check": "pnpm run typecheck && pnpm run lint && pnpm run deps && pnpm run test && pnpm --filter @stardust/web run check",
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run deps && pnpm run changesets:check && pnpm run test && pnpm --filter @stardust/web run check",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "biome check --error-on-warnings .",
     "format": "biome format --write .",
     "deps": "depcruise --config .dependency-cruiser.cjs packages plugins",
-    "test": "node --test \"packages/*/src/**/*.test.ts\" \"plugins/*/src/**/*.test.ts\" \"tools/**/*.test.ts\""
+    "test": "node --test \"packages/*/src/**/*.test.ts\" \"plugins/*/src/**/*.test.ts\" \"tools/**/*.test.ts\"",
+    "changesets:check": "node tools/check-changesets.ts",
+    "changeset": "changeset",
+    "version-packages": "changeset version && pnpm install --lockfile-only && biome format --write charts/stardust"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.3",
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3",
     "@types/node": "^26.6.5",
     "dependency-cruiser": "^18.7.0",
     "typescript": "^6.0.3"

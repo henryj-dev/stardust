@@ -1,86 +1,51 @@
 # Releasing
 
-Releases follow [ADR 0002](adr/0002-release-trust.md): a release is a signed
-tag, and everything built from it is signed by the release workflow.
+stardust releases with [changesets](https://github.com/changesets/changesets),
+the same flow as cloudflare/workers-sdk. See [ADR 0002](adr/0002-release-trust.md)
+for why.
 
-## One-time setup
+## Contributors: add a changeset
 
-1. **Create one signing key per device that may release.** Any of them can
-   sign a release, so a lost or broken key never blocks one. Hardware keys
-   are preferred; keep at least two so one can be lost.
-
-   On each security key (`-O resident` stores the key on the device so it can
-   be used from another machine with `ssh-keygen -K`; `-O verify-required`
-   asks for the device PIN as well as a touch):
-
-   ```sh
-   ssh-keygen -t ed25519-sk -O resident -O verify-required \
-     -O application=ssh:stardust-release -C "stardust release: key A" \
-     -f ~/.ssh/stardust-release-a
-   ```
-
-   A file key on a workstation works too, but it is the weakest of the set:
-   anything that runs as you while it is unlocked can sign. Give it a
-   passphrase.
-
-   ```sh
-   ssh-keygen -t ed25519 -C "stardust release: workstation" -f ~/.ssh/stardust-release-ws
-   ```
-
-2. **Register the public keys as the allowed signers.** In the repository
-   settings, add an Actions variable `RELEASE_SIGNERS` holding the `.pub`
-   files' lines, one per line. Blank lines and `#` comments are allowed, so
-   label each key. It is a variable, not a file in the repository, so a pull
-   request cannot change who may release.
-
-   ```text
-   # key A
-   sk-ssh-ed25519@openssh.com AAAA... stardust release: key A
-   # key B
-   sk-ssh-ed25519@openssh.com AAAA... stardust release: key B
-   # workstation
-   ssh-ed25519 AAAA... stardust release: workstation
-   ```
-
-3. **Protect release tags.** Add a tag ruleset for `v*` that restricts
-   creation, update and deletion to maintainers.
-
-4. **Configure git to sign tags with SSH**, and pick the key per tag:
-
-   ```sh
-   git config gpg.format ssh
-   git config user.signingkey ~/.ssh/stardust-release-a     # default key
-   git -c user.signingkey=~/.ssh/stardust-release-b tag -s ...  # another one
-   ```
-
-## Cutting a release
+Every pull request that changes behaviour adds a changeset:
 
 ```sh
-git switch main && git pull --ff-only
-git tag -s v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+pnpm changeset
 ```
 
-The `release` workflow then:
+Pick `stardust` (it is the only package that is released), choose the bump and
+write one or two sentences for the changelog. Commit the generated file in
+`.changeset/` with your change. Pull requests that only touch tests, CI or
+docs do not need one.
 
-1. stops unless the tag is `vMAJOR.MINOR.PATCH[-PRERELEASE]`, annotated,
-   signed by one of `RELEASE_SIGNERS`, and on `main` — each check reports its
-   own name, and the log records the fingerprint of the key that signed
-   (`tools/verify-release-tag.sh`);
-2. builds `stardust-server`, `stardust-worker` and `stardust-web` for amd64 and
-   arm64, pushes them to GHCR, signs them with cosign and attaches an SBOM
-   and build provenance;
-3. writes the image digests into the chart, checks that all three images are
-   pinned, pushes the chart to `oci://ghcr.io/henryj-dev/charts/stardust` and
-   signs it;
-4. creates a GitHub release listing every digest.
+While stardust is below 1.0, use `minor` for anything that changes behaviour
+or configuration and `patch` for fixes.
+
+## Maintainers: release
+
+1. Merge pull requests as usual. After each merge, the `release` workflow
+   opens or updates a pull request titled **chore: version packages**. It
+   bumps `charts/stardust/package.json` and adds the changesets to
+   `charts/stardust/CHANGELOG.md`.
+2. When you want to release, **merge that pull request.**
+3. The workflow sees a version that has not been released and:
+   1. builds `stardust-server`, `stardust-worker` and `stardust-web` for amd64
+      and arm64, pushes them to GHCR, signs them with cosign and attaches an
+      SBOM and build provenance;
+   2. writes the image digests into the chart, checks that all three images
+      are pinned, pushes the chart to `oci://ghcr.io/henryj-dev/charts/stardust`
+      and signs it;
+   3. creates the tag `vX.Y.Z` and a GitHub release with the changelog and
+      every digest.
+
+The tag is created last, so a failed build leaves no tag; re-running the
+workflow or pushing again retries the release.
 
 ## Verifying a release
 
 ```sh
 cosign verify ghcr.io/henryj-dev/charts/stardust:0.1.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity https://github.com/henryj-dev/stardust/.github/workflows/release.yml@refs/tags/v0.1.0
+  --certificate-identity https://github.com/henryj-dev/stardust/.github/workflows/release.yml@refs/heads/main
 ```
 
 With Flux, put the same identity in the `OCIRepository`:
@@ -94,15 +59,15 @@ spec:
     provider: cosign
     matchOIDCIdentity:
       - issuer: ^https://token\.actions\.githubusercontent\.com$
-        subject: ^https://github\.com/henryj-dev/stardust/\.github/workflows/release\.yml@refs/tags/v.*$
+        subject: ^https://github\.com/henryj-dev/stardust/\.github/workflows/release\.yml@refs/heads/main$
 ```
 
-## Adding, losing or replacing a key
+## Repository settings the flow needs
 
-- **Add a key:** create it as above and add its line to `RELEASE_SIGNERS`.
-- **Lose a key:** delete its line. Releases continue with the remaining keys.
-  Artifacts already released stay valid: their signatures come from the
-  release workflow, not from the tag key.
-- **Suspect a key was compromised:** delete its line, delete any tag you did
-  not create, and review the release runs since the last tag you trust — each
-  run's log names the fingerprint that signed it.
+- **Actions → General → Workflow permissions:** "Allow GitHub Actions to create
+  and approve pull requests" must be on, or the version pull request cannot be
+  opened. The default token permission stays read-only; the workflow asks for
+  write access only in the jobs that need it.
+- Pull requests opened by the workflow's token do not trigger other workflows,
+  so CI does not run on the version pull request. It only changes the version
+  and the changelog; CI runs on `main` after the merge.
