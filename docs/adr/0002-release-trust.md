@@ -14,11 +14,16 @@ rely on a second reviewer.
 
 ## Decision
 
-1. **A release is a signed git tag** `vX.Y.Z`, signed with the maintainer's
-   SSH release key. The release workflow refuses to continue unless
-   - the tag signature verifies against the allowed signer, and
+1. **A release is a signed git tag** `vX.Y.Z`, signed with one of the
+   maintainers' SSH release keys. The release workflow refuses to continue
+   unless
+   - the tag signature verifies against one of the allowed signers, and
    - the tagged commit is an ancestor of `main`.
-2. **The allowed signer lives outside the repository tree** (a repository
+
+   Several keys may be allowed at once — typically two hardware keys, so
+   losing one does not block releases. The log of every release records the
+   fingerprint of the key that signed it.
+2. **The allowed signers live outside the repository tree** (a repository
    variable), so a pull request cannot change the trust anchor. Tag creation
    for `v*` is restricted to maintainers by a ruleset.
 3. **Builds run only on GitHub-hosted runners.** Release images are pushed to
@@ -39,7 +44,8 @@ rely on a second reviewer.
 - An urgent fix needs merge → tag → release before it reaches production.
   The release pipeline must stay fast (target: under 15 minutes) or the
   pressure to bypass it wins.
-- Losing the release key blocks releases until a new key is registered; the
-  rotation procedure must be written down before the first release.
+- Every allowed key can release on its own, so the set is only as strong as
+  its weakest key. Keys are added and removed by editing one variable; the
+  procedure is in `docs/releasing.md`.
 - Keyless signatures are recorded in the public Sigstore transparency log,
   including the repository and workflow identity.

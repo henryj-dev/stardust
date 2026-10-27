@@ -5,26 +5,52 @@ tag, and everything built from it is signed by the release workflow.
 
 ## One-time setup
 
-1. **Create a release signing key** on the maintainer's machine. A hardware
-   key (`ed25519-sk`) is preferred; a passphrase-protected file key works too.
+1. **Create one signing key per device that may release.** Any of them can
+   sign a release, so a lost or broken key never blocks one. Hardware keys
+   are preferred; keep at least two so one can be lost.
+
+   On each security key (`-O resident` stores the key on the device so it can
+   be used from another machine with `ssh-keygen -K`; `-O verify-required`
+   asks for the device PIN as well as a touch):
 
    ```sh
-   ssh-keygen -t ed25519-sk -C "stardust release" -f ~/.ssh/stardust-release
+   ssh-keygen -t ed25519-sk -O resident -O verify-required \
+     -O application=ssh:stardust-release -C "stardust release: key A" \
+     -f ~/.ssh/stardust-release-a
    ```
 
-2. **Register the public key as the allowed signer.** In the repository
-   settings, add an Actions variable `RELEASE_SIGNER_PUBKEY` whose value is the
-   single line in `~/.ssh/stardust-release.pub`. It is a variable, not a file
-   in the repository, so a pull request cannot change who may release.
+   A file key on a workstation works too, but it is the weakest of the set:
+   anything that runs as you while it is unlocked can sign. Give it a
+   passphrase.
+
+   ```sh
+   ssh-keygen -t ed25519 -C "stardust release: workstation" -f ~/.ssh/stardust-release-ws
+   ```
+
+2. **Register the public keys as the allowed signers.** In the repository
+   settings, add an Actions variable `RELEASE_SIGNERS` holding the `.pub`
+   files' lines, one per line. Blank lines and `#` comments are allowed, so
+   label each key. It is a variable, not a file in the repository, so a pull
+   request cannot change who may release.
+
+   ```text
+   # key A
+   sk-ssh-ed25519@openssh.com AAAA... stardust release: key A
+   # key B
+   sk-ssh-ed25519@openssh.com AAAA... stardust release: key B
+   # workstation
+   ssh-ed25519 AAAA... stardust release: workstation
+   ```
 
 3. **Protect release tags.** Add a tag ruleset for `v*` that restricts
    creation, update and deletion to maintainers.
 
-4. **Configure git to sign tags with that key:**
+4. **Configure git to sign tags with SSH**, and pick the key per tag:
 
    ```sh
    git config gpg.format ssh
-   git config user.signingkey ~/.ssh/stardust-release.pub
+   git config user.signingkey ~/.ssh/stardust-release-a     # default key
+   git -c user.signingkey=~/.ssh/stardust-release-b tag -s ...  # another one
    ```
 
 ## Cutting a release
@@ -38,8 +64,9 @@ git push origin v0.1.0
 The `release` workflow then:
 
 1. stops unless the tag is `vMAJOR.MINOR.PATCH[-PRERELEASE]`, annotated,
-   signed by `RELEASE_SIGNER_PUBKEY`, and on `main` — each check reports its
-   own name (`tools/verify-release-tag.sh`);
+   signed by one of `RELEASE_SIGNERS`, and on `main` — each check reports its
+   own name, and the log records the fingerprint of the key that signed
+   (`tools/verify-release-tag.sh`);
 2. builds `stardust-server`, `stardust-worker` and `stardust-web` for amd64 and
    arm64, pushes them to GHCR, signs them with cosign and attaches an SBOM
    and build provenance;
@@ -70,15 +97,12 @@ spec:
         subject: ^https://github\.com/henryj-dev/stardust/\.github/workflows/release\.yml@refs/tags/v.*$
 ```
 
-## Rotating or replacing the signing key
+## Adding, losing or replacing a key
 
-1. Create the new key as in the one-time setup.
-2. Replace the value of `RELEASE_SIGNER_PUBKEY` with the new public key.
-   Tags signed by the old key can no longer be released, but artifacts
-   already released stay valid: their signatures come from the release
-   workflow, not from the tag key.
-3. Cut the next release with the new key.
-
-If the key is lost, the steps are the same. If it may have been
-compromised, also delete any tag you did not create and review the release
-workflow runs since the last tag you trust.
+- **Add a key:** create it as above and add its line to `RELEASE_SIGNERS`.
+- **Lose a key:** delete its line. Releases continue with the remaining keys.
+  Artifacts already released stay valid: their signatures come from the
+  release workflow, not from the tag key.
+- **Suspect a key was compromised:** delete its line, delete any tag you did
+  not create, and review the release runs since the last tag you trust — each
+  run's log names the fingerprint that signed it.
