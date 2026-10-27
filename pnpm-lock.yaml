@@ -257,6 +257,12 @@ importers:
         specifier: workspace:*
         version: link:../db
 
+  plugins/builder-buildkit:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
   plugins/source-github:
     dependencies:
       '@stardust/core':
