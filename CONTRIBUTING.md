@@ -1,6 +1,7 @@
 # Contributing
 
-Thanks for your interest. stardust is pre-alpha, so expect the structure to
+Thanks for your interest. Everyone taking part is expected to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md). stardust is pre-alpha, so expect the structure to
 move; opening an issue before a large change saves everyone time.
 
 ## Setup
