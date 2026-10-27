@@ -1,5 +1,11 @@
 # stardust
 
+## 0.1.1
+
+### Patch Changes
+
+- [`a95df5c`](https://github.com/henryj-dev/stardust/commit/a95df5c928b8ea58e2b886f2c39e938535844c21) Thanks [@mack-erel](https://github.com/mack-erel)! - The chart installs through Flux from OCI: the `helm.sh/chart` label no longer carries the `+<digest>` build metadata that Flux appends to the chart version, which the API server rejects as a label value.
+
 ## 0.1.0
 
 ### Minor Changes
