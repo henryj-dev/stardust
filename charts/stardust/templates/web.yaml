@@ -27,6 +27,8 @@ spec:
           env:
             - name: PORT
               value: {{ $port | quote }}
+            - name: STARDUST_API_URL
+              value: {{ printf "http://%s-server:%d" (include "stardust.fullname" .) (int (default 8080 .Values.config.server.port)) | quote }}
           ports:
             - name: http
               containerPort: {{ $port }}

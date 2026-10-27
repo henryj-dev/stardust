@@ -1,2 +1,2 @@
-export type { Client, ClientOptions } from "./client.ts";
-export { createClient } from "./client.ts";
+export type { Client, ClientOptions, JobView, RunView } from "./client.ts";
+export { ApiError, createClient } from "./client.ts";

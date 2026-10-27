@@ -105,6 +105,9 @@ export function createApp(info: AppInfo, services?: Services): Hono {
     await next();
   });
 
+  /** Lets a client check a token without side effects. */
+  app.get("/api/v1/session", (c) => c.json({ ok: true }));
+
   app.put("/api/v1/projects/:id", async (c) => {
     let body: Partial<Project>;
     try {
