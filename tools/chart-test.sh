@@ -79,6 +79,23 @@ else
 fi
 if ! grep -q "kind: Role" <<<"$(render)"; then pass builds-off-no-role; else bad builds-off-no-role "a Role exists with builds disabled"; fi
 
+# Flux appends the OCI digest to the chart version as build metadata
+# ("0.1.0+e6f18c5ec407"). Every label value must still be a valid label: the
+# API server refuses the whole install otherwise (found installing v0.1.0 with
+# Flux). kubeconform's schemas do not check label syntax, so this does.
+plus="$(mktemp -d)"
+cp -R "$repo/charts/stardust" "$plus/stardust"
+sed -i.bak -E 's/^version: .*/version: 0.1.0+e6f18c5ec407/' "$plus/stardust/Chart.yaml"
+out="$(docker run --rm -v "$plus:/charts:ro" "$HELM" template t /charts/stardust --set database.existingSecret=db --set builds.enabled=true 2>&1)"
+rm -rf "$plus"
+invalid="$(awk '/^  labels:/{l=1;next} l && /^    [^ ]/{print; next} {l=0}' <<<"$out" \
+  | sed -E 's/^ +[^:]+: *"?([^"]*)"?$/\1/' | grep -vE '^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$' | sort -u || true)"
+if grep -q 'helm.sh/chart: stardust-0.1.0_e6f18c5ec407' <<<"$out" && [ -z "$invalid" ]; then
+  pass labels-valid-with-build-metadata
+else
+  bad labels-valid-with-build-metadata "invalid label values: ${invalid:-none, but the chart label was not rewritten}"
+fi
+
 # Must be rejected, for the stated reason.
 reject() { # <name> <expected message> <helm args...>
   local name="$1" expected="$2"
