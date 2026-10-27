@@ -228,7 +228,12 @@ describe("every API route is guarded", () => {
     "POST /api/v1/tokens",
     "DELETE /api/v1/tokens/:tokenId",
   ]);
-  const PUBLIC = new Set(["POST /api/v1/auth/login"]);
+  const PUBLIC = new Set([
+    "POST /api/v1/auth/login",
+    "GET /api/v1/auth/methods",
+    "POST /api/v1/auth/oidc/start",
+    "POST /api/v1/auth/oidc/callback",
+  ]);
   const routes = () => [
     ...new Set(
       app.routes.filter((r) => r.path.startsWith("/api/v1/") && r.method !== "ALL").map((r) => `${r.method} ${r.path}`),

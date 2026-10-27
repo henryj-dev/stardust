@@ -58,6 +58,12 @@ export interface Client {
   login(username: string, password: string): Promise<LoginResult>;
   /** Ends the session of the client's token. */
   logout(): Promise<void>;
+  /** Which ways of signing in the server offers. */
+  authMethods(): Promise<{ password: boolean; oidc: { displayName: string } | null }>;
+  /** Starts an OpenID sign-in: where to send the browser, and the state to keep for the callback. */
+  oidcStart(): Promise<{ url: string; state: string }>;
+  /** Finishes it with the callback's query string and the state kept since the start. */
+  oidcCallback(query: string, state: string): Promise<LoginResult>;
   /** True when the token is accepted. */
   checkToken(): Promise<boolean>;
   runs(projectId: string): Promise<RunView[]>;
@@ -90,6 +96,32 @@ export function createClient(options: ClientOptions): Client {
         return { ok: false, reason: res.status === 429 ? "locked" : "invalid", message: error };
       }
       if (!res.ok) throw new ApiError(res.status, `POST /api/v1/auth/login failed: ${res.status}`);
+      const body = (await res.json()) as { token: string; user: SessionUser };
+      return { ok: true, token: body.token, user: body.user };
+    },
+    async authMethods() {
+      return (await (await get("/api/v1/auth/methods")).json()) as {
+        password: boolean;
+        oidc: { displayName: string } | null;
+      };
+    },
+    async oidcStart() {
+      return (await (await get("/api/v1/auth/oidc/start", { method: "POST" })).json()) as {
+        url: string;
+        state: string;
+      };
+    },
+    async oidcCallback(query, state) {
+      const res = await doFetch(`${base}/api/v1/auth/oidc/callback`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query, state }),
+      });
+      if (res.status === 401 || res.status === 403) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error: string };
+        return { ok: false, reason: "invalid", message: error };
+      }
+      if (!res.ok) throw new ApiError(res.status, `POST /api/v1/auth/oidc/callback failed: ${res.status}`);
       const body = (await res.json()) as { token: string; user: SessionUser };
       return { ok: true, token: body.token, user: body.user };
     },

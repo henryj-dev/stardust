@@ -42,6 +42,27 @@ plugins:
   `POST /api/v1/tokens` `{"name": "ci", "expiresInDays": 90}`; it is shown
   once and acts with your roles. List with `GET /api/v1/tokens`, revoke with
   `DELETE /api/v1/tokens/<id>`.
+- **Single sign-on** through any OpenID Connect provider:
+
+  ```yaml
+  plugins:
+    identity-oidc:
+      displayName: Company SSO          # the sign-in button
+      issuer: https://id.example.com
+      clientId: stardust
+      clientSecret: { env: OIDC_CLIENT_SECRET }
+      allowedGroups: [developers]       # optional: only these groups may sign in
+      adminGroups: [platform]           # optional: these are administrators, checked at every sign-in
+      autoCreate: true                  # optional: create an account at first sign-in (default false)
+  ```
+
+  Register `<server.publicUrl>/login/oidc/callback` as the redirect URI. The
+  flow uses PKCE, a nonce and a one-time state bound to the browser, and the
+  ID token's signature is checked against the provider's keys. People are
+  matched by issuer and subject only. A first sign-in whose username already
+  belongs to another account is refused, never linked to it. Without
+  `autoCreate`, an administrator creates the account first:
+  `POST /api/v1/users {"username": "ada", "oidc": {"issuer": "…", "subject": "…"}}`.
 - **Lost password.** Anyone who can reach the deployment can reset it, and
   that access is the authority for it:
 

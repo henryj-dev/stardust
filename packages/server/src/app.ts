@@ -12,12 +12,16 @@ import {
   putProject,
   revokeApiToken,
   type Sql,
+  savePendingLogin,
   setProjectRole,
   signIn,
+  signInWithIdentity,
   signOut,
   startRun,
+  takePendingLogin,
   type User,
 } from "@stardust/db";
+import { type AccessRules, decideAccess, type Identity, type Oidc } from "@stardust/plugin-identity-oidc";
 import {
   type CompareResult,
   decideWebhook,
@@ -41,6 +45,15 @@ export interface Services {
   compare: (repo: string, base: string, head: string) => Promise<CompareResult>;
   /** Live run updates. Without it the events endpoint is not served. */
   events?: RunEvents;
+  /** Sign-in through an OpenID provider. Without it only passwords work. */
+  oidc?: {
+    /** Resolved lazily: the provider may be unreachable when the server starts. */
+    client: () => Promise<Oidc>;
+    redirectUri: string;
+    displayName: string;
+    rules: AccessRules;
+    autoCreate: boolean;
+  };
   /** Interval of SSE heartbeats, so proxies keep idle streams open. */
   heartbeatMs?: number;
   log?: Logger;
@@ -147,9 +160,74 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     return c.json({ token: result.token, user: result.user });
   });
 
+  app.get("/api/v1/auth/methods", (c) =>
+    c.json({ password: true, oidc: services.oidc ? { displayName: services.oidc.displayName } : null }),
+  );
+
+  // OpenID sign-in. The dashboard keeps `state` in a cookie of its own and
+  // sends it back with the callback, which ties the callback to the browser
+  // that started it (no login CSRF). The pending login is used once.
+  app.post("/api/v1/auth/oidc/start", async (c) => {
+    if (!services.oidc) return c.json({ error: "OpenID sign-in is not configured" }, 404);
+    const { url, pending } = await (await services.oidc.client()).start();
+    await savePendingLogin(sql, pending);
+    return c.json({ url, state: pending.state });
+  });
+
+  app.post("/api/v1/auth/oidc/callback", async (c) => {
+    const oidc = services.oidc;
+    if (!oidc) return c.json({ error: "OpenID sign-in is not configured" }, 404);
+    const body = (await c.req.json().catch(() => null)) as { query?: unknown; state?: unknown } | null;
+    if (typeof body?.query !== "string" || typeof body.state !== "string" || body.state === "") {
+      return c.json({ error: "query and state are required" }, 400);
+    }
+    const query = new URLSearchParams(body.query);
+    if (query.get("error")) {
+      return c.json({ error: `the provider refused: ${query.get("error_description") ?? query.get("error")}` }, 401);
+    }
+    if (query.get("state") !== body.state) return c.json({ error: "this sign-in was not started here" }, 401);
+    const pending = await takePendingLogin(sql, body.state);
+    if (!pending) return c.json({ error: "this sign-in expired or was already used; start again" }, 401);
+    let identity: Identity;
+    try {
+      identity = await (await oidc.client()).finish(`${oidc.redirectUri}?${query}`, pending);
+    } catch (err) {
+      log.warn("OpenID sign-in refused", { error: (err as Error).message });
+      return c.json({ error: "the provider's answer did not check out" }, 401);
+    }
+    const access = decideAccess(identity, oidc.rules);
+    if (!access.allowed) {
+      log.warn("OpenID sign-in refused by group", { issuer: identity.issuer, subject: identity.subject });
+      return c.json({ error: "your account is not allowed to use stardust" }, 403);
+    }
+    const result = await signInWithIdentity(sql, identity, {
+      autoCreate: oidc.autoCreate,
+      isAdmin: oidc.rules.adminGroups ? access.isAdmin : null,
+    });
+    if (!result.ok) {
+      log.warn("OpenID sign-in refused", { subject: identity.subject, reason: result.reason });
+      const message = {
+        "no-account": "there is no stardust account for you; ask an administrator",
+        disabled: "your account is disabled",
+        "username-taken": "your username is taken by another account; ask an administrator",
+        "no-username": "the provider sent no username or email",
+      }[result.reason];
+      return c.json({ error: message }, 403);
+    }
+    log.info("signed in", { username: result.user.username, via: "oidc", created: result.created });
+    return c.json({ token: result.token, user: result.user });
+  });
+
   // Every other /api/v1 route needs a session.
+  const PUBLIC_PATHS = new Set([
+    "/api/v1/auth/login",
+    "/api/v1/auth/methods",
+    "/api/v1/auth/oidc/start",
+    "/api/v1/auth/oidc/callback",
+  ]);
   app.use("/api/v1/*", async (c, next) => {
-    if (c.req.path === "/api/v1/auth/login") return next();
+    if (PUBLIC_PATHS.has(c.req.path)) return next();
+
     const token = bearer(c.req.header("authorization"));
     const user = token ? await authenticate(sql, token) : null;
     if (!user) return c.json({ error: "unauthorized" }, 401);
@@ -209,14 +287,20 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       username?: unknown;
       password?: unknown;
       isAdmin?: unknown;
+      oidc?: { issuer?: unknown; subject?: unknown };
     } | null;
-    if (typeof body?.username !== "string" || typeof body.password !== "string") {
-      return c.json({ error: "username and password are required" }, 400);
+    const oidc =
+      typeof body?.oidc?.issuer === "string" && typeof body.oidc.subject === "string"
+        ? { issuer: body.oidc.issuer, subject: body.oidc.subject }
+        : undefined;
+    if (typeof body?.username !== "string" || (typeof body.password !== "string" && !oidc)) {
+      return c.json({ error: "username and a password or an oidc identity are required" }, 400);
     }
     try {
       const user = await createUser(sql, {
         username: body.username,
-        password: body.password,
+        ...(typeof body.password === "string" ? { password: body.password } : {}),
+        ...(oidc ? { oidc } : {}),
         isAdmin: body.isAdmin === true,
       });
       return c.json({ user }, 201);

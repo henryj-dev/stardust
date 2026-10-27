@@ -13,5 +13,8 @@
     "@stardust/db": "workspace:*",
     "@stardust/plugin-source-github": "workspace:*",
     "hono": "^4.13.14"
+  },
+  "devDependencies": {
+    "@stardust/plugin-identity-oidc": "workspace:*"
   }
 }

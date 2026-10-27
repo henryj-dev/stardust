@@ -70,13 +70,21 @@ const tokenHash = (token: string) => createHash("sha256").update(token).digest()
 
 export async function createUser(
   sql: Sql,
-  input: { username: string; password?: string; isAdmin?: boolean; displayName?: string },
+  input: {
+    username: string;
+    password?: string;
+    isAdmin?: boolean;
+    displayName?: string;
+    /** Links an OpenID identity, so that person signs in through the provider. */
+    oidc?: { issuer: string; subject: string };
+  },
 ): Promise<User> {
   if (!USERNAME.test(input.username)) throw new Error(`username "${input.username}" is not allowed`);
   const hash = input.password === undefined ? null : await hashPassword(input.password);
   const [row] = await sql<{ id: string }[]>`
-    INSERT INTO users (username, display_name, password_hash, is_admin)
-    VALUES (${input.username}, ${input.displayName ?? ""}, ${hash}, ${input.isAdmin ?? false})
+    INSERT INTO users (username, display_name, password_hash, is_admin, oidc_issuer, oidc_subject)
+    VALUES (${input.username}, ${input.displayName ?? ""}, ${hash}, ${input.isAdmin ?? false},
+            ${input.oidc?.issuer ?? null}, ${input.oidc?.subject ?? null})
     RETURNING id`;
   if (!row) throw new Error("user insert returned no row");
   return {

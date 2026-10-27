@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/config";
 import { createPluginRegistry, type Logger } from "@stardust/core";
 import { connect, ensureBootstrapAdmin, migrate } from "@stardust/db";
+import { createOidc, plugin as identityOidc, type Oidc } from "@stardust/plugin-identity-oidc";
 import { plugin as sourceGithub } from "@stardust/plugin-source-github";
 import { createApp, type Services } from "./app.ts";
 import { RunEvents } from "./events.ts";
@@ -22,8 +23,9 @@ try {
   config = await loadConfig(configPath);
   // The server reads only the source plugin's section; the registry still
   // validates every enabled section so a typo stops start-up here too.
-  createPluginRegistry([sourceGithub]).resolve(
-    Object.fromEntries(Object.entries(config.plugins).filter(([name]) => name === "source-github")),
+  const mine = new Set(["source-github", "identity-oidc"]);
+  createPluginRegistry([sourceGithub, identityOidc]).resolve(
+    Object.fromEntries(Object.entries(config.plugins).filter(([name]) => mine.has(name))),
   );
 } catch (err) {
   console.error((err as Error).message);
@@ -52,6 +54,7 @@ if (source) {
     log,
     events,
     sql,
+    ...(await oidcServices()),
     webhookSecret: await resolveSecretRef(source.webhookSecret, `${at}.webhookSecret`),
     compare: compareApi(
       (source.apiBaseUrl as string | undefined) ?? "https://api.github.com",
@@ -60,6 +63,44 @@ if (source) {
   };
 } else {
   console.warn("source-github is not configured: only /healthz is served");
+}
+
+/** OpenID sign-in, when configured. Discovery runs at first use and is retried after a failure. */
+async function oidcServices(): Promise<Pick<Services, "oidc">> {
+  const section = config.plugins["identity-oidc"] as Record<string, unknown> | undefined;
+  if (!section) return {};
+  const at = "plugins.identity-oidc";
+  const redirectUri = `${config.server.publicUrl.replace(/\/+$/, "")}/login/oidc/callback`;
+  const options = {
+    issuer: section.issuer as string,
+    clientId: section.clientId as string,
+    clientSecret: await resolveSecretRef(section.clientSecret, `${at}.clientSecret`),
+    redirectUri,
+    ...(section.scopes ? { scopes: section.scopes as string[] } : {}),
+    ...(section.groupsClaim ? { groupsClaim: section.groupsClaim as string } : {}),
+  };
+  let pending: Promise<Oidc> | null = null;
+  const client = () => {
+    pending ??= createOidc(options).catch((err: Error) => {
+      pending = null;
+      log.error("OpenID discovery failed", { issuer: options.issuer, error: err.message });
+      throw err;
+    });
+    return pending;
+  };
+  log.info("OpenID sign-in enabled", { issuer: options.issuer, redirectUri });
+  return {
+    oidc: {
+      client,
+      redirectUri,
+      displayName: (section.displayName as string | undefined) ?? "single sign-on",
+      autoCreate: section.autoCreate === true,
+      rules: {
+        ...(section.allowedGroups ? { allowedGroups: section.allowedGroups as string[] } : {}),
+        ...(section.adminGroups ? { adminGroups: section.adminGroups as string[] } : {}),
+      },
+    },
+  };
 }
 
 const app = createApp({ version: process.env.STARDUST_VERSION ?? "dev" }, services);

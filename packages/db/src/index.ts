@@ -19,6 +19,8 @@ export {
   verifyPassword,
 } from "./identity.ts";
 export { MIGRATIONS_DIR, migrate } from "./migrate.ts";
+export type { ExternalIdentity, IdentitySignIn, PendingLoginRow } from "./oidc.ts";
+export { savePendingLogin, signInWithIdentity, takePendingLogin, usernameFrom } from "./oidc.ts";
 export type { Component, Project, RunView } from "./projects.ts";
 export { getProject, getRun, listRuns, ProjectError, putProject, validateProject } from "./projects.ts";
 export type { ClaimedJob, JobResult } from "./queue.ts";

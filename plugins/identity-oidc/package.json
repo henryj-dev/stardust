@@ -1,0 +1,17 @@
+{
+  "name": "@stardust/plugin-identity-oidc",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "dependencies": {
+    "@stardust/core": "workspace:*",
+    "openid-client": "6.8.8"
+  },
+  "devDependencies": {
+    "jose": "6.2.13"
+  }
+}

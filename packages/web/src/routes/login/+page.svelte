@@ -1,5 +1,5 @@
 <script lang="ts">
-let { form } = $props();
+let { data, form } = $props();
 </script>
 
 <svelte:head>
@@ -8,7 +8,13 @@ let { form } = $props();
 
 <main>
   <h1>Sign in</h1>
-  <form method="POST">
+  {#if data.oidc}
+    <form method="POST" action="?/oidc">
+      <button type="submit">Sign in with {data.oidc.displayName}</button>
+    </form>
+    <p>or with a password:</p>
+  {/if}
+  <form method="POST" action="?/password">
     <label>
       Username
       <input name="username" autocomplete="username" value={form?.username ?? ""} required />
@@ -19,7 +25,7 @@ let { form } = $props();
     </label>
     <button type="submit">Sign in</button>
   </form>
-  {#if form?.error}
-    <p role="alert">{form.error}</p>
+  {#if form?.error ?? data.error}
+    <p role="alert">{form?.error ?? data.error}</p>
   {/if}
 </main>
