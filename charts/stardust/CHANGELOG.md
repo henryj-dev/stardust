@@ -1,5 +1,11 @@
 # stardust
 
+## 0.3.1
+
+### Patch Changes
+
+- [`2efa83f`](https://github.com/henryj-dev/stardust/commit/2efa83fe6134714dcbec570858fc93bdd0b22029) Thanks [@mack-erel](https://github.com/mack-erel)! - Pipeline N images run as user `1000:1000` instead of `node`: with `runAsNonRoot`, Kubernetes refused to start a container whose image user is a name it cannot check.
+
 ## 0.3.0
 
 ### Minor Changes
