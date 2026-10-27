@@ -1,0 +1,8 @@
+# Lets containerd on the nodes read registry hosts from /etc/containerd/certs.d,
+# where the delivery test registers the local plain-HTTP registry.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"

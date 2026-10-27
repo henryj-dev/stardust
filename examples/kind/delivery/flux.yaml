@@ -1,0 +1,25 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: deploy
+  namespace: flux-system
+spec:
+  interval: 10s
+  url: http://gitea.git.svc.cluster.local:3000/e2e/deploy.git
+  ref:
+    branch: main
+  secretRef:
+    name: gitea-auth
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: demo-api
+  namespace: flux-system
+spec:
+  interval: 10s
+  path: ./deploy/demo/api
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: deploy

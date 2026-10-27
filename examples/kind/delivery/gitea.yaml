@@ -1,0 +1,50 @@
+# A throwaway Gitea for the delivery test: sqlite, no persistence, webhooks
+# allowed to private addresses (stardust runs in the same cluster).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: git
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitea
+  namespace: git
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: gitea }
+  template:
+    metadata:
+      labels: { app: gitea }
+    spec:
+      containers:
+        - name: gitea
+          image: gitea/gitea:28.2.0-rootless@sha256:94807314454f6525994a3b76286ba12bc7e7f8cd14f61d9e67431767f8103306
+          env:
+            - { name: GITEA__security__INSTALL_LOCK, value: "true" }
+            - { name: GITEA__server__ROOT_URL, value: "http://gitea.git.svc.cluster.local:3000/" }
+            - { name: GITEA__server__DOMAIN, value: "gitea.git.svc.cluster.local" }
+            - { name: GITEA__database__DB_TYPE, value: "sqlite3" }
+            - { name: GITEA__webhook__ALLOWED_HOST_LIST, value: "*" }
+            - { name: GITEA__service__DISABLE_REGISTRATION, value: "true" }
+          ports:
+            - containerPort: 3000
+          readinessProbe:
+            httpGet: { path: /api/healthz, port: 3000 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/gitea }
+            - { name: config, mountPath: /etc/gitea }
+      volumes:
+        - { name: data, emptyDir: {} }
+        - { name: config, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea
+  namespace: git
+spec:
+  selector: { app: gitea }
+  ports:
+    - port: 3000

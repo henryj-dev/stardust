@@ -148,3 +148,32 @@ jobs:
           kubectl -n stardust get all,events -o wide || true
           kubectl -n stardust describe pods || true
           kubectl -n stardust logs -l app.kubernetes.io/instance=stardust --all-containers --tail=50 || true
+
+  e2e-delivery:
+    name: e2e (push to deploy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          cluster_name: stardust
+          config: examples/kind/delivery/kind-config.yaml
+      - run: tools/e2e-delivery.sh
+      - if: failure()
+        name: Dump state
+        run: |
+          for ns in stardust stardust-builds flux-system demo git; do
+            echo "::group::$ns"
+            kubectl -n "$ns" get all,events -o wide || true
+            echo "::endgroup::"
+          done
+          kubectl -n stardust logs deploy/stardust-server --tail=100 || true
+          kubectl -n stardust logs deploy/stardust-worker --tail=100 || true
+          kubectl -n stardust-builds logs -l app.kubernetes.io/component=build --all-containers --tail=100 || true
+          kubectl -n flux-system get gitrepositories,kustomizations -o yaml || true
