@@ -10,6 +10,7 @@ export {
   ensureBootstrapAdmin,
   hashPassword,
   listApiTokens,
+  MAX_PASSWORD_LENGTH,
   projectRole,
   resetPassword,
   revokeApiToken,
@@ -26,4 +27,4 @@ export { getProject, getRun, listRuns, ProjectError, putProject, validateProject
 export type { ClaimedJob, JobResult } from "./queue.ts";
 export { claimJob, finishJob, reclaimExpired, renewLease } from "./queue.ts";
 export type { StartRun } from "./runs.ts";
-export { advanceRun, startRun } from "./runs.ts";
+export { advanceRun, claimDelivery, releaseDelivery, startRun } from "./runs.ts";

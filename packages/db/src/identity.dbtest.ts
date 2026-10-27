@@ -3,6 +3,7 @@ import { after, before, describe, it } from "node:test";
 import { can } from "@stardust/core";
 import {
   authenticate,
+  createApiToken,
   createUser,
   ensureBootstrapAdmin,
   hashPassword,
@@ -62,8 +63,13 @@ describe("sessions", () => {
   });
 
   it("rejects wrong passwords and unknown users the same way", async () => {
-    assert.deepEqual(await signIn(db.sql, "admin", "wrong password!"), { ok: false, reason: "invalid" });
-    assert.deepEqual(await signIn(db.sql, "nobody", PASSWORD), { ok: false, reason: "invalid" });
+    // knownUser is for logs; the server answers both the same.
+    assert.deepEqual(await signIn(db.sql, "admin", "wrong password!"), {
+      ok: false,
+      reason: "invalid",
+      knownUser: true,
+    });
+    assert.deepEqual(await signIn(db.sql, "nobody", PASSWORD), { ok: false, reason: "invalid", knownUser: false });
   });
 
   it("an unknown user costs about as much as a wrong password", async () => {
@@ -90,7 +96,29 @@ describe("sessions", () => {
     await createUser(db.sql, { username: "target", password: PASSWORD });
     const policy = { maxFailures: 3, windowMinutes: 15, sessionHours: 1 };
     for (let i = 0; i < 3; i++) await signIn(db.sql, "target", "wrong password!", policy);
-    assert.deepEqual(await signIn(db.sql, "target", PASSWORD, policy), { ok: false, reason: "locked" });
+    assert.deepEqual(await signIn(db.sql, "target", PASSWORD, policy), {
+      ok: false,
+      reason: "locked",
+      knownUser: true,
+    });
+  });
+
+  it("parallel guesses get no more tries than sequential ones", async () => {
+    await createUser(db.sql, { username: "burst", password: PASSWORD });
+    const policy = { maxFailures: 3, windowMinutes: 15, sessionHours: 1 };
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, i) => signIn(db.sql, "burst", `wrong password ${i}!`, policy)),
+    );
+    const checked = results.filter((r) => !r.ok && r.reason === "invalid").length;
+    assert.ok(checked <= 3, `${checked} of 20 parallel guesses reached the password check`);
+    assert.equal(results.filter((r) => !r.ok && r.reason === "locked").length, 20 - checked);
+  });
+
+  it("refuses an over-long password without hashing it", async () => {
+    await assert.rejects(hashPassword("x".repeat(1025)), /at most 1024/);
+    const t = performance.now();
+    assert.equal((await signIn(db.sql, "admin", "x".repeat(10_000_000))).ok, false);
+    assert.ok(performance.now() - t < 2000);
   });
 
   it("expired sessions and disabled users do not authenticate", async () => {
@@ -137,8 +165,11 @@ describe("password reset", () => {
     const before = await signIn(db.sql, "forgetful", PASSWORD);
     assert.ok(before.ok);
     for (let i = 0; i < 3; i++) await signIn(db.sql, "forgetful", "wrong password!");
+    const { token: apiToken } = await createApiToken(db.sql, before.user.id, "laptop", null);
+    assert.ok(await authenticate(db.sql, apiToken));
     assert.equal(await resetPassword(db.sql, "forgetful", "a brand new password"), true);
     assert.equal(await authenticate(db.sql, before.token), null);
+    assert.equal(await authenticate(db.sql, apiToken), null, "API tokens end too");
     assert.equal((await signIn(db.sql, "forgetful", PASSWORD)).ok, false);
     assert.equal((await signIn(db.sql, "forgetful", "a brand new password")).ok, true);
     assert.equal(await resetPassword(db.sql, "nobody-here", "a brand new password"), false);

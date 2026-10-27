@@ -49,6 +49,7 @@ const push = (over: Record<string, unknown> = {}) =>
     after: "b".repeat(40),
     head_commit: { message: "feat: x" },
     commits: [],
+    repository: { full_name: "acme/demo" },
     ...over,
   });
 const deliver = (body: string, headers: Record<string, string> = {}) =>
@@ -108,6 +109,11 @@ describe("sign-in and permissions", () => {
     assert.deepEqual([session.user.username, session.user.isAdmin], ["admin", true]);
     assert.equal((await app.request("/api/v1/auth/logout", { method: "POST", headers: auth })).status, 200);
     assert.equal((await app.request("/api/v1/session", { headers: auth })).status, 401);
+  });
+
+  it("refuses an oversized request body before reading it", async () => {
+    const res = await app.request("/api/v1/auth/login", json({ username: "admin", password: "x".repeat(100_000) }));
+    assert.equal(res.status, 413);
   });
 
   it("answers a wrong password and an unknown user alike", async () => {
@@ -298,8 +304,43 @@ describe("webhooks", () => {
         .status,
       401,
     );
-    assert.equal((await app.request("/webhooks/github/nope", { method: "POST", body })).status, 404);
+    // Unsigned, an unknown project answers like a known one: names do not leak.
+    assert.equal((await app.request("/webhooks/github/nope", { method: "POST", body })).status, 401);
+    assert.equal(
+      (
+        await app.request("/webhooks/github/nope", {
+          method: "POST",
+          body,
+          headers: { "x-hub-signature-256": sign(body) },
+        })
+      ).status,
+      404,
+    );
     assert.equal(await runCount(), before);
+  });
+
+  it("refuses a signed delivery about another repository", async () => {
+    const before = await runCount();
+    const body = push({ repository: { full_name: "mallory/copy-of-demo" } });
+    assert.equal((await deliver(body)).status, 403);
+    assert.equal((await deliver(push({ repository: undefined }))).status, 403, "no repository at all");
+    assert.equal(
+      (await deliver(push({ repository: { full_name: "ACME/Demo" } }))).status,
+      201,
+      "names are case-insensitive",
+    );
+    assert.equal(await runCount(), (before ?? 0) + 1);
+  });
+
+  it("a re-sent delivery starts nothing the second time", async () => {
+    const before = await runCount();
+    const body = push({ after: "c".repeat(40) });
+    const id = { "x-github-delivery": "5f1c0a2e-0000-4000-8000-000000000001" };
+    assert.equal((await deliver(body, id)).status, 201);
+    const again = await deliver(body, id);
+    assert.equal(again.status, 202);
+    assert.match(((await again.json()) as { reason: string }).reason, /duplicate/);
+    assert.equal(await runCount(), (before ?? 0) + 1);
   });
 
   it("refuses an oversized body, even without Content-Length", async () => {

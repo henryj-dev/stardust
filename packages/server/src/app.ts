@@ -1,6 +1,7 @@
 import { type Action, can, evaluateOn, type Logger, PipelineDefError, pipelineDefFromComponents } from "@stardust/core";
 import {
   authenticate,
+  claimDelivery,
   createApiToken,
   createUser,
   getProject,
@@ -10,6 +11,7 @@ import {
   ProjectError,
   projectRole,
   putProject,
+  releaseDelivery,
   revokeApiToken,
   type Sql,
   savePendingLogin,
@@ -30,6 +32,7 @@ import {
   verifySignature,
 } from "@stardust/plugin-source-github";
 import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import { readBoundedBody } from "./body.ts";
 import type { RunEvents } from "./events.ts";
@@ -77,12 +80,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     const projectId = c.req.param("project");
     const event = c.req.header("x-github-event");
     const delivery = c.req.header("x-github-delivery");
-    const project = await getProject(sql, projectId);
-    if (!project) {
-      log.warn("webhook for an unknown project", { project: projectId, event, delivery });
-      return c.json({ error: "unknown project" }, 404);
-    }
-
+    // The signature first: an unsigned caller learns nothing, not even which projects exist.
     const read = await readBoundedBody(c.req.raw);
     if ("tooLarge" in read) {
       log.warn("webhook payload too large", { project: projectId, event, delivery });
@@ -92,13 +90,29 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       log.warn("webhook signature rejected", { project: projectId, event, delivery });
       return c.json({ error: "invalid signature" }, 401);
     }
-    if (event === "ping") return c.json({ pong: true });
+    const project = await getProject(sql, projectId);
+    if (!project) {
+      log.warn("webhook for an unknown project", { project: projectId, event, delivery });
+      return c.json({ error: "unknown project" }, 404);
+    }
 
     let payload: Record<string, unknown>;
     try {
       payload = JSON.parse(read.body) as Record<string, unknown>;
     } catch {
       return c.json({ error: "body is not JSON" }, 400);
+    }
+
+    // A ping starts nothing; organisation webhooks send it without a repository.
+    if (event === "ping") return c.json({ pong: true });
+
+    // The secret is shared by every webhook, so a signature only proves the
+    // sender holds it. The delivery must also be about this project's repository:
+    // otherwise any repository with a stardust webhook could aim at any project.
+    const from = (payload.repository as { full_name?: unknown } | undefined)?.full_name;
+    if (project.githubRepo && (typeof from !== "string" || from.toLowerCase() !== project.githubRepo.toLowerCase())) {
+      log.warn("webhook from another repository", { project: projectId, event, delivery, repository: from });
+      return c.json({ error: "this delivery is not for the project's repository" }, 403);
     }
 
     const decision = decideWebhook(event, payload, POLICY[project.webhookKind], project);
@@ -131,18 +145,35 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       if (resolved.fallback) log.info("changed paths from the commits", { project: projectId, why: resolved.fallback });
     }
 
-    const runId = await startRun(sql, {
-      projectId: project.id,
-      event: decision.event,
-      trigger: decision.trigger,
-      ref: decision.ref,
-      sha: decision.sha,
-      def,
-      changedPaths,
-    });
+    // A re-sent copy of a delivery that already started a run starts nothing.
+    if (delivery && !(await claimDelivery(sql, delivery, project.id))) {
+      log.info("webhook ignored", { project: projectId, event, delivery, reason: "duplicate delivery" });
+      return c.json({ ignored: true, reason: "duplicate delivery" }, 202);
+    }
+    let runId: string;
+    try {
+      runId = await startRun(sql, {
+        projectId: project.id,
+        event: decision.event,
+        trigger: decision.trigger,
+        ref: decision.ref,
+        sha: decision.sha,
+        def,
+        changedPaths,
+      });
+    } catch (err) {
+      if (delivery) await releaseDelivery(sql, delivery);
+      throw err;
+    }
     log.info("run started", { project: projectId, event, delivery, run: runId, ref: decision.ref, sha: decision.sha });
     return c.json({ runId }, 201);
   });
+
+  // API bodies are small; the webhook has its own, larger bound.
+  app.use(
+    "/api/v1/*",
+    bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ error: "request body too large" }, 413) }),
+  );
 
   app.post("/api/v1/auth/login", async (c) => {
     const body = (await c.req.json().catch(() => null)) as { username?: unknown; password?: unknown } | null;
@@ -151,7 +182,11 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     }
     const result = await signIn(sql, body.username, body.password);
     if (!result.ok) {
-      log.warn("sign-in refused", { username: body.username, reason: result.reason });
+      // Only an existing username is logged: people type passwords into the username field.
+      log.warn("sign-in refused", {
+        username: result.knownUser ? body.username : "(not a user)",
+        reason: result.reason,
+      });
       return result.reason === "locked"
         ? c.json({ error: "too many failed attempts; try again later" }, 429)
         : c.json({ error: "invalid username or password" }, 401);

@@ -80,3 +80,20 @@ export async function advanceRun(tx: TransactionSql, runId: string): Promise<voi
     }
   }
 }
+
+/**
+ * Claims a webhook delivery ID; false when it was already claimed, meaning
+ * this is a re-sent copy. Claims older than 30 days are dropped.
+ */
+export async function claimDelivery(sql: Sql, deliveryId: string, projectId: string): Promise<boolean> {
+  if (Math.random() < 0.01) await sql`DELETE FROM webhook_deliveries WHERE received_at < now() - interval '30 days'`;
+  const rows = await sql`
+    INSERT INTO webhook_deliveries (delivery_id, project_id) VALUES (${deliveryId}, ${projectId})
+    ON CONFLICT (delivery_id) DO NOTHING RETURNING delivery_id`;
+  return rows.length === 1;
+}
+
+/** Gives a claim back, when the run it was for could not be started. */
+export async function releaseDelivery(sql: Sql, deliveryId: string): Promise<void> {
+  await sql`DELETE FROM webhook_deliveries WHERE delivery_id = ${deliveryId}`;
+}

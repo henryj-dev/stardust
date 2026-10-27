@@ -1,16 +1,15 @@
 import { fail, redirect } from "@sveltejs/kit";
 import { apiClient, LOGIN_ERROR_COOKIE, OIDC_STATE_COOKIE, setSession } from "$lib/server/api";
+import { safeNext } from "$lib/server/safe-next";
 import type { Actions, PageServerLoad } from "./$types";
 
-const safeNext = (value: string | null): string => (value?.startsWith("/") && !value.startsWith("//") ? value : "/");
-
-export const load: PageServerLoad = async ({ cookies }) => {
+export const load: PageServerLoad = async ({ cookies, url }) => {
   const error = cookies.get(LOGIN_ERROR_COOKIE) ?? null;
   if (error) cookies.delete(LOGIN_ERROR_COOKIE, { path: "/login" });
   const methods = await apiClient()
     .authMethods()
     .catch(() => ({ password: true, oidc: null }));
-  return { oidc: methods.oidc, error };
+  return { oidc: methods.oidc, error, next: safeNext(url.searchParams.get("next")) };
 };
 
 export const actions: Actions = {

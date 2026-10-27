@@ -14,7 +14,8 @@ let { data, form } = $props();
     </form>
     <p>or with a password:</p>
   {/if}
-  <form method="POST" action="?/password">
+  <!-- The action replaces the query string, so `next` is carried along explicitly. -->
+  <form method="POST" action={`?/password&next=${encodeURIComponent(data.next)}`}>
     <label>
       Username
       <input name="username" autocomplete="username" value={form?.username ?? ""} required />

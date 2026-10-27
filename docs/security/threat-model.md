@@ -33,8 +33,11 @@ pull request.
 ### Webhook → server
 
 - HMAC-SHA256 over the raw body with a constant-time compare, before any
-  parsing (`plugins/source-github/src/signature.ts`). The body is read up to
+  parsing or project lookup (`plugins/source-github/src/signature.ts`). The body is read up to
   5 MiB and refused beyond (`packages/server/src/body.ts`).
+- The secret is shared by every webhook, so a valid signature only proves the
+  sender holds it. A delivery must also name the project's own repository, and
+  a delivery ID that already started a run starts nothing when re-sent.
 - Policy decides what a delivery may start (`plugins/source-github/src/policy.ts`):
   only configured events and branches, deleted refs ignored, and pull requests
   from forks refused — failing closed when the head repository cannot be read
@@ -61,6 +64,7 @@ pull request.
 
 ### Worker → deploy repository
 
+- **A pull request is built, never deployed**: its head is unreviewed code.
 - Image bumps are commits made with compare-and-swap on the expected head
   (`--force-with-lease`), so a concurrent change is never overwritten.
 - Env changes (not yet exposed through the API) are meant to reach pods by
@@ -75,8 +79,10 @@ pull request.
   session (401) and a user without a role (403, or 404 for a project), so a
   new route without a check fails CI (`packages/server/src/app.dbtest.ts`).
 - Projects a user cannot read answer 404, so their names do not leak.
-- Passwords: scrypt, at least 12 characters. Ten failures in 15 minutes lock
-  the username. An unknown username costs the same scrypt work as a wrong
+- Passwords: scrypt, 12 to 1024 characters. Ten failures in 15 minutes lock
+  the username; each attempt is recorded before the password is checked, so
+  parallel guesses get no more tries than sequential ones. API bodies are
+  limited to 64 KiB. An unknown username costs the same scrypt work as a wrong
   password.
 - Password recovery is a command inside the server container: access to the
   deployment is the authority, so there is no recovery endpoint to attack.
@@ -105,6 +111,26 @@ pull request.
   Actions are pinned by commit SHA. See [releasing.md](../releasing.md).
 
 ## Known gaps
+
+Found in the pre-publication review (2026-10-27) and not fixed yet:
+
+- **One webhook secret for all projects.** Repository binding and delivery
+  deduplication limit what it allows, but anyone who can configure a webhook on
+  a watched repository holds it. A secret per project is the fix.
+- **Without an `on` block, a pipeline runs for pushes to every branch**, and
+  each build is deployed. That matches the predecessor, but anyone with push
+  access to any branch can deploy. Declare `on.push.branches` until the default
+  changes.
+- **Anyone can lock an account** by failing to sign in as it ten times in 15
+  minutes, including the bootstrap administrator. The lockout is per username,
+  not per username and address.
+- **`autoCreate` without `allowedGroups`** lets anyone the provider accepts
+  create an account, and claim a username before its owner signs in. Roles are
+  granted by username. Use `allowedGroups` with `autoCreate`.
+- **The builds namespace must allow privileged-adjacent pods** (BuildKit needs
+  unconfined seccomp and AppArmor), and the worker may create Jobs there. A
+  compromised worker can run such pods in that namespace. An admission policy
+  pinning the build image and security context would close this.
 
 - **Builds share one push credential per builds namespace.** A malicious commit
   that gets built can push other images that credential can reach. Use one

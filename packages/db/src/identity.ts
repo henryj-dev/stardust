@@ -41,6 +41,8 @@ function derive(password: string, salt: Buffer, params: ScryptParams = SCRYPT): 
 
 export async function hashPassword(password: string): Promise<string> {
   if (password.length < 12) throw new Error("passwords must be at least 12 characters");
+  if (password.length > MAX_PASSWORD_LENGTH)
+    throw new Error(`passwords must be at most ${MAX_PASSWORD_LENGTH} characters`);
   const salt = randomBytes(16);
   const key = await derive(password, salt);
   return `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${salt.toString("base64")}$${key.toString("base64")}`;
@@ -114,7 +116,13 @@ export interface SignInPolicy {
 }
 export const DEFAULT_SIGN_IN: SignInPolicy = { maxFailures: 10, windowMinutes: 15, sessionHours: 12 };
 
-export type SignInResult = { ok: true; token: string; user: User } | { ok: false; reason: "invalid" | "locked" };
+export type SignInResult =
+  | { ok: true; token: string; user: User }
+  /** knownUser says whether the username exists, for logs only: never show it to the caller. */
+  | { ok: false; reason: "invalid" | "locked"; knownUser: boolean };
+
+/** Longer passwords are refused before hashing: scrypt over megabytes is a cheap way to burn CPU. */
+export const MAX_PASSWORD_LENGTH = 1024;
 
 export async function signIn(
   sql: Sql,
@@ -122,10 +130,22 @@ export async function signIn(
   password: string,
   policy: SignInPolicy = DEFAULT_SIGN_IN,
 ): Promise<SignInResult> {
+  // Record the attempt first, then count. Parallel attempts each see at least
+  // their own row and all earlier ones, so the k-th attempt counts >= k and at
+  // most maxFailures get to the password check — without holding a lock (and
+  // a pooled connection) for the length of a scrypt call. A wrong password
+  // leaves its row; a right one clears them.
+  if (Math.random() < 0.01) await sql`DELETE FROM sign_in_failures WHERE failed_at < now() - interval '1 day'`;
+  const [mine] = await sql<{ ctid: string }[]>`
+    INSERT INTO sign_in_failures (username) VALUES (${username}) RETURNING ctid::text`;
   const [failures] = await sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM sign_in_failures
     WHERE username = ${username} AND failed_at > now() - make_interval(mins => ${policy.windowMinutes})`;
-  if ((failures?.n ?? 0) >= policy.maxFailures) return { ok: false, reason: "locked" };
+  if ((failures?.n ?? 0) > policy.maxFailures) {
+    await sql`DELETE FROM sign_in_failures WHERE ctid = ${mine?.ctid ?? "(0,0)"}::tid`;
+    const [known] = await sql`SELECT 1 FROM users WHERE username = ${username}`;
+    return { ok: false, reason: "locked", knownUser: known !== undefined };
+  }
 
   const [row] = await sql<
     {
@@ -138,10 +158,10 @@ export async function signIn(
     }[]
   >`
     SELECT id, username, display_name, password_hash, is_admin, disabled FROM users WHERE username = ${username}`;
-  const valid = await verifyPassword(password, row?.password_hash ?? (await dummy()));
+  const valid =
+    password.length <= MAX_PASSWORD_LENGTH && (await verifyPassword(password, row?.password_hash ?? (await dummy())));
   if (!row || !valid || row.disabled || row.password_hash === null) {
-    await sql`INSERT INTO sign_in_failures (username) VALUES (${username})`;
-    return { ok: false, reason: "invalid" };
+    return { ok: false, reason: "invalid", knownUser: row !== undefined };
   }
   await sql`DELETE FROM sign_in_failures WHERE username = ${username}`;
   const token = randomBytes(32).toString("base64url");
@@ -203,7 +223,7 @@ export async function revokeApiToken(sql: Sql, userId: string, id: string): Prom
   return rows.length === 1;
 }
 
-/** Sets a new password and ends the user's sessions. For recovery, run by someone with access to the deployment. */
+/** Sets a new password and ends the user's sessions and API tokens. For recovery, run by someone with access to the deployment. */
 export async function resetPassword(sql: Sql, username: string, password: string): Promise<boolean> {
   const hash = await hashPassword(password);
   return sql.begin(async (tx) => {
@@ -212,7 +232,10 @@ export async function resetPassword(sql: Sql, username: string, password: string
     >`UPDATE users SET password_hash = ${hash} WHERE username = ${username} RETURNING id`;
     const user = rows[0];
     if (!user) return false;
+    // Everything that acts as this user ends: sessions and API tokens. After a
+    // compromise, a token the attacker made must not outlive the reset.
     await tx`DELETE FROM sessions WHERE user_id = ${user.id}`;
+    await tx`DELETE FROM api_tokens WHERE user_id = ${user.id}`;
     await tx`DELETE FROM sign_in_failures WHERE username = ${username}`;
     return true;
   });
