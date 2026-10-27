@@ -39,6 +39,21 @@ the cluster except through a commit somebody can read afterwards.
 The boundaries between these are enforced by `.dependency-cruiser.cjs`; see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Supported environments
+
+stardust targets one well-defined setup rather than every possible one:
+
+| Area              | Supported                       |
+| ----------------- | ------------------------------- |
+| Cluster           | Kubernetes 1.30+ (k3s included) |
+| GitOps controller | Flux 2.8+                       |
+| Source host       | GitHub (GitHub App)             |
+| Secrets in Git    | SOPS with age                   |
+| Database          | PostgreSQL 16+                  |
+
+Anything else is unsupported until a plugin for it exists. See
+[docs/adr](docs/adr) for the decisions behind this.
+
 ## Development
 
 Requirements: Node.js 26+ and pnpm 12+.
