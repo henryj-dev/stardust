@@ -5,15 +5,7 @@
  * stores the outcome. A job that does not exist yet has simply not been
  * created — that is what the core functions expect.
  */
-import {
-  aggregateRunStatus,
-  isRunComplete,
-  loadPipelineDef,
-  nextReadyJobs,
-  type PipelineDef,
-  shouldSkipForPaths,
-  shouldSkipForUpstream,
-} from "@stardust/core";
+import { aggregateRunStatus, isRunComplete, loadPipelineDef, nextJobs, type PipelineDef } from "@stardust/core";
 import type { Sql, TransactionSql } from "postgres";
 
 export interface StartRun {
@@ -58,13 +50,7 @@ export async function advanceRun(tx: TransactionSql, runId: string): Promise<voi
   for (;;) {
     const rows = await tx<{ name: string; status: string }[]>`SELECT name, status FROM jobs WHERE run_id = ${runId}`;
     const statuses = new Map(rows.map((r) => [r.name, r.status]));
-    const create: { name: string; status: "queued" | "skipped" }[] = [];
-    for (const name of shouldSkipForUpstream(def, statuses)) create.push({ name, status: "skipped" });
-    for (const name of nextReadyJobs(def, statuses)) {
-      const job = def.jobs[name];
-      const skip = job !== undefined && shouldSkipForPaths(job, event, run.changed_paths);
-      create.push({ name, status: skip ? "skipped" : "queued" });
-    }
+    const create = nextJobs(def, event, run.changed_paths, statuses);
     if (create.length === 0) {
       if (isRunComplete(def, statuses)) {
         await tx`UPDATE runs SET status = ${aggregateRunStatus(def, statuses)}, finished_at = now()

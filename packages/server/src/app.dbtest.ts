@@ -510,3 +510,67 @@ describe("webhooks", () => {
     assert.equal(run?.status, "success");
   });
 });
+
+// Last: it starts a run of its own, which earlier tests that count runs do not expect.
+describe("planning a delivery", () => {
+  const plan = (body: unknown, headers: Record<string, string> = admin) =>
+    app.request("/api/v1/projects/demo/plan", {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { ...headers, "content-type": "application/json" },
+    });
+
+  it("reports what a push would run and writes nothing", async () => {
+    const before = await runCount();
+    const res = await plan({
+      event: "push",
+      payload: JSON.parse(push({ after: "d".repeat(40) })),
+      changedPaths: ["api/x.go"],
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { action: string; jobs: Record<string, string>; pathsFrom: string; sha: string };
+    assert.deepEqual([body.action, body.pathsFrom, body.sha], ["run", "given", "d".repeat(40)]);
+    assert.deepEqual(body.jobs, { api: "run" });
+    const skipped = (await (
+      await plan({ event: "push", payload: JSON.parse(push()), changedPaths: ["README.md"] })
+    ).json()) as {
+      jobs: Record<string, string>;
+    };
+    assert.deepEqual(skipped.jobs, { api: "skip" });
+    assert.equal(await runCount(), before, "no run was started");
+  });
+
+  it("gives the same answer a delivery acts on", async () => {
+    // Without given paths it asks the compare API, like the webhook (which here reports api/main.go).
+    const planned = (await (
+      await plan({ event: "push", payload: JSON.parse(push({ after: "e".repeat(40) })) })
+    ).json()) as {
+      jobs: Record<string, string>;
+      pathsFrom: string;
+    };
+    const body = push({ after: "e".repeat(40) });
+    const { runId } = (await (await deliver(body)).json()) as { runId: string };
+    const jobs = await db.sql<
+      { name: string; status: string }[]
+    >`SELECT name, status FROM jobs WHERE run_id = ${runId}`;
+    assert.equal(planned.pathsFrom, "compare");
+    assert.deepEqual(
+      Object.fromEntries(jobs.map((j) => [j.name, j.status === "queued" ? "run" : "skip"])),
+      planned.jobs,
+    );
+  });
+
+  it("reports why nothing would run, and needs write access", async () => {
+    const ignored = (await (
+      await plan({ event: "push", payload: JSON.parse(push({ ref: "refs/heads/feature" })) })
+    ).json()) as {
+      action: string;
+      reason: string;
+    };
+    assert.equal(ignored.action, "ignore");
+    assert.match(ignored.reason, /no trigger/);
+    assert.equal((await plan({ event: "push" })).status, 400);
+    const viewer = { authorization: `Bearer ${await sessionFor("viewer")}` };
+    assert.equal((await plan({ event: "push", payload: {} }, viewer)).status, 403);
+  });
+});

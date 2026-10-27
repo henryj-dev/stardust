@@ -6,5 +6,6 @@ export type { Logger } from "./logger.ts";
 export * from "./pipeline/dag.ts";
 export * from "./pipeline/definition.ts";
 export * from "./pipeline/job-status.ts";
+export * from "./pipeline/plan.ts";
 export type { Plugin, PluginManifest, PluginRegistry } from "./plugin.ts";
 export { createPluginRegistry, definePlugin } from "./plugin.ts";

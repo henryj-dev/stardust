@@ -1,4 +1,12 @@
-import { type Action, can, evaluateOn, type Logger, PipelineDefError, pipelineDefFromComponents } from "@stardust/core";
+import {
+  type Action,
+  can,
+  type Logger,
+  loadPipelineDef,
+  type PipelineDef,
+  PipelineDefError,
+  planRun,
+} from "@stardust/core";
 import {
   authenticate,
   claimDelivery,
@@ -28,18 +36,13 @@ import {
   updateUser,
 } from "@stardust/db";
 import { type AccessRules, decideAccess, type Identity, type Oidc } from "@stardust/plugin-identity-oidc";
-import {
-  type CompareResult,
-  decideWebhook,
-  POLICY,
-  resolveChangedPaths,
-  verifySignature,
-} from "@stardust/plugin-source-github";
+import { type CompareResult, verifySignature } from "@stardust/plugin-source-github";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import { readBoundedBody } from "./body.ts";
 import type { RunEvents } from "./events.ts";
+import { planDelivery } from "./plan-delivery.ts";
 
 export interface AppInfo {
   readonly version: string;
@@ -119,36 +122,12 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       return c.json({ error: "this delivery is not for the project's repository" }, 403);
     }
 
-    const decision = decideWebhook(event, payload, POLICY[project.webhookKind], project);
-    if (decision.action === "ignore") {
-      log.info("webhook ignored", { project: projectId, event, delivery, reason: decision.reason });
-      return c.json({ ignored: true, reason: decision.reason }, 202);
+    const plan = await planDelivery({ project, event, payload, compare: services.compare });
+    if (plan.action === "ignore") {
+      log.info("webhook ignored", { project: projectId, event, delivery, reason: plan.reason });
+      return c.json({ ignored: true, reason: plan.reason }, 202);
     }
-
-    const def = project.pipelineDef ?? pipelineDefFromComponents(project.components);
-    const ctx = {
-      ...(decision.branch !== undefined ? { branch: decision.branch } : {}),
-      ...(decision.tag !== undefined ? { tag: decision.tag } : {}),
-      ...(decision.baseBranch !== undefined ? { baseBranch: decision.baseBranch } : {}),
-      ...(decision.defaultBranch !== undefined ? { defaultBranch: decision.defaultBranch } : {}),
-    };
-    if (!evaluateOn(def, decision.event, ctx)) {
-      const reason = `no trigger matches ${decision.event} ${decision.ref}`;
-      log.info("webhook ignored", { project: projectId, event, delivery, reason });
-      return c.json({ ignored: true, reason }, 202);
-    }
-
-    let changedPaths: string[] | null = null;
-    if (decision.event === "push") {
-      const repo = project.githubRepo;
-      const resolved = await resolveChangedPaths({
-        payload,
-        compare: (base, head) =>
-          repo ? services.compare(repo, base, head) : Promise.reject(new Error("project has no repository")),
-      });
-      changedPaths = resolved.paths;
-      if (resolved.fallback) log.info("changed paths from the commits", { project: projectId, why: resolved.fallback });
-    }
+    if (plan.fallback) log.info("changed paths from the commits", { project: projectId, why: plan.fallback });
 
     // A re-sent copy of a delivery that already started a run starts nothing.
     if (delivery && !(await claimDelivery(sql, delivery, project.id))) {
@@ -159,26 +138,28 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     try {
       runId = await startRun(sql, {
         projectId: project.id,
-        event: decision.event,
-        trigger: decision.trigger,
-        ref: decision.ref,
-        sha: decision.sha,
-        def,
-        changedPaths,
+        event: plan.event,
+        trigger: plan.trigger,
+        ref: plan.ref,
+        sha: plan.sha,
+        def: plan.def,
+        changedPaths: plan.changedPaths,
       });
     } catch (err) {
       if (delivery) await releaseDelivery(sql, delivery);
       throw err;
     }
-    log.info("run started", { project: projectId, event, delivery, run: runId, ref: decision.ref, sha: decision.sha });
+    log.info("run started", { project: projectId, event, delivery, run: runId, ref: plan.ref, sha: plan.sha });
     return c.json({ runId }, 201);
   });
 
   // API bodies are small; the webhook has its own, larger bound.
-  app.use(
-    "/api/v1/*",
-    bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ error: "request body too large" }, 413) }),
-  );
+  // The plan endpoint takes a whole webhook payload and bounds it like the webhook does.
+  const smallBodies = bodyLimit({
+    maxSize: 64 * 1024,
+    onError: (c) => c.json({ error: "request body too large" }, 413),
+  });
+  app.use("/api/v1/*", (c, next) => (c.req.path.endsWith("/plan") ? next() : smallBodies(c, next)));
 
   app.post("/api/v1/auth/login", async (c) => {
     const body = (await c.req.json().catch(() => null)) as { username?: unknown; password?: unknown } | null;
@@ -455,6 +436,49 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     const denied = await deny(c, "admin");
     if (denied) return denied;
     return c.json({ users: await listUsers(sql) });
+  });
+
+  // What a delivery would do, without doing it: the same decision as the webhook
+  // (policy, triggers, changed paths) and the fate of every job, assuming each
+  // job that runs succeeds. Nothing is written. For shadow-running a new
+  // installation next to an existing one, and for checking a pipeline definition.
+  app.post("/api/v1/projects/:id/plan", async (c) => {
+    const denied = await deny(c, "project:write", c.req.param("id"));
+    if (denied) return denied;
+    const project = await getProject(sql, c.req.param("id"));
+    if (!project) return c.json({ error: "unknown project" }, 404);
+    const read = await readBoundedBody(c.req.raw);
+    if ("tooLarge" in read) return c.json({ error: "request body too large" }, 413);
+    let body: { event?: unknown; payload?: unknown; changedPaths?: unknown };
+    try {
+      body = JSON.parse(read.body) as typeof body;
+    } catch {
+      return c.json({ error: "body is not JSON" }, 400);
+    }
+    if (typeof body.event !== "string" || typeof body.payload !== "object" || body.payload === null) {
+      return c.json({ error: "event and payload are required" }, 400);
+    }
+    const cp = body.changedPaths;
+    if (cp !== undefined && cp !== null && !(Array.isArray(cp) && cp.every((p) => typeof p === "string"))) {
+      return c.json({ error: "changedPaths must be a list of paths, or null" }, 400);
+    }
+    const plan = await planDelivery({
+      project,
+      event: body.event,
+      payload: body.payload as Record<string, unknown>,
+      compare: services.compare,
+      ...(cp !== undefined ? { changedPaths: cp as string[] | null } : {}),
+    });
+    if (plan.action === "ignore") return c.json(plan);
+    let def: PipelineDef;
+    try {
+      def = loadPipelineDef(plan.def);
+    } catch (err) {
+      if (err instanceof PipelineDefError) return c.json({ error: err.message }, 422);
+      throw err;
+    }
+    const { def: _def, ...rest } = plan;
+    return c.json({ ...rest, jobs: planRun(def, plan.event, plan.changedPaths) });
   });
 
   app.get("/api/v1/projects/:id/runs", async (c) => {
