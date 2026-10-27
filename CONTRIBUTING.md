@@ -47,6 +47,17 @@ If a change needs to break a rule, discuss it in an issue first.
   stopped **by that guard** — not merely that something failed.
   `tools/dependency-rules.test.ts` is the pattern to follow.
 
+Database tests (`*.dbtest.ts`) need PostgreSQL and are run separately. Each
+test gets its own schema, so any empty database works:
+
+```sh
+docker run --rm -d --name stardust-pg -e POSTGRES_PASSWORD=test -p 55432:5432 postgres:17
+DATABASE_URL_TEST=postgres://postgres:test@127.0.0.1:55432/postgres pnpm run test:db
+```
+
+`pnpm run test:db` exits with an error when `DATABASE_URL_TEST` is not set
+rather than skipping, so a missing database is never reported as a pass.
+
 ## Code
 
 - TypeScript is run directly by Node (type stripping), so only erasable syntax

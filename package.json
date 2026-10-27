@@ -15,7 +15,8 @@
     "test": "node --test \"packages/*/src/**/*.test.ts\" \"plugins/*/src/**/*.test.ts\" \"tools/**/*.test.ts\"",
     "changesets:check": "node tools/check-changesets.ts",
     "changeset": "changeset",
-    "version-packages": "changeset version && pnpm install --lockfile-only && biome format --write charts/stardust"
+    "version-packages": "changeset version && pnpm install --lockfile-only && biome format --write charts/stardust",
+    "test:db": "test -n \"$DATABASE_URL_TEST\" || { echo \"DATABASE_URL_TEST is not set: database tests need PostgreSQL (see CONTRIBUTING)\"; exit 3; }; node --test \"packages/*/src/**/*.dbtest.ts\""
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.3",

@@ -1,0 +1,14 @@
+{
+  "name": "@stardust/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "dependencies": {
+    "@stardust/core": "workspace:*",
+    "postgres": "^3.4.9"
+  }
+}

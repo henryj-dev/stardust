@@ -11,13 +11,19 @@ image="$2"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 config="$here/examples/stardust.yaml"
 name="stardust-smoke-$target-$$"
+net="$name-net"
+pg="$name-pg"
+PG_IMAGE="postgres:17@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe"
 
 fail() {
   echo "FAIL [$1] $2" >&2
   docker logs "$name" 2>&1 | tail -20 >&2 || true
   exit 1
 }
-cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; }
+cleanup() {
+  docker rm -f "$name" "$pg" >/dev/null 2>&1 || true
+  docker network rm "$net" >/dev/null 2>&1 || true
+}
 trap cleanup EXIT
 
 wait_http() { # <port> <path>
@@ -56,10 +62,18 @@ case "$target" in
     stop_gracefully server-sigterm
     ;;
   worker)
-    docker run -d --name "$name" -e DATABASE_URL=postgres://smoke \
+    # The worker needs a real database: it migrates it and polls the queue.
+    docker network create "$net" >/dev/null
+    docker run -d --name "$pg" --network "$net" -e POSTGRES_PASSWORD=smoke "$PG_IMAGE" >/dev/null
+    for _ in $(seq 1 30); do
+      docker exec "$pg" pg_isready -U postgres >/dev/null 2>&1 && break
+      sleep 1
+    done
+    docker run -d --name "$name" --network "$net" \
+      -e DATABASE_URL="postgres://postgres:smoke@$pg:5432/postgres" \
       -v "$config:/etc/stardust/stardust.yaml:ro" "$image" >/dev/null
     started=""
-    for _ in $(seq 1 15); do
+    for _ in $(seq 1 30); do
       if docker logs "$name" 2>&1 | grep -q "stardust worker started"; then started=1; break; fi
       sleep 1
     done
@@ -67,6 +81,9 @@ case "$target" in
     sleep 2
     [ "$(docker inspect --format '{{.State.Running}}' "$name")" = "true" ] || fail worker-start "worker exited on its own"
     echo "ok   [worker-start]"
+    applied="$(docker exec "$pg" psql -U postgres -tAc 'SELECT count(*) FROM schema_migrations' 2>/dev/null || echo 0)"
+    [ "${applied:-0}" -ge 1 ] || fail worker-migrated "no migrations recorded in the database"
+    echo "ok   [worker-migrated] $applied migration(s)"
     stop_gracefully worker-sigterm
     ;;
   web)
