@@ -8,6 +8,7 @@
     "./testing": "./src/testing.ts"
   },
   "dependencies": {
-    "@stardust/core": "workspace:*"
+    "@stardust/core": "workspace:*",
+    "yaml": "^2.9.1"
   }
 }

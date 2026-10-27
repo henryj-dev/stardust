@@ -62,3 +62,4 @@ export const plugin = definePlugin({
 
 export type { GitCliOptions } from "./git-cli.ts";
 export { GitCliRepo } from "./git-cli.ts";
+export { stampPodTemplate } from "./stamp.ts";

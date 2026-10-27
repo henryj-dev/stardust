@@ -1,3 +1,4 @@
+export * from "./env/consumers.ts";
 export * from "./env/merge.ts";
 export * from "./env/render.ts";
 export type { Logger } from "./logger.ts";
