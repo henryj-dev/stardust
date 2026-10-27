@@ -30,6 +30,29 @@ plugins:
   gitops-git: { ... }
 ```
 
+## Accounts and access
+
+- **Sign-in** is by username and password (`POST /api/v1/auth/login`). Ten
+  failures in 15 minutes lock a username for that window. Sessions last 12
+  hours.
+- **Roles** are per project: `maintainer` changes it, `viewer` reads it.
+  Administrators do everything. Someone who is not a member gets 404 for a
+  project, so project names do not leak.
+- **API tokens** (`sdt_…`) are for automation. Create one with
+  `POST /api/v1/tokens` `{"name": "ci", "expiresInDays": 90}`; it is shown
+  once and acts with your roles. List with `GET /api/v1/tokens`, revoke with
+  `DELETE /api/v1/tokens/<id>`.
+- **Lost password.** Anyone who can reach the deployment can reset it, and
+  that access is the authority for it:
+
+  ```sh
+  kubectl -n stardust exec -i deploy/stardust-server -- \
+    node packages/server/src/admin.ts reset-password admin < new-password.txt
+  ```
+
+  The password is read from standard input, so it does not appear in the
+  process list or shell history. The user's sessions end.
+
 ## Plugins
 
 ### `source-github`

@@ -1,13 +1,16 @@
 import { type Action, can, evaluateOn, type Logger, PipelineDefError, pipelineDefFromComponents } from "@stardust/core";
 import {
   authenticate,
+  createApiToken,
   createUser,
   getProject,
+  listApiTokens,
   listRuns,
   type Project,
   ProjectError,
   projectRole,
   putProject,
+  revokeApiToken,
   type Sql,
   setProjectRole,
   signIn,
@@ -168,6 +171,34 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
 
   app.post("/api/v1/auth/logout", async (c) => {
     await signOut(sql, c.get("token"));
+    return c.json({ ok: true });
+  });
+
+  // Users manage their own API tokens; a token acts with its user's roles.
+  app.get("/api/v1/tokens", async (c) => c.json({ tokens: await listApiTokens(sql, c.get("user").id) }));
+
+  app.post("/api/v1/tokens", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { name?: unknown; expiresInDays?: unknown } | null;
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    const days = body?.expiresInDays ?? null;
+    if (!name || name.length > 100) return c.json({ error: "name is required (at most 100 characters)" }, 400);
+    if (days !== null && !(Number.isInteger(days) && (days as number) >= 1 && (days as number) <= 3650)) {
+      return c.json({ error: "expiresInDays must be a whole number of days from 1 to 3650, or null" }, 400);
+    }
+    try {
+      const created = await createApiToken(sql, c.get("user").id, name, days as number | null);
+      log.info("API token created", { username: c.get("user").username, name });
+      return c.json(created, 201);
+    } catch (err) {
+      if ((err as { code?: string }).code === "23505") return c.json({ error: `a token named "${name}" exists` }, 409);
+      throw err;
+    }
+  });
+
+  app.delete("/api/v1/tokens/:tokenId", async (c) => {
+    if (!(await revokeApiToken(sql, c.get("user").id, c.req.param("tokenId")))) {
+      return c.json({ error: "unknown token" }, 404);
+    }
     return c.json({ ok: true });
   });
 

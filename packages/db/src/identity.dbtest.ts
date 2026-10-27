@@ -7,6 +7,7 @@ import {
   ensureBootstrapAdmin,
   hashPassword,
   projectRole,
+  resetPassword,
   setProjectRole,
   signIn,
   signOut,
@@ -127,5 +128,19 @@ describe("project roles and permissions", () => {
     assert.equal(can({ isAdmin: true }, "admin"), true);
     await setProjectRole(db.sql, "demo", viewer.id, null);
     assert.equal(await projectRole(db.sql, viewer.id, "demo"), null);
+  });
+});
+
+describe("password reset", () => {
+  it("sets a new password, ends the user's sessions and clears the lockout", async () => {
+    await createUser(db.sql, { username: "forgetful", password: PASSWORD });
+    const before = await signIn(db.sql, "forgetful", PASSWORD);
+    assert.ok(before.ok);
+    for (let i = 0; i < 3; i++) await signIn(db.sql, "forgetful", "wrong password!");
+    assert.equal(await resetPassword(db.sql, "forgetful", "a brand new password"), true);
+    assert.equal(await authenticate(db.sql, before.token), null);
+    assert.equal((await signIn(db.sql, "forgetful", PASSWORD)).ok, false);
+    assert.equal((await signIn(db.sql, "forgetful", "a brand new password")).ok, true);
+    assert.equal(await resetPassword(db.sql, "nobody-here", "a brand new password"), false);
   });
 });

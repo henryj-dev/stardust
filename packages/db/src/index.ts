@@ -1,13 +1,18 @@
 export type { Sql } from "postgres";
 export { connect } from "./client.ts";
-export type { SignInPolicy, SignInResult, User } from "./identity.ts";
+export type { ApiToken, SignInPolicy, SignInResult, User } from "./identity.ts";
 export {
+  API_TOKEN_PREFIX,
   authenticate,
+  createApiToken,
   createUser,
   DEFAULT_SIGN_IN,
   ensureBootstrapAdmin,
   hashPassword,
+  listApiTokens,
   projectRole,
+  resetPassword,
+  revokeApiToken,
   setProjectRole,
   signIn,
   signOut,

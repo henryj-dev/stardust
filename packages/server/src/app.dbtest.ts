@@ -160,6 +160,112 @@ describe("sign-in and permissions", () => {
   });
 });
 
+describe("API tokens", () => {
+  const post = (body: unknown, auth: string) => ({
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { authorization: auth, "content-type": "application/json" },
+  });
+
+  it("are shown once, act as their user with that user's roles, and stop working when revoked", async () => {
+    const res = await app.request("/api/v1/tokens", post({ name: "ci", expiresInDays: 30 }, admin.authorization ?? ""));
+    assert.equal(res.status, 201);
+    const { token, id } = (await res.json()) as { token: string; id: string };
+    assert.match(token, /^sdt_/);
+    const auth = { authorization: `Bearer ${token}` };
+    assert.equal((await app.request("/api/v1/projects/demo/runs", { headers: auth })).status, 200);
+    const listed = await (await app.request("/api/v1/tokens", { headers: auth })).text();
+    assert.ok(listed.includes('"name":"ci"') && !listed.includes(token), "listed without the secret");
+    assert.equal((await app.request("/api/v1/tokens", post({ name: "ci" }, auth.authorization))).status, 409);
+    assert.equal((await app.request(`/api/v1/tokens/${id}`, { method: "DELETE", headers: auth })).status, 200);
+    assert.equal((await app.request("/api/v1/projects/demo/runs", { headers: auth })).status, 401);
+  });
+
+  it("one user cannot see or revoke another's token", async () => {
+    const mine = (await (
+      await app.request("/api/v1/tokens", post({ name: "mine" }, admin.authorization ?? ""))
+    ).json()) as {
+      id: string;
+      token: string;
+    };
+    const other = `Bearer ${await sessionFor("outsider")}`;
+    assert.equal(
+      (await app.request(`/api/v1/tokens/${mine.id}`, { method: "DELETE", headers: { authorization: other } })).status,
+      404,
+    );
+    const theirs = await (await app.request("/api/v1/tokens", { headers: { authorization: other } })).text();
+    assert.ok(!theirs.includes(mine.id));
+    assert.equal(
+      (await app.request("/api/v1/session", { headers: { authorization: `Bearer ${mine.token}` } })).status,
+      200,
+    );
+  });
+
+  it("refuses bad names and lifetimes; an expired token does not authenticate", async () => {
+    assert.equal((await app.request("/api/v1/tokens", post({ name: "" }, admin.authorization ?? ""))).status, 400);
+    assert.equal(
+      (await app.request("/api/v1/tokens", post({ name: "x", expiresInDays: 0 }, admin.authorization ?? ""))).status,
+      400,
+    );
+    const { token } = (await (
+      await app.request("/api/v1/tokens", post({ name: "old", expiresInDays: 1 }, admin.authorization ?? ""))
+    ).json()) as {
+      token: string;
+    };
+    await db.sql`UPDATE api_tokens SET expires_at = now() - interval '1 second' WHERE name = 'old'`;
+    assert.equal((await app.request("/api/v1/session", { headers: { authorization: `Bearer ${token}` } })).status, 401);
+  });
+});
+
+describe("every API route is guarded", () => {
+  // Read from the router itself, so a route added later without a check fails
+  // here. Routes open to any signed-in user must be listed with the reason.
+  // Own-account routes: every signed-in user may use them, on their own things only.
+  const SIGNED_IN = new Set([
+    "GET /api/v1/session",
+    "POST /api/v1/auth/logout",
+    "GET /api/v1/tokens",
+    "POST /api/v1/tokens",
+    "DELETE /api/v1/tokens/:tokenId",
+  ]);
+  const PUBLIC = new Set(["POST /api/v1/auth/login"]);
+  const routes = () => [
+    ...new Set(
+      app.routes.filter((r) => r.path.startsWith("/api/v1/") && r.method !== "ALL").map((r) => `${r.method} ${r.path}`),
+    ),
+  ];
+  const fill = (path: string) =>
+    path
+      .replace(":id", "demo")
+      .replace(":username", "outsider")
+      .replace(":tokenId", "00000000-0000-0000-0000-000000000000");
+
+  it("the list is not empty and holds the routes we know of", () => {
+    const all = routes();
+    assert.ok(all.length >= 8, all.join("\n"));
+    assert.ok(all.includes("PUT /api/v1/projects/:id"));
+  });
+
+  it("without a session, every route but sign-in answers 401", async () => {
+    for (const route of routes()) {
+      if (PUBLIC.has(route)) continue;
+      const [method, path] = route.split(" ") as [string, string];
+      const res = await app.request(fill(path), { method, body: method === "GET" ? null : "{}" });
+      assert.equal(res.status, 401, route);
+    }
+  });
+
+  it("a signed-in user with no role is refused everywhere else (403, or 404 for a project)", async () => {
+    const outsider = { authorization: `Bearer ${await sessionFor("outsider")}`, "content-type": "application/json" };
+    for (const route of routes()) {
+      if (PUBLIC.has(route) || SIGNED_IN.has(route)) continue;
+      const [method, path] = route.split(" ") as [string, string];
+      const res = await app.request(fill(path), { method, headers: outsider, body: method === "GET" ? null : "{}" });
+      assert.ok(res.status === 403 || res.status === 404, `${route} answered ${res.status}`);
+    }
+  });
+});
+
 describe("webhooks", () => {
   it("a signed push starts a run with changed paths from compare", async () => {
     compareCalls = [];

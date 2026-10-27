@@ -147,9 +147,85 @@ export async function signIn(
   };
 }
 
-/** The user a session token belongs to, or null when it is unknown, expired or the user is disabled. */
+/** API tokens start with this, so secret scanners and people can tell what they are. */
+export const API_TOKEN_PREFIX = "sdt_";
+
+export interface ApiToken {
+  id: string;
+  name: string;
+  createdAt: Date;
+  expiresAt: Date | null;
+  lastUsedAt: Date | null;
+}
+
+export async function createApiToken(
+  sql: Sql,
+  userId: string,
+  name: string,
+  expiresInDays: number | null,
+): Promise<{ token: string; id: string }> {
+  const token = `${API_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
+  const [row] = await sql<{ id: string }[]>`
+    INSERT INTO api_tokens (user_id, name, token_hash, expires_at)
+    VALUES (${userId}, ${name}, ${tokenHash(token)},
+            ${expiresInDays === null ? null : sql`now() + make_interval(days => ${expiresInDays})`})
+    RETURNING id`;
+  if (!row) throw new Error("token insert returned no row");
+  return { token, id: row.id };
+}
+
+export async function listApiTokens(sql: Sql, userId: string): Promise<ApiToken[]> {
+  const rows = await sql<
+    { id: string; name: string; created_at: Date; expires_at: Date | null; last_used_at: Date | null }[]
+  >`
+    SELECT id, name, created_at, expires_at, last_used_at FROM api_tokens WHERE user_id = ${userId} ORDER BY created_at`;
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    createdAt: r.created_at,
+    expiresAt: r.expires_at,
+    lastUsedAt: r.last_used_at,
+  }));
+}
+
+/** Deletes one of the user's own tokens; false when there is no such token of theirs. */
+export async function revokeApiToken(sql: Sql, userId: string, id: string): Promise<boolean> {
+  if (!/^[0-9a-f-]{36}$/.test(id)) return false;
+  const rows = await sql`DELETE FROM api_tokens WHERE id = ${id} AND user_id = ${userId} RETURNING id`;
+  return rows.length === 1;
+}
+
+/** Sets a new password and ends the user's sessions. For recovery, run by someone with access to the deployment. */
+export async function resetPassword(sql: Sql, username: string, password: string): Promise<boolean> {
+  const hash = await hashPassword(password);
+  return sql.begin(async (tx) => {
+    const rows = await tx<
+      { id: string }[]
+    >`UPDATE users SET password_hash = ${hash} WHERE username = ${username} RETURNING id`;
+    const user = rows[0];
+    if (!user) return false;
+    await tx`DELETE FROM sessions WHERE user_id = ${user.id}`;
+    await tx`DELETE FROM sign_in_failures WHERE username = ${username}`;
+    return true;
+  });
+}
+
+/**
+ * The user a session or API token belongs to, or null when it is unknown,
+ * expired or the user is disabled.
+ */
 export async function authenticate(sql: Sql, token: string): Promise<User | null> {
   if (!token) return null;
+  if (token.startsWith(API_TOKEN_PREFIX)) {
+    const [row] = await sql<{ token: string; id: string; username: string; display_name: string; is_admin: boolean }[]>`
+      SELECT t.id AS token, u.id, u.username, u.display_name, u.is_admin
+      FROM api_tokens t JOIN users u ON u.id = t.user_id
+      WHERE t.token_hash = ${tokenHash(token)} AND (t.expires_at IS NULL OR t.expires_at > now()) AND NOT u.disabled`;
+    if (!row) return null;
+    await sql`UPDATE api_tokens SET last_used_at = now()
+              WHERE id = ${row.token} AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')`;
+    return { id: row.id, username: row.username, displayName: row.display_name, isAdmin: row.is_admin };
+  }
   const [row] = await sql<{ session: string; id: string; username: string; display_name: string; is_admin: boolean }[]>`
     SELECT s.id AS session, u.id, u.username, u.display_name, u.is_admin
     FROM sessions s JOIN users u ON u.id = s.user_id
