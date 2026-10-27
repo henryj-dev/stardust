@@ -292,6 +292,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  plugins/secrets-sops-age:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+
   plugins/source-github:
     dependencies:
       '@stardust/core':

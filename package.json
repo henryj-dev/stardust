@@ -16,7 +16,8 @@
     "changesets:check": "node tools/check-changesets.ts",
     "changeset": "changeset",
     "version-packages": "changeset version && pnpm install --lockfile-only && biome format --write charts/stardust",
-    "test:db": "test -n \"$DATABASE_URL_TEST\" || { echo \"DATABASE_URL_TEST is not set: database tests need PostgreSQL (see CONTRIBUTING)\"; exit 3; }; node --test \"packages/*/src/**/*.dbtest.ts\""
+    "test:db": "test -n \"$DATABASE_URL_TEST\" || { echo \"DATABASE_URL_TEST is not set: database tests need PostgreSQL (see CONTRIBUTING)\"; exit 3; }; node --test \"packages/*/src/**/*.dbtest.ts\"",
+    "test:sops": "test -n \"$SOPS_BIN\" -a -n \"$AGE_KEYGEN\" || { echo \"SOPS_BIN and AGE_KEYGEN are not set: SOPS tests need sops and age-keygen (see CONTRIBUTING)\"; exit 3; }; node --test \"plugins/*/src/**/*.sopstest.ts\""
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.3",
