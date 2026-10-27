@@ -1,3 +1,4 @@
+export * from "./auth/rbac.ts";
 export * from "./env/consumers.ts";
 export * from "./env/merge.ts";
 export * from "./env/render.ts";

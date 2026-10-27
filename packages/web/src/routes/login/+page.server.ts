@@ -6,10 +6,19 @@ const safeNext = (value: string | null): string => (value?.startsWith("/") && !v
 
 export const actions: Actions = {
   default: async ({ request, cookies, url }) => {
-    const token = String((await request.formData()).get("token") ?? "").trim();
-    if (!token) return fail(400, { error: "Enter the admin token." });
-    if (!(await apiClient(token).checkToken())) return fail(401, { error: "That token was not accepted." });
-    cookies.set(SESSION_COOKIE, token, {
+    const form = await request.formData();
+    const username = String(form.get("username") ?? "").trim();
+    const password = String(form.get("password") ?? "");
+    if (!username || !password) return fail(400, { username, error: "Enter your username and password." });
+    const result = await apiClient().login(username, password);
+    if (!result.ok) {
+      return fail(result.reason === "locked" ? 429 : 401, {
+        username,
+        error:
+          result.reason === "locked" ? "Too many failed attempts. Try again later." : "Wrong username or password.",
+      });
+    }
+    cookies.set(SESSION_COOKIE, result.token, {
       path: "/",
       httpOnly: true,
       sameSite: "strict",

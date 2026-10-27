@@ -5,12 +5,12 @@
  */
 import assert from "node:assert/strict";
 import { after, before, it } from "node:test";
-import { claimJob, finishJob, putProject, type RunView, startRun } from "@stardust/db";
+import { claimJob, ensureBootstrapAdmin, finishJob, putProject, type RunView, signIn, startRun } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
 import { createApp } from "./app.ts";
 import { RunEvents } from "./events.ts";
 
-const ADMIN = "admin";
+let ADMIN = "";
 let db: TestDb;
 let events: RunEvents;
 let app: ReturnType<typeof createApp>;
@@ -33,7 +33,6 @@ before(async () => {
     { version: "test" },
     {
       sql: db.sql,
-      adminToken: ADMIN,
       webhookSecret: "s",
       compare: async () => ({ files: null }),
       events,
@@ -42,6 +41,10 @@ before(async () => {
   );
   await putProject(db.sql, project("demo"));
   await putProject(db.sql, project("other"));
+  await ensureBootstrapAdmin(db.sql, "admin", "correct horse battery");
+  const session = await signIn(db.sql, "admin", "correct horse battery");
+  if (!session.ok) throw new Error("cannot sign in");
+  ADMIN = session.token;
 });
 after(async () => {
   await events.stop();

@@ -14,9 +14,11 @@ server:
   host: 0.0.0.0
   port: 8080
   publicUrl: https://stardust.example.com
-  # Bearer token for /api/v1 and the dashboard sign-in, until user accounts
-  # exist. Without it the admin API is off.
-  adminToken: { env: STARDUST_ADMIN_TOKEN }
+  # The first administrator, created only while there are no users. Change the
+  # password after signing in, and remove this once other administrators exist.
+  bootstrapAdmin:
+    username: admin
+    password: { env: STARDUST_BOOTSTRAP_PASSWORD }
 
 database:
   url: { env: DATABASE_URL }

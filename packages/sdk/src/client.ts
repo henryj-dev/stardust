@@ -41,8 +41,23 @@ export class ApiError extends Error {
   }
 }
 
+export interface SessionUser {
+  id: string;
+  username: string;
+  displayName: string;
+  isAdmin: boolean;
+}
+
+export type LoginResult =
+  | { ok: true; token: string; user: SessionUser }
+  | { ok: false; reason: "invalid" | "locked"; message: string };
+
 export interface Client {
   health(): Promise<{ status: string; version: string }>;
+  /** Signs in with a username and password. Wrong credentials and lockout are results, not errors. */
+  login(username: string, password: string): Promise<LoginResult>;
+  /** Ends the session of the client's token. */
+  logout(): Promise<void>;
   /** True when the token is accepted. */
   checkToken(): Promise<boolean>;
   runs(projectId: string): Promise<RunView[]>;
@@ -56,13 +71,30 @@ export function createClient(options: ClientOptions): Client {
   const headers = (): Record<string, string> => (options.token ? { authorization: `Bearer ${options.token}` } : {});
   const get = async (path: string, init: RequestInit = {}): Promise<Response> => {
     const res = await doFetch(`${base}${path}`, { ...init, headers: { ...headers(), ...(init.headers ?? {}) } });
-    if (!res.ok) throw new ApiError(res.status, `GET ${path} failed: ${res.status}`);
+    if (!res.ok) throw new ApiError(res.status, `${init.method ?? "GET"} ${path} failed: ${res.status}`);
     return res;
   };
 
   return {
     async health() {
       return (await (await get("/healthz")).json()) as { status: string; version: string };
+    },
+    async login(username, password) {
+      const res = await doFetch(`${base}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (res.status === 401 || res.status === 429) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error: string };
+        return { ok: false, reason: res.status === 429 ? "locked" : "invalid", message: error };
+      }
+      if (!res.ok) throw new ApiError(res.status, `POST /api/v1/auth/login failed: ${res.status}`);
+      const body = (await res.json()) as { token: string; user: SessionUser };
+      return { ok: true, token: body.token, user: body.user };
+    },
+    async logout() {
+      await get("/api/v1/auth/logout", { method: "POST" });
     },
     async checkToken() {
       try {

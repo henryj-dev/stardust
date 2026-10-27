@@ -15,8 +15,15 @@ export const configSchema = z.strictObject({
     host: z.string().default("0.0.0.0"),
     port: z.number().int().min(1).max(65535).default(8080),
     publicUrl: z.url({ protocol: /^https?$/ }),
-    /** Bearer token for the admin API, until user sign-in exists. Without it the admin API is off. */
-    adminToken: secretRef.optional(),
+    /** The first administrator, created when there are no users yet. */
+    bootstrapAdmin: z
+      .strictObject({
+        username: z
+          .string()
+          .regex(/^[a-z0-9][a-z0-9._-]{0,62}$/, "must be lower-case letters, digits, '.', '_' or '-'"),
+        password: secretRef,
+      })
+      .optional(),
   }),
   database: z.strictObject({
     url: secretRef,
@@ -29,6 +36,6 @@ export type RawConfig = z.infer<typeof configSchema>;
 
 /** Configuration after secret references have been resolved to their values. */
 export type StardustConfig = Omit<RawConfig, "database" | "server"> & {
-  server: Omit<RawConfig["server"], "adminToken"> & { adminToken?: string };
+  server: Omit<RawConfig["server"], "bootstrapAdmin"> & { bootstrapAdmin?: { username: string; password: string } };
   database: { url: string };
 };

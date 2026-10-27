@@ -1,6 +1,20 @@
-import { createHash, timingSafeEqual } from "node:crypto";
-import { evaluateOn, type Logger, PipelineDefError, pipelineDefFromComponents } from "@stardust/core";
-import { getProject, listRuns, type Project, ProjectError, putProject, type Sql, startRun } from "@stardust/db";
+import { type Action, can, evaluateOn, type Logger, PipelineDefError, pipelineDefFromComponents } from "@stardust/core";
+import {
+  authenticate,
+  createUser,
+  getProject,
+  listRuns,
+  type Project,
+  ProjectError,
+  projectRole,
+  putProject,
+  type Sql,
+  setProjectRole,
+  signIn,
+  signOut,
+  startRun,
+  type User,
+} from "@stardust/db";
 import {
   type CompareResult,
   decideWebhook,
@@ -8,7 +22,7 @@ import {
   resolveChangedPaths,
   verifySignature,
 } from "@stardust/plugin-source-github";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { readBoundedBody } from "./body.ts";
 import type { RunEvents } from "./events.ts";
@@ -19,8 +33,6 @@ export interface AppInfo {
 
 export interface Services {
   sql: Sql;
-  /** Bearer token for the admin API until user sign-in exists. */
-  adminToken: string;
   webhookSecret: string;
   /** Net change of a push, from the source host's compare API. */
   compare: (repo: string, base: string, head: string) => Promise<CompareResult>;
@@ -33,15 +45,13 @@ export interface Services {
 
 const silent: Logger = { debug() {}, info() {}, warn() {}, error() {} };
 
-const digest = (s: string) => createHash("sha256").update(s).digest();
-function bearerMatches(header: string | undefined, token: string): boolean {
-  const given = header?.startsWith("Bearer ") ? header.slice(7) : "";
-  return given !== "" && timingSafeEqual(digest(given), digest(token));
-}
+type Env = { Variables: { user: User; token: string } };
+
+const bearer = (header: string | undefined) => (header?.startsWith("Bearer ") ? header.slice(7) : "");
 
 /** Builds the HTTP application. Without services, only /healthz exists. */
-export function createApp(info: AppInfo, services?: Services): Hono {
-  const app = new Hono();
+export function createApp(info: AppInfo, services?: Services): Hono<Env> {
+  const app = new Hono<Env>();
   app.get("/healthz", (c) => c.json({ status: "ok", version: info.version }));
   if (!services) return app;
   const { sql } = services;
@@ -118,17 +128,90 @@ export function createApp(info: AppInfo, services?: Services): Hono {
     return c.json({ runId }, 201);
   });
 
-  app.use("/api/v1/*", async (c, next) => {
-    if (!bearerMatches(c.req.header("authorization"), services.adminToken)) {
-      return c.json({ error: "unauthorized" }, 401);
+  app.post("/api/v1/auth/login", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { username?: unknown; password?: unknown } | null;
+    if (typeof body?.username !== "string" || typeof body.password !== "string") {
+      return c.json({ error: "username and password are required" }, 400);
     }
+    const result = await signIn(sql, body.username, body.password);
+    if (!result.ok) {
+      log.warn("sign-in refused", { username: body.username, reason: result.reason });
+      return result.reason === "locked"
+        ? c.json({ error: "too many failed attempts; try again later" }, 429)
+        : c.json({ error: "invalid username or password" }, 401);
+    }
+    log.info("signed in", { username: result.user.username });
+    return c.json({ token: result.token, user: result.user });
+  });
+
+  // Every other /api/v1 route needs a session.
+  app.use("/api/v1/*", async (c, next) => {
+    if (c.req.path === "/api/v1/auth/login") return next();
+    const token = bearer(c.req.header("authorization"));
+    const user = token ? await authenticate(sql, token) : null;
+    if (!user) return c.json({ error: "unauthorized" }, 401);
+    c.set("user", user);
+    c.set("token", token);
     await next();
   });
 
-  /** Lets a client check a token without side effects. */
-  app.get("/api/v1/session", (c) => c.json({ ok: true }));
+  /** Null when allowed; otherwise the response to send. Unreadable projects are 404, not 403. */
+  const deny = async (c: Context<Env>, action: Action, projectId?: string): Promise<Response | null> => {
+    const user = c.get("user");
+    const role = projectId ? await projectRole(sql, user.id, projectId) : null;
+    if (can(user, action, role)) return null;
+    if (projectId && !can(user, "project:read", role)) return c.json({ error: "unknown project" }, 404);
+    return c.json({ error: "forbidden" }, 403);
+  };
+
+  app.get("/api/v1/session", (c) => c.json({ user: c.get("user") }));
+
+  app.post("/api/v1/auth/logout", async (c) => {
+    await signOut(sql, c.get("token"));
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/v1/users", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const body = (await c.req.json().catch(() => null)) as {
+      username?: unknown;
+      password?: unknown;
+      isAdmin?: unknown;
+    } | null;
+    if (typeof body?.username !== "string" || typeof body.password !== "string") {
+      return c.json({ error: "username and password are required" }, 400);
+    }
+    try {
+      const user = await createUser(sql, {
+        username: body.username,
+        password: body.password,
+        isAdmin: body.isAdmin === true,
+      });
+      return c.json({ user }, 201);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+  });
+
+  app.put("/api/v1/projects/:id/members/:username", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const body = (await c.req.json().catch(() => null)) as { role?: unknown } | null;
+    const role = body?.role;
+    if (role !== "maintainer" && role !== "viewer" && role !== null) {
+      return c.json({ error: "role must be maintainer, viewer or null" }, 400);
+    }
+    if (!(await getProject(sql, c.req.param("id")))) return c.json({ error: "unknown project" }, 404);
+    const [user] = await sql<{ id: string }[]>`SELECT id FROM users WHERE username = ${c.req.param("username")}`;
+    if (!user) return c.json({ error: "unknown user" }, 404);
+    await setProjectRole(sql, c.req.param("id"), user.id, role);
+    return c.json({ ok: true });
+  });
 
   app.put("/api/v1/projects/:id", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
     let body: Partial<Project>;
     try {
       body = (await c.req.json()) as Partial<Project>;
@@ -154,6 +237,8 @@ export function createApp(info: AppInfo, services?: Services): Hono {
   });
 
   app.get("/api/v1/projects/:id/runs", async (c) => {
+    const denied = await deny(c, "project:read", c.req.param("id"));
+    if (denied) return denied;
     if (!(await getProject(sql, c.req.param("id")))) return c.json({ error: "unknown project" }, 404);
     return c.json({ runs: await listRuns(sql, c.req.param("id")) });
   });
@@ -162,6 +247,8 @@ export function createApp(info: AppInfo, services?: Services): Hono {
   // run, and a comment heartbeat every few seconds.
   app.get("/api/v1/projects/:id/events", async (c) => {
     const id = c.req.param("id");
+    const denied = await deny(c, "project:read", id);
+    if (denied) return denied;
     const events = services.events;
     if (!events) return c.json({ error: "live updates are not enabled" }, 404);
     if (!(await getProject(sql, id))) return c.json({ error: "unknown project" }, 404);

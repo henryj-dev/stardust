@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/config";
 import { createPluginRegistry, type Logger } from "@stardust/core";
-import { connect, migrate } from "@stardust/db";
+import { connect, ensureBootstrapAdmin, migrate } from "@stardust/db";
 import { plugin as sourceGithub } from "@stardust/plugin-source-github";
 import { createApp, type Services } from "./app.ts";
 import { RunEvents } from "./events.ts";
@@ -33,8 +33,14 @@ try {
 const sql = connect(config.database.url, { max: 8 });
 await migrate(sql);
 
+if (config.server.bootstrapAdmin) {
+  const { username, password } = config.server.bootstrapAdmin;
+  if (await ensureBootstrapAdmin(sql, username, password))
+    log.info("created the bootstrap administrator", { username });
+}
+
 const source = config.plugins["source-github"] as Record<string, unknown> | undefined;
-if (source && config.server.adminToken) {
+if (source) {
   if (source.appId !== undefined) {
     console.error("plugins.source-github: GitHub App authentication is not implemented yet; use token");
     process.exit(1);
@@ -46,7 +52,6 @@ if (source && config.server.adminToken) {
     log,
     events,
     sql,
-    adminToken: config.server.adminToken,
     webhookSecret: await resolveSecretRef(source.webhookSecret, `${at}.webhookSecret`),
     compare: compareApi(
       (source.apiBaseUrl as string | undefined) ?? "https://api.github.com",
@@ -54,7 +59,7 @@ if (source && config.server.adminToken) {
     ),
   };
 } else {
-  console.warn("source-github or server.adminToken is not configured: only /healthz is served");
+  console.warn("source-github is not configured: only /healthz is served");
 }
 
 const app = createApp({ version: process.env.STARDUST_VERSION ?? "dev" }, services);

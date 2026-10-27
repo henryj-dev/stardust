@@ -33,12 +33,20 @@ describe("parseConfig", () => {
     assert.deepEqual(config.plugins, { "source-github": {} });
   });
 
-  it("resolves an optional admin token reference", async () => {
-    const text = VALID.replace("  publicUrl:", "  adminToken: { env: ADMIN }\n  publicUrl:");
-    const config = await parseConfig(text, "test.yaml", { env: { ...env, ADMIN: "t0ken" } });
-    assert.equal(config.server.adminToken, "t0ken");
+  it("resolves the bootstrap administrator's password reference", async () => {
+    const text = VALID.replace(
+      "  publicUrl:",
+      "  bootstrapAdmin: { username: admin, password: { env: ADMIN_PW } }\n  publicUrl:",
+    );
+    const config = await parseConfig(text, "test.yaml", { env: { ...env, ADMIN_PW: "a long password" } });
+    assert.deepEqual(config.server.bootstrapAdmin, { username: "admin", password: "a long password" });
     const missing = await issuesOf(text);
-    assert.deepEqual(missing, ["server.adminToken: environment variable ADMIN is not set"]);
+    assert.deepEqual(missing, ["server.bootstrapAdmin.password: environment variable ADMIN_PW is not set"]);
+    const plain = await issuesOf(text.replace("{ env: ADMIN_PW }", "hunter2hunter2"));
+    assert.ok(
+      plain.some((i) => i.startsWith("server.bootstrapAdmin.password")),
+      plain.join("\n"),
+    );
   });
 
   it("reads a secret from a file reference", async () => {

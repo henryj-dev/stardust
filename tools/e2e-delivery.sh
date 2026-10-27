@@ -116,13 +116,13 @@ kubectl apply -f "$fixtures/flux.yaml" >/dev/null
 # ---------------------------------------------------------------- stardust delivery config
 step configure "stardust with the GitHub source, BuildKit builder and Git deploy repository"
 WEBHOOK_SECRET="$(openssl rand -hex 16)"
-ADMIN_TOKEN="$(openssl rand -hex 16)"
+ADMIN_PASSWORD="$(openssl rand -hex 16)"
 kubectl create namespace stardust-builds
 kubectl -n stardust-builds create secret generic git-clone --from-literal=token="$TOKEN"
 kubectl -n stardust-builds create secret generic registry-push --from-literal=config.json='{"auths":{}}'
 kubectl -n stardust create secret generic stardust-delivery \
   --from-literal=SOURCE_TOKEN="$TOKEN" --from-literal=DEPLOY_TOKEN="$TOKEN" \
-  --from-literal=WEBHOOK_SECRET="$WEBHOOK_SECRET" --from-literal=ADMIN_TOKEN="$ADMIN_TOKEN"
+  --from-literal=WEBHOOK_SECRET="$WEBHOOK_SECRET" --from-literal=ADMIN_PASSWORD="$ADMIN_PASSWORD"
 cat >"$work/delivery-values.yaml" <<EOF
 builds:
   enabled: true
@@ -135,7 +135,7 @@ config:
   server:
     port: 8080
     publicUrl: http://localhost:8080
-    adminToken: { env: ADMIN_TOKEN }
+    bootstrapAdmin: { username: admin, password: { env: ADMIN_PASSWORD } }
   database:
     url: { env: DATABASE_URL }
   plugins:
@@ -160,6 +160,9 @@ EOF
 helm upgrade stardust "$here/charts/stardust" --namespace stardust --reuse-values \
   --values "$here/examples/kind/values.yaml" --values "$work/delivery-values.yaml" --wait --timeout 5m
 port_forward stardust stardust-server 18080 8080
+ADMIN_TOKEN="$(curl -fsS -H "content-type: application/json" http://127.0.0.1:18080/api/v1/auth/login \
+  -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PASSWORD\"}" | jq -r .token)"
+[ -n "$ADMIN_TOKEN" ] && [ "$ADMIN_TOKEN" != null ] || fail "the bootstrap administrator could not sign in"
 sapi() { curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" -H "content-type: application/json" "$@"; }
 sapi -X PUT http://127.0.0.1:18080/api/v1/projects/demo -d '{
   "name": "Demo",
