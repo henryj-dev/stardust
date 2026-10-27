@@ -1,3 +1,5 @@
+export * from "./env/merge.ts";
+export * from "./env/render.ts";
 export type { Logger } from "./logger.ts";
 export * from "./pipeline/dag.ts";
 export * from "./pipeline/definition.ts";
