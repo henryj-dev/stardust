@@ -30,6 +30,12 @@ config:
     url: { env: DATABASE_URL }
   plugins: {}
 
+# Extra environment for the server and worker, typically a Secret holding the
+# values that stardust.yaml references with { env: NAME }.
+extraEnvFrom: []
+#  - secretRef:
+#      name: stardust-secrets
+
 # Existing Secret holding the PostgreSQL connection URL. Required.
 database:
   existingSecret: ""

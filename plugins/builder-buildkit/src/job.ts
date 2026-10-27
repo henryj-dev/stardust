@@ -45,6 +45,8 @@ export interface BuildInput {
 export interface BuilderOptions {
   /** Base URL of the Git host to clone from. Defaults to https://github.com. */
   gitBaseUrl?: string;
+  /** User name sent with the clone token. GitHub ignores it; Gitea wants the token's owner. */
+  cloneUsername?: string;
   /** Push over plain HTTP. Only for local registries such as a kind test cluster. */
   insecureRegistry?: boolean;
   /** Secret with key `token`: a GitHub token that can read the repository. */
@@ -99,7 +101,7 @@ git init -q /workspace/src
 cd /workspace/src
 export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0="http.\${GIT_BASE}/.extraheader"
-GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "\${GITHUB_TOKEN}" | base64 | tr -d '\\n')"
+GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf '%s:%s' "\${GIT_USERNAME}" "\${GITHUB_TOKEN}" | base64 | tr -d '\\n')"
 export GIT_CONFIG_VALUE_0
 git fetch -q --depth 1 "\${GIT_BASE}/\${REPO}.git" "\${SHA}"
 unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GITHUB_TOKEN
@@ -184,7 +186,13 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
               image: images.git,
               command: ["sh", "-c", CLONE_SCRIPT],
               env: [
-                ...env({ GIT_BASE: gitBase, REPO: input.repo, SHA: input.sha, HOME: "/workspace/home" }),
+                ...env({
+                  GIT_BASE: gitBase,
+                  GIT_USERNAME: options.cloneUsername ?? "x-access-token",
+                  REPO: input.repo,
+                  SHA: input.sha,
+                  HOME: "/workspace/home",
+                }),
                 {
                   name: "GITHUB_TOKEN",
                   valueFrom: { secretKeyRef: { name: options.cloneSecret, key: "token" } },

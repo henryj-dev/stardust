@@ -191,6 +191,12 @@
           "type": "boolean"
         }
       }
+    },
+    "extraEnvFrom": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
     }
   }
 }

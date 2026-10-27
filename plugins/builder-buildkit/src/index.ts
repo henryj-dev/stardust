@@ -24,7 +24,17 @@ export const plugin = definePlugin({
     const s = section as Record<string, unknown>;
     const problems: string[] = [];
     for (const key of Object.keys(s)) {
-      if (!["namespace", "registry", "cloneSecret", "pushSecret", "gitBaseUrl", "insecureRegistry"].includes(key)) {
+      if (
+        ![
+          "namespace",
+          "registry",
+          "cloneSecret",
+          "pushSecret",
+          "gitBaseUrl",
+          "insecureRegistry",
+          "cloneUsername",
+        ].includes(key)
+      ) {
         problems.push(`unknown key "${key}"`);
       }
     }
@@ -36,6 +46,12 @@ export const plugin = definePlugin({
     }
     if (s.gitBaseUrl !== undefined && (typeof s.gitBaseUrl !== "string" || !/^https?:\/\/\S+$/.test(s.gitBaseUrl))) {
       problems.push("gitBaseUrl must be an http(s) URL");
+    }
+    if (
+      s.cloneUsername !== undefined &&
+      (typeof s.cloneUsername !== "string" || !/^[A-Za-z0-9._-]+$/.test(s.cloneUsername))
+    ) {
+      problems.push("cloneUsername must be a user name");
     }
     if (s.insecureRegistry !== undefined && typeof s.insecureRegistry !== "boolean") {
       problems.push("insecureRegistry must be true or false");

@@ -47,6 +47,7 @@ if (builder && gitops) {
       pushSecret: builder.pushSecret as string,
       ...(builder.gitBaseUrl ? { gitBaseUrl: builder.gitBaseUrl as string } : {}),
       ...(builder.insecureRegistry === true ? { insecureRegistry: true } : {}),
+      ...(builder.cloneUsername ? { cloneUsername: builder.cloneUsername as string } : {}),
     },
     deployRepo: new GitCliRepo({
       url: gitops.url as string,

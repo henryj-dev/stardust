@@ -31,6 +31,10 @@ spec:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           env:
             {{- include "stardust.configEnv" . | nindent 12 }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           volumeMounts:
