@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
-import { BUILD_SCRIPT, type BuildInput, buildJob, CLONE_SCRIPT, DEFAULT_IMAGES, DIGEST_LINE } from "./job.ts";
+import {
+  BUILD_SCRIPT,
+  type BuildInput,
+  buildJob,
+  CLONE_SCRIPT,
+  DEFAULT_IMAGES,
+  DIGEST_FROM_METADATA,
+  DIGEST_LINE,
+} from "./job.ts";
 
 const input: BuildInput = {
   projectId: "demo",
@@ -173,5 +185,55 @@ describe("job shape", () => {
     const log = `[build] x\n[stardust-image-digest] sha256:${"f".repeat(64)}\n`;
     assert.equal(DIGEST_LINE.exec(log)?.[1], `sha256:${"f".repeat(64)}`);
     assert.equal(DIGEST_LINE.exec("[stardust-image-digest] \n"), null);
+  });
+});
+
+describe("reading the digest from BuildKit's metadata", () => {
+  const IMAGE = `sha256:${"9".repeat(64)}`;
+  const run = (metadata: string) => {
+    const dir = mkdtempSync(join(tmpdir(), "meta-"));
+    try {
+      writeFileSync(join(dir, "metadata.json"), metadata);
+      return execFileSync("sh", ["-c", `set -eu\n${DIGEST_FROM_METADATA}`], {
+        env: { ...process.env, METADATA: join(dir, "metadata.json") },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("takes containerimage.digest, not the first digest in the file", () => {
+    // Real shape: the provenance (with base image digests) and the config digest come first.
+    const real = JSON.stringify(
+      {
+        "buildx.build.provenance": {
+          materials: [{ digest: { sha256: "1".repeat(64) } }],
+          ref: `x@sha256:${"2".repeat(64)}`,
+        },
+        "containerimage.config.digest": `sha256:${"3".repeat(64)}`,
+        "containerimage.descriptor": { digest: IMAGE },
+        "containerimage.digest": IMAGE,
+      },
+      null,
+      2,
+    );
+    assert.equal(run(real).trim(), `[stardust-image-digest] ${IMAGE}`);
+    assert.equal(DIGEST_LINE.exec(run(real))?.[1], IMAGE);
+  });
+  it("reads compact JSON too", () => {
+    const compact = `{"containerimage.config.digest":"sha256:${"3".repeat(64)}","containerimage.digest":"${IMAGE}"}`;
+    assert.equal(run(compact).trim(), `[stardust-image-digest] ${IMAGE}`);
+  });
+  it("fails, saying why, when the key is missing", () => {
+    assert.throws(
+      () => run(`{"containerimage.config.digest":"sha256:${"3".repeat(64)}"}`),
+      (err: { status?: number; stderr?: string }) =>
+        err.status === 1 && String(err.stderr).includes("no containerimage.digest"),
+    );
+  });
+  it("is the tail of the build script", () => {
+    assert.ok(BUILD_SCRIPT.endsWith(DIGEST_FROM_METADATA));
   });
 });

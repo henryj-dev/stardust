@@ -110,6 +110,20 @@ git show -s --format=%cI HEAD > /workspace/build-time
 echo "[clone] \${REPO} @ \${SHA}"
 `;
 
+/**
+ * Prints the pushed image's digest from BuildKit's metadata file. It must be
+ * read from the `containerimage.digest` key: the file also holds other
+ * digests (the image config, the base images in the provenance) and any of
+ * them can come first, and deploying one of those fails at pull time.
+ */
+export const DIGEST_FROM_METADATA = `DIGEST="$(grep -o '"containerimage\\.digest"[[:space:]]*:[[:space:]]*"sha256:[0-9a-f]\\{64\\}"' "\${METADATA:-/workspace/metadata.json}" | grep -o 'sha256:[0-9a-f]\\{64\\}' || true)"
+if [ -z "\${DIGEST}" ]; then
+  echo "[build] no containerimage.digest in the build metadata" >&2
+  exit 1
+fi
+echo "[stardust-image-digest] \${DIGEST}"
+`;
+
 export const BUILD_SCRIPT = `set -eu
 cd /workspace/src
 BUILD_TIME="$(cat /workspace/build-time)"
@@ -123,9 +137,7 @@ buildctl-daemonless.sh build \\
   --opt "build-arg:BUILD_TIME=\${BUILD_TIME}" \\
   --output "type=image,name=\${IMAGE},push=true,oci-mediatypes=true\${REGISTRY_INSECURE:+,registry.insecure=true}" \\
   --metadata-file /workspace/metadata.json
-DIGEST="$(grep -o 'sha256:[0-9a-f]\\{64\\}' /workspace/metadata.json | head -1)"
-echo "[stardust-image-digest] \${DIGEST}"
-`;
+${DIGEST_FROM_METADATA}`;
 
 /** The line the build prints with the pushed image's digest; the executor reads it from the log. */
 export const DIGEST_LINE = /^\[stardust-image-digest\] (sha256:[0-9a-f]{64})$/m;
