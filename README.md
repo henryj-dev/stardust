@@ -82,6 +82,11 @@ build step for the server and worker.
 3. Environment and secret cascade (SOPS + age), OIDC sign-in, RBAC
 4. First public release
 
+## Releases
+
+Releases are signed tags; images and the Helm chart are signed by the release
+workflow. See [docs/releasing.md](docs/releasing.md) for how to cut and verify one.
+
 ## License
 
 [Apache-2.0](LICENSE)
