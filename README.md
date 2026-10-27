@@ -90,6 +90,11 @@ build step for the server and worker.
 3. Environment and secret cascade (SOPS + age), OIDC sign-in, RBAC
 4. First public release
 
+## Configuration
+
+See [docs/configuration.md](docs/configuration.md) for `stardust.yaml`, the
+plugins and registering a project.
+
 ## Releases
 
 Releases use changesets, like cloudflare/workers-sdk: merging the
