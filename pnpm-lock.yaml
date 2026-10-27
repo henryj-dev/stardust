@@ -227,16 +227,15 @@ importers:
       '@stardust/db':
         specifier: workspace:*
         version: link:../db
+      '@stardust/plugin-identity-oidc':
+        specifier: workspace:*
+        version: link:../../plugins/identity-oidc
       '@stardust/plugin-source-github':
         specifier: workspace:*
         version: link:../../plugins/source-github
       hono:
         specifier: ^4.13.14
         version: 4.13.14
-    devDependencies:
-      '@stardust/plugin-identity-oidc':
-        specifier: workspace:*
-        version: link:../../plugins/identity-oidc
 
   packages/web:
     dependencies:

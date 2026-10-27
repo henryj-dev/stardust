@@ -7,7 +7,7 @@
     "node": ">=26"
   },
   "scripts": {
-    "check": "pnpm run typecheck && pnpm run lint && pnpm run deps && pnpm run changesets:check && pnpm run test && pnpm --filter @stardust/web run check",
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run deps && node tools/check-runtime-deps.ts && pnpm run changesets:check && pnpm run test && pnpm --filter @stardust/web run check",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "biome check --error-on-warnings .",
     "format": "biome format --write .",
