@@ -22,6 +22,7 @@ export type Decision =
       branch?: string;
       tag?: string;
       baseBranch?: string;
+      defaultBranch?: string;
     };
 
 export function refToBranchTag(ref: string): { branch?: string; tag?: string } {
@@ -54,7 +55,16 @@ export function decideWebhook(
     const skip = judgePush(typeof message === "string" ? message : "", policy);
     if (skip) return { action: "ignore", reason: skip.reason };
     const trigger = ref.startsWith("refs/tags/") ? "tag" : "push";
-    return { action: "run", event: "push", trigger, ref, sha, ...refToBranchTag(ref) };
+    const defaultBranch = (p.repository as { default_branch?: unknown } | undefined)?.default_branch;
+    return {
+      action: "run",
+      event: "push",
+      trigger,
+      ref,
+      sha,
+      ...refToBranchTag(ref),
+      ...(typeof defaultBranch === "string" && defaultBranch !== "" ? { defaultBranch } : {}),
+    };
   }
 
   if (eventName === "pull_request") {

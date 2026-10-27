@@ -59,10 +59,13 @@ describe("matchPath / anyPathMatches — GitHub Actions glob", () => {
 });
 
 describe("evaluateOn — triggers", () => {
-  it("without on, only push", () => {
+  it("without on, only a push to the default branch (unlike the predecessor: any branch)", () => {
     const d = asDef({ jobs: {} });
-    assert.equal(evaluateOn(d, "push", { branch: "x" }), true);
-    assert.equal(evaluateOn(d, "pull_request", { baseBranch: "x" }), false);
+    assert.equal(evaluateOn(d, "push", { branch: "main", defaultBranch: "main" }), true);
+    assert.equal(evaluateOn(d, "push", { branch: "feature", defaultBranch: "main" }), false);
+    assert.equal(evaluateOn(d, "push", { branch: "main" }), false, "unknown default branch: fail closed");
+    assert.equal(evaluateOn(d, "push", { tag: "v1", defaultBranch: "main" }), false);
+    assert.equal(evaluateOn(d, "pull_request", { baseBranch: "main", defaultBranch: "main" }), false);
   });
   it("branch globs; a tag push is judged by tags only", () => {
     assert.equal(evaluateOn(def, "push", { branch: "main" }), true);

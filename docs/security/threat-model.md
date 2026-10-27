@@ -117,10 +117,6 @@ Found in the pre-publication review (2026-10-27) and not fixed yet:
 - **One webhook secret for all projects.** Repository binding and delivery
   deduplication limit what it allows, but anyone who can configure a webhook on
   a watched repository holds it. A secret per project is the fix.
-- **Without an `on` block, a pipeline runs for pushes to every branch**, and
-  each build is deployed. That matches the predecessor, but anyone with push
-  access to any branch can deploy. Declare `on.push.branches` until the default
-  changes.
 - **Anyone can lock an account** by failing to sign in as it ten times in 15
   minutes, including the bootstrap administrator. The lockout is per username,
   not per username and address.

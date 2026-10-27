@@ -48,11 +48,13 @@ export interface EventContext {
   tag?: string;
   /** Base branch of a pull request. */
   baseBranch?: string;
+  /** The repository's default branch, as the source host reports it. */
+  defaultBranch?: string;
 }
 
 /**
  * Whether an event starts a run.
- * - no `on`: push only
+ * - no `on`: a push to the default branch only
  * - push: a tag push is judged by `on.push.tags` only; a branch push by
  *   `on.push.branches`, where an empty or missing list matches every branch
  * - pull_request: `on.pull_request.branches` against the base branch
@@ -61,7 +63,11 @@ export interface EventContext {
  */
 export function evaluateOn(def: PipelineDef, event: string, ctx: EventContext): boolean {
   const on = def.on;
-  if (!on) return event === "push";
+  // Without `on`, only a push to the default branch: every other branch would
+  // otherwise deploy too, and anyone who can push a branch could deploy. If the
+  // default branch is unknown, nothing runs (fail closed). This differs on
+  // purpose from the predecessor, which ran for pushes to any branch.
+  if (!on) return event === "push" && ctx.branch !== undefined && ctx.branch === ctx.defaultBranch;
 
   switch (event) {
     case "push": {

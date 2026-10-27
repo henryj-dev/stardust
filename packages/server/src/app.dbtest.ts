@@ -4,7 +4,7 @@
  * oversized, ignored by policy or not matched by a trigger starts nothing.
  */
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { createUser, ensureBootstrapAdmin, signIn } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
@@ -317,6 +317,35 @@ describe("webhooks", () => {
       404,
     );
     assert.equal(await runCount(), before);
+  });
+
+  it("without an `on` block, only a push to the default branch starts a run", async () => {
+    const put = await app.request("/api/v1/projects/plain", {
+      method: "PUT",
+      headers: admin,
+      body: JSON.stringify({
+        name: "Plain",
+        githubRepo: "acme/plain",
+        pipelineDef: { jobs: { api: { pipeline: "C", component: "api" } } },
+        components: [{ name: "api", pipeline: "C", context: "api", deployDir: "deploy/plain/api" }],
+      }),
+    });
+    assert.equal(put.status, 200);
+    const to = (branch: string, defaultBranch?: string) => {
+      const body = push({
+        ref: `refs/heads/${branch}`,
+        after: randomBytes(20).toString("hex"),
+        repository: { full_name: "acme/plain", ...(defaultBranch ? { default_branch: defaultBranch } : {}) },
+      });
+      return app.request("/webhooks/github/plain", {
+        method: "POST",
+        body,
+        headers: { "x-github-event": "push", "x-hub-signature-256": sign(body) },
+      });
+    };
+    assert.equal((await to("feature", "main")).status, 202);
+    assert.equal((await to("main")).status, 202, "default branch unknown: nothing runs");
+    assert.equal((await to("main", "main")).status, 201);
   });
 
   it("refuses a signed delivery about another repository", async () => {

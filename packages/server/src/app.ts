@@ -126,6 +126,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       ...(decision.branch !== undefined ? { branch: decision.branch } : {}),
       ...(decision.tag !== undefined ? { tag: decision.tag } : {}),
       ...(decision.baseBranch !== undefined ? { baseBranch: decision.baseBranch } : {}),
+      ...(decision.defaultBranch !== undefined ? { defaultBranch: decision.defaultBranch } : {}),
     };
     if (!evaluateOn(def, decision.event, ctx)) {
       const reason = `no trigger matches ${decision.event} ${decision.ref}`;
