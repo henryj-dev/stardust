@@ -9,7 +9,9 @@ import {
   verifySignature,
 } from "@stardust/plugin-source-github";
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { readBoundedBody } from "./body.ts";
+import type { RunEvents } from "./events.ts";
 
 export interface AppInfo {
   readonly version: string;
@@ -22,6 +24,10 @@ export interface Services {
   webhookSecret: string;
   /** Net change of a push, from the source host's compare API. */
   compare: (repo: string, base: string, head: string) => Promise<CompareResult>;
+  /** Live run updates. Without it the events endpoint is not served. */
+  events?: RunEvents;
+  /** Interval of SSE heartbeats, so proxies keep idle streams open. */
+  heartbeatMs?: number;
 }
 
 const digest = (s: string) => createHash("sha256").update(s).digest();
@@ -127,6 +133,39 @@ export function createApp(info: AppInfo, services?: Services): Hono {
   app.get("/api/v1/projects/:id/runs", async (c) => {
     if (!(await getProject(sql, c.req.param("id")))) return c.json({ error: "unknown project" }, 404);
     return c.json({ runs: await listRuns(sql, c.req.param("id")) });
+  });
+
+  // Server-sent events: a `runs-snapshot` first, then a `runs-delta` per changed
+  // run, and a comment heartbeat every few seconds.
+  app.get("/api/v1/projects/:id/events", async (c) => {
+    const id = c.req.param("id");
+    const events = services.events;
+    if (!events) return c.json({ error: "live updates are not enabled" }, 404);
+    if (!(await getProject(sql, id))) return c.json({ error: "unknown project" }, 404);
+    return streamSSE(c, async (stream) => {
+      const queue: string[] = [];
+      let wake: (() => void) | null = null;
+      const unsubscribe = events.subscribe(id, (run) => {
+        queue.push(JSON.stringify(run));
+        wake?.();
+      });
+      stream.onAbort(unsubscribe);
+      await stream.writeSSE({ event: "runs-snapshot", data: JSON.stringify(await listRuns(sql, id)) });
+      while (!stream.aborted) {
+        const next = queue.shift();
+        if (next !== undefined) {
+          await stream.writeSSE({ event: "runs-delta", data: next });
+          continue;
+        }
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+          setTimeout(resolve, services.heartbeatMs ?? 5_000);
+        });
+        wake = null;
+        if (queue.length === 0 && !stream.aborted) await stream.write(": heartbeat\n\n");
+      }
+      unsubscribe();
+    });
   });
 
   return app;

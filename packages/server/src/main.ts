@@ -4,6 +4,7 @@ import { createPluginRegistry } from "@stardust/core";
 import { connect, migrate } from "@stardust/db";
 import { plugin as sourceGithub } from "@stardust/plugin-source-github";
 import { createApp, type Services } from "./app.ts";
+import { RunEvents } from "./events.ts";
 import { compareApi } from "./source.ts";
 
 const configPath = process.env.STARDUST_CONFIG ?? "stardust.yaml";
@@ -32,7 +33,10 @@ if (source && config.server.adminToken) {
     process.exit(1);
   }
   const at = "plugins.source-github";
+  const events = new RunEvents(sql);
+  await events.start();
   services = {
+    events,
     sql,
     adminToken: config.server.adminToken,
     webhookSecret: await resolveSecretRef(source.webhookSecret, `${at}.webhookSecret`),

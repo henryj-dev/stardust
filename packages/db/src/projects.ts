@@ -110,7 +110,13 @@ export interface RunView {
   jobs: Array<{ name: string; status: string; attempt: number; detail: Record<string, unknown> }>;
 }
 
-export async function listRuns(sql: Sql, projectId: string, limit = 20): Promise<RunView[]> {
+export async function getRun(sql: Sql, runId: string): Promise<RunView | null> {
+  const [row] = await sql<{ project_id: string }[]>`SELECT project_id FROM runs WHERE id = ${runId}`;
+  if (!row) return null;
+  return (await listRuns(sql, row.project_id, 1, runId))[0] ?? null;
+}
+
+export async function listRuns(sql: Sql, projectId: string, limit = 20, onlyRun?: string): Promise<RunView[]> {
   const runs = await sql<
     {
       id: string;
@@ -123,7 +129,8 @@ export async function listRuns(sql: Sql, projectId: string, limit = 20): Promise
       finished_at: Date | null;
     }[]
   >`SELECT id, event, trigger, ref, sha, status, created_at, finished_at FROM runs
-    WHERE project_id = ${projectId} ORDER BY created_at DESC LIMIT ${limit}`;
+    WHERE project_id = ${projectId} ${onlyRun ? sql`AND id = ${onlyRun}` : sql``}
+    ORDER BY created_at DESC LIMIT ${limit}`;
   if (runs.length === 0) return [];
   const jobs = await sql<
     { run_id: string; name: string; status: string; attempt: number; detail: Record<string, unknown> }[]
