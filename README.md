@@ -70,6 +70,9 @@ helm):
 examples/kind/up.sh     # builds the images, installs PostgreSQL and the chart
 examples/kind/down.sh
 ```
+To install a signed release on a real machine, see
+[docs/install/k3s.md](docs/install/k3s.md).
+
 
 Run the API against the example configuration:
 
