@@ -33,7 +33,9 @@ export function buildHandler(deps: BuildHandlerDeps): JobHandler {
     const project = await getProject(deps.sql, job.projectId);
     if (!project) return failed(`project ${job.projectId} no longer exists`);
     if (!project.githubRepo) return failed("the project has no repository to build from");
-    if (job.def.pipeline !== "C") return failed(`build kind ${job.def.pipeline} is not supported yet`);
+    if (job.def.pipeline !== "C" && job.def.pipeline !== "N") {
+      return failed(`build kind ${job.def.pipeline} is not supported yet`);
+    }
 
     const name = job.def.component ?? (project.components.length === 1 ? project.components[0]?.name : undefined);
     const component = project.components.find((c) => c.name === name);
@@ -49,7 +51,16 @@ export function buildHandler(deps: BuildHandlerDeps): JobHandler {
         runId: job.runId,
         jobName: job.name,
         ...(component.context ? { context: component.context } : {}),
-        ...(component.dockerfile ? { dockerfile: component.dockerfile } : {}),
+        // C builds the repository's Dockerfile; N builds a Node app with the builder's own.
+        ...(job.def.pipeline === "N"
+          ? {
+              kind: "node" as const,
+              ...(component.port !== undefined ? { port: component.port } : {}),
+              ...(component.buildEnv ? { buildEnv: component.buildEnv } : {}),
+            }
+          : component.dockerfile
+            ? { dockerfile: component.dockerfile }
+            : {}),
       },
       deps.builder,
     );

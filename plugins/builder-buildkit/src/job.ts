@@ -18,9 +18,13 @@
  * same commit builds the same image.
  */
 
+import { hasControlCharacter } from "@stardust/core";
+
 export const DEFAULT_IMAGES = {
   buildkit: "moby/buildkit:v0.34.1-rootless@sha256:f68752a5a94acfcdad2d07867b7075601a421638e17fc5f28efc1c814d0c4f89",
   git: "alpine/git:v2.54.0@sha256:e8ceedc73bd80992ae8d58a7d24c58b8322146c354f1d2e81a97db4452068ec0",
+  /** Base of `kind: "node"` builds. */
+  node: "node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d",
 } as const;
 
 export const LABEL_PREFIX = "stardust";
@@ -37,6 +41,12 @@ export interface BuildInput {
   /** Path of the Dockerfile and build context inside the repository. Defaults to the root. */
   context?: string;
   dockerfile?: string;
+  /** "dockerfile" (default) builds the repository's Dockerfile; "node" builds a Node app with NODE_DOCKERFILE. */
+  kind?: "dockerfile" | "node";
+  /** Port the Node app listens on (kind "node"). */
+  port?: number;
+  /** Environment during the Node build (kind "node"), e.g. which adapter or database driver to compile in. Not secret. */
+  buildEnv?: Record<string, string>;
   /** Run id and job name, for labels. */
   runId: string;
   jobName: string;
@@ -55,7 +65,7 @@ export interface BuilderOptions {
   pushSecret: string;
   /** Optional per-project secret mounted read-only at /run/secrets/project. */
   projectSecret?: string;
-  images?: { buildkit: string; git: string };
+  images?: { buildkit: string; git: string; node?: string };
   deadlineSeconds?: number;
   ttlSeconds?: number;
   resources?: { requests: Record<string, string>; limits: Record<string, string> };
@@ -66,6 +76,7 @@ const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 const SHA = /^[0-9a-f]{40}$/;
 const IMAGE_REPOSITORY = /^[a-z0-9]+([._-][a-z0-9]+)*(:[0-9]+)?(\/[a-z0-9]+([._-][a-z0-9]+)*)+$/;
 const GIT_BASE = /^https?:\/\/[A-Za-z0-9.-]+(:[0-9]+)?(\/[A-Za-z0-9._-]+)*$/;
+const ENV_KEY = /^[A-Z_][A-Z0-9_]{0,63}$/;
 const RELATIVE_PATH = /^(?!\/)(?!.*(^|\/)\.\.(\/|$))[A-Za-z0-9._/-]+$/;
 
 export class BuildInputError extends Error {}
@@ -86,6 +97,18 @@ export function validateBuildInput(input: BuildInput): void {
     if (value !== undefined && !RELATIVE_PATH.test(value)) {
       problems.push(`${key} "${value}" must be a relative path inside the repository`);
     }
+  }
+  if (input.kind === "node") {
+    if (input.dockerfile !== undefined) problems.push("a node build uses no dockerfile of its own");
+    if (input.port !== undefined && !(Number.isInteger(input.port) && input.port >= 1 && input.port <= 65535)) {
+      problems.push(`port ${input.port} is not a TCP port`);
+    }
+    for (const [key, value] of Object.entries(input.buildEnv ?? {})) {
+      if (!ENV_KEY.test(key)) problems.push(`buildEnv key "${key}" must look like UPPER_CASE_NAME`);
+      if (hasControlCharacter(value)) problems.push(`buildEnv ${key} contains a control character`);
+    }
+  } else if (input.port !== undefined || input.buildEnv !== undefined) {
+    problems.push("port and buildEnv apply to node builds only");
   }
   if (problems.length > 0) throw new BuildInputError(`invalid build input: ${problems.join("; ")}`);
 }
@@ -124,15 +147,68 @@ fi
 echo "[stardust-image-digest] \${DIGEST}"
 `;
 
+/**
+ * The Dockerfile for `kind: "node"` builds: a Node application without a
+ * Dockerfile of its own, built with its lockfile's package manager and run
+ * from `build/` (the SvelteKit adapter-node layout). It is a constant: the
+ * Node image, the port and the build environment arrive as build arguments,
+ * and the build environment is decoded and exported one `KEY=value` line at a
+ * time, never evaluated by a shell.
+ *
+ * Carried over from the predecessor, where each line came from a failed start:
+ * install scripts do not run (`--ignore-scripts`); `server.js` and
+ * `shutdown.js` are copied when present and `server.js` is preferred over
+ * `build/index.js` (a custom server that terminates TLS, and the module it
+ * imports for shutdown). New: an app without dependencies gets an empty
+ * node_modules, which a package manager does not create (found by the fixture).
+ */
+export const NODE_DOCKERFILE = `# syntax=docker/dockerfile:1
+ARG NODE_IMAGE
+FROM \${NODE_IMAGE} AS build
+ARG BUILD_ENV=""
+WORKDIR /app
+RUN corepack enable
+COPY . ./
+RUN printf '%s' "\${BUILD_ENV}" | base64 -d > /tmp/build.env \\
+ && while IFS= read -r line; do if [ -n "$line" ]; then export "$line"; fi; done < /tmp/build.env \\
+ && rm /tmp/build.env \\
+ && if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile --ignore-scripts && pnpm run build; \\
+    elif [ -f yarn.lock ]; then yarn install --frozen-lockfile --ignore-scripts && yarn build; \\
+    else npm ci --ignore-scripts && npm run build; fi \\
+ && mkdir -p node_modules
+
+FROM \${NODE_IMAGE}
+ARG PORT=3000
+WORKDIR /app
+COPY --from=build /app/build ./build
+COPY --from=build /app/package.json /app/server.js* /app/shutdown.js* ./
+COPY --from=build /app/node_modules ./node_modules
+ENV NODE_ENV=production PORT=\${PORT}
+EXPOSE \${PORT}
+USER node
+CMD ["sh", "-c", "if [ -f server.js ]; then exec node server.js; else exec node build/index.js; fi"]
+`;
+
 export const BUILD_SCRIPT = `set -eu
 cd /workspace/src
 BUILD_TIME="$(cat /workspace/build-time)"
-echo "[build] \${IMAGE} context=\${CONTEXT} dockerfile=\${DOCKERFILE}"
+DOCKERFILE_DIR="\${CONTEXT}"
+set --
+if [ "\${BUILD_KIND}" = node ]; then
+  # The Dockerfile is the constant NODE_DOCKERFILE, handed over in the environment.
+  DOCKERFILE_DIR=/workspace/node-dockerfile
+  DOCKERFILE=Dockerfile
+  mkdir -p "\${DOCKERFILE_DIR}"
+  printf '%s' "\${NODE_DOCKERFILE}" > "\${DOCKERFILE_DIR}/Dockerfile"
+  set -- --opt "build-arg:NODE_IMAGE=\${NODE_IMAGE}" --opt "build-arg:PORT=\${PORT}" --opt "build-arg:BUILD_ENV=\${BUILD_ENV_B64}"
+fi
+echo "[build] \${IMAGE} kind=\${BUILD_KIND} context=\${CONTEXT} dockerfile=\${DOCKERFILE}"
 buildctl-daemonless.sh build \\
   --frontend dockerfile.v0 \\
   --local "context=\${CONTEXT}" \\
-  --local "dockerfile=\${CONTEXT}" \\
+  --local "dockerfile=\${DOCKERFILE_DIR}" \\
   --opt "filename=\${DOCKERFILE}" \\
+  "$@" \\
   --opt "build-arg:BUILD_SHA=\${SHA}" \\
   --opt "build-arg:BUILD_TIME=\${BUILD_TIME}" \\
   --output "type=image,name=\${IMAGE},push=true,oci-mediatypes=true\${REGISTRY_INSECURE:+,registry.insecure=true}" \\
@@ -224,6 +300,19 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
                 SHA: input.sha,
                 CONTEXT: input.context ?? ".",
                 DOCKERFILE: input.dockerfile ?? "Dockerfile",
+                BUILD_KIND: input.kind ?? "dockerfile",
+                ...(input.kind === "node"
+                  ? {
+                      NODE_DOCKERFILE,
+                      NODE_IMAGE: images.node ?? DEFAULT_IMAGES.node,
+                      PORT: String(input.port ?? 3000),
+                      BUILD_ENV_B64: Buffer.from(
+                        Object.entries(input.buildEnv ?? {})
+                          .map(([k, v]) => `${k}=${v}\n`)
+                          .join(""),
+                      ).toString("base64"),
+                    }
+                  : {}),
                 BUILDKITD_FLAGS: "--oci-worker-no-process-sandbox",
                 DOCKER_CONFIG: "/home/user/.docker",
                 ...(options.insecureRegistry ? { REGISTRY_INSECURE: "true" } : {}),

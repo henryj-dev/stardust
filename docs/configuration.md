@@ -123,11 +123,12 @@ so concurrent writers never overwrite each other.
 
 ## Projects
 
-A project is registered through the admin API:
+A project is registered through the API, by an administrator (with a session
+or an API token, see [Accounts and access](#accounts-and-access)):
 
 ```sh
 curl -X PUT https://stardust.example.com/api/v1/projects/demo \
-  -H "Authorization: Bearer $STARDUST_ADMIN_TOKEN" -H 'content-type: application/json' -d '{
+  -H "Authorization: Bearer $STARDUST_TOKEN" -H 'content-type: application/json' -d '{
     "name": "Demo",
     "githubRepo": "acme/demo",
     "pipelineDef": {
@@ -144,3 +145,30 @@ Then point the repository's webhook at
 
 Every manifest in `deployDir` that references
 `<registry>/demo/api:<tag>` is updated to the new build, pinned by digest.
+
+### Components
+
+| Pipeline | Builds                                  | Fields                                                                           |
+| -------- | --------------------------------------- | -------------------------------------------------------------------------------- |
+| `C`      | the repository's own Dockerfile         | `context` (default the root), `dockerfile` (default `Dockerfile` in the context) |
+| `N`      | a Node application without a Dockerfile | `context`, `port` (default 3000), `buildEnv`                                     |
+
+A pipeline `N` build installs with the lockfile's package manager (pnpm, yarn
+or npm; install scripts do not run), runs the `build` script, and starts
+`server.js` if the app has one, otherwise `build/index.js` (the SvelteKit
+`adapter-node` layout). `buildEnv` is set during the build only, for choices a
+build compiles in, such as an adapter; it is not for secrets.
+
+```json
+{
+  "name": "web",
+  "pipeline": "N",
+  "context": "web",
+  "port": 3000,
+  "buildEnv": { "BUILD_TARGET": "node" },
+  "deployDir": "deploy/demo/web"
+}
+```
+
+Check a definition before saving it with `POST /api/v1/projects/<id>/plan`,
+which reports what a delivery would run without running it.

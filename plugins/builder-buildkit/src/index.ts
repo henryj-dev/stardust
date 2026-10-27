@@ -1,7 +1,15 @@
 import { definePlugin } from "@stardust/core";
 
 export type { BuilderOptions, BuildInput } from "./job.ts";
-export { BUILD_SCRIPT, BuildInputError, buildJob, CLONE_SCRIPT, DEFAULT_IMAGES, DIGEST_LINE } from "./job.ts";
+export {
+  BUILD_SCRIPT,
+  BuildInputError,
+  buildJob,
+  CLONE_SCRIPT,
+  DEFAULT_IMAGES,
+  DIGEST_LINE,
+  NODE_DOCKERFILE,
+} from "./job.ts";
 
 const DNS_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 

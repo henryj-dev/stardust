@@ -2,7 +2,7 @@
  * Projects: the repository, the pipeline definition, and per component how to
  * build it and which deploy directory holds its manifests.
  */
-import { type JobPipeline, loadPipelineDef, type PipelineDef } from "@stardust/core";
+import { hasControlCharacter, type JobPipeline, loadPipelineDef, type PipelineDef } from "@stardust/core";
 import type { Sql } from "postgres";
 
 export interface Component {
@@ -11,6 +11,10 @@ export interface Component {
   /** Directory inside the source repository used as the build context. */
   context?: string;
   dockerfile?: string;
+  /** Pipeline N (a Node app built without a Dockerfile of its own): the port it listens on. */
+  port?: number;
+  /** Pipeline N: environment during the build, e.g. which adapter to compile in. Not for secrets. */
+  buildEnv?: Record<string, string>;
   /** Directory in the deploy repository holding this component's manifests. */
   deployDir: string;
 }
@@ -50,6 +54,24 @@ export function validateProject(p: Project): void {
     for (const key of ["context", "dockerfile"] as const) {
       const v = c[key];
       if (v !== undefined && !REL.test(v)) problems.push(`${at}.${key} must be a relative path`);
+    }
+    if (c.pipeline === "N") {
+      if (c.dockerfile !== undefined)
+        problems.push(`${at}.dockerfile: pipeline N builds without a Dockerfile of its own`);
+      if (c.port !== undefined && !(Number.isInteger(c.port) && c.port >= 1 && c.port <= 65535))
+        problems.push(`${at}.port must be a TCP port`);
+      if (c.buildEnv !== undefined) {
+        if (typeof c.buildEnv !== "object" || c.buildEnv === null || Array.isArray(c.buildEnv))
+          problems.push(`${at}.buildEnv must map names to values`);
+        else
+          for (const [k, v] of Object.entries(c.buildEnv)) {
+            if (!/^[A-Z_][A-Z0-9_]{0,63}$/.test(k)) problems.push(`${at}.buildEnv: "${k}" is not an UPPER_CASE_NAME`);
+            if (typeof v !== "string" || hasControlCharacter(v))
+              problems.push(`${at}.buildEnv.${k} must be text without control characters`);
+          }
+      }
+    } else if (c.port !== undefined || c.buildEnv !== undefined) {
+      problems.push(`${at}: port and buildEnv apply to pipeline N only`);
     }
   }
   if (p.pipelineDef !== null) {

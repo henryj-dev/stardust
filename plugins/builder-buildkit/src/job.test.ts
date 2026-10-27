@@ -12,6 +12,7 @@ import {
   DEFAULT_IMAGES,
   DIGEST_FROM_METADATA,
   DIGEST_LINE,
+  NODE_DOCKERFILE,
 } from "./job.ts";
 
 const input: BuildInput = {
@@ -235,5 +236,54 @@ describe("reading the digest from BuildKit's metadata", () => {
   });
   it("is the tail of the build script", () => {
     assert.ok(BUILD_SCRIPT.endsWith(DIGEST_FROM_METADATA));
+  });
+});
+
+describe("node builds", () => {
+  const node: BuildInput = {
+    ...input,
+    kind: "node",
+    port: 8080,
+    buildEnv: { BUILD_TARGET: "node", DB_DIALECT: "postgres" },
+  };
+  const envOf = (m: ReturnType<typeof manifest>) => Object.fromEntries(build(m).env.map((e) => [e.name, e.value]));
+
+  it("run the same constant script, with the constant Dockerfile and pinned Node image in the environment", () => {
+    const m = manifest(node);
+    assert.equal(build(m).command[2], BUILD_SCRIPT);
+    const env = envOf(m);
+    assert.equal(env.BUILD_KIND, "node");
+    assert.equal(env.NODE_DOCKERFILE, NODE_DOCKERFILE);
+    assert.match(env.NODE_IMAGE ?? "", /^node:22\.[0-9.]+-bookworm-slim@sha256:[0-9a-f]{64}$/);
+    assert.equal(env.PORT, "8080");
+  });
+
+  it("carry the build environment encoded, one KEY=value line each, decoded only inside the build", () => {
+    const decoded = Buffer.from(envOf(manifest(node)).BUILD_ENV_B64 ?? "", "base64").toString();
+    assert.equal(decoded, "BUILD_TARGET=node\nDB_DIALECT=postgres\n");
+    // A value that looks like shell stays a value: the Dockerfile exports lines, it never evaluates them.
+    const tricky = manifest({ ...node, buildEnv: { X: "$(touch /pwned); `id`" } });
+    assert.equal(Buffer.from(envOf(tricky).BUILD_ENV_B64 ?? "", "base64").toString(), "X=$(touch /pwned); `id`\n");
+    assert.match(NODE_DOCKERFILE, /export "\$line"/);
+    assert.doesNotMatch(NODE_DOCKERFILE, /\beval\b|\bsource\b|^\s*\. /m);
+  });
+
+  it("refuse names that are not environment names, control characters, bad ports and a Dockerfile", () => {
+    for (const [change, expected] of [
+      [{ buildEnv: { "lower-case": "x" } }, /UPPER_CASE_NAME/],
+      [{ buildEnv: { "A=B": "x" } }, /UPPER_CASE_NAME/],
+      [{ buildEnv: { OK: "line\nINJECTED=1" } }, /control character/],
+      [{ port: 70000 }, /not a TCP port/],
+      [{ dockerfile: "Dockerfile" }, /no dockerfile of its own/],
+    ] as const) {
+      assert.throws(() => buildJob({ ...node, ...change } as BuildInput, options), expected);
+    }
+    assert.throws(() => buildJob({ ...input, port: 3000 }, options), /node builds only/);
+  });
+
+  it("leave Dockerfile builds as they were", () => {
+    const env = envOf(manifest());
+    assert.equal(env.BUILD_KIND, "dockerfile");
+    assert.equal(env.NODE_DOCKERFILE, undefined);
   });
 });

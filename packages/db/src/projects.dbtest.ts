@@ -49,6 +49,28 @@ it("rejects invalid projects before writing anything", async () => {
   assert.equal(await getProject(db.sql, "Bad Id"), null);
 });
 
+it("checks pipeline N settings: port, build environment, and no Dockerfile of its own", async () => {
+  const n = (c: Partial<Project["components"][number]>): Project => ({
+    ...project,
+    id: "nodeapp",
+    components: [{ name: "site", pipeline: "N", deployDir: "deploy/n/site", ...c }],
+  });
+  await putProject(db.sql, n({ port: 3000, buildEnv: { BUILD_TARGET: "node" } }));
+  assert.deepEqual((await getProject(db.sql, "nodeapp"))?.components[0]?.buildEnv, { BUILD_TARGET: "node" });
+  for (const [change, word] of [
+    [{ dockerfile: "Dockerfile" }, "without a Dockerfile"],
+    [{ port: 0 }, "TCP port"],
+    [{ buildEnv: { lower: "x" } }, "UPPER_CASE_NAME"],
+    [{ buildEnv: { OK: "a\nB=c" } }, "control characters"],
+  ] as const) {
+    await assert.rejects(putProject(db.sql, n(change as never)), (err: Error) => err.message.includes(word), word);
+  }
+  await assert.rejects(
+    putProject(db.sql, { ...project, components: [{ name: "api", pipeline: "C", deployDir: "d", port: 1 }] }),
+    /pipeline N only/,
+  );
+});
+
 it("lists runs with their jobs and the details a job left behind", async () => {
   const runId = await startRun(db.sql, {
     projectId: "demo",

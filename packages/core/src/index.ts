@@ -9,3 +9,4 @@ export * from "./pipeline/job-status.ts";
 export * from "./pipeline/plan.ts";
 export type { Plugin, PluginManifest, PluginRegistry } from "./plugin.ts";
 export { createPluginRegistry, definePlugin } from "./plugin.ts";
+export * from "./text.ts";

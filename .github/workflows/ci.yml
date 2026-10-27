@@ -142,6 +142,23 @@ jobs:
           koalaman/shellcheck:stable@sha256:bb596a0d169b85ddd81d8b6d3a2ff6d5baf5fca10b97f575ebc647c3dff62b3d
           -x tools/*.sh examples/kind/*.sh
 
+  node-build:
+    name: node build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Builds and runs fixture apps with the generated Dockerfile of pipeline N builds.
+      - run: tools/node-build-test.sh
+
   release-plan:
     name: release plan
     runs-on: ubuntu-24.04

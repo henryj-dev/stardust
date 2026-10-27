@@ -30,6 +30,24 @@ before(async () => {
     metadata: {},
     webhookKind: "repo",
   });
+  await putProject(db.sql, {
+    id: "web",
+    name: "Web",
+    githubRepo: "acme/web",
+    pipelineDef: { on: { workflow_dispatch: {} }, jobs: { site: { pipeline: "N", component: "site" } } },
+    components: [
+      {
+        name: "site",
+        pipeline: "N",
+        context: "site",
+        port: 8080,
+        buildEnv: { BUILD_TARGET: "node" },
+        deployDir: "deploy/web/site",
+      },
+    ],
+    metadata: {},
+    webhookKind: "repo",
+  });
 });
 after(async () => db.close());
 
@@ -50,14 +68,17 @@ function kube(final: Record<string, unknown>, log: string) {
   return { client, created };
 }
 
-async function runOnce(client: KubeClient, repo: MemoryRepo, event = "workflow_dispatch") {
+async function runOnce(client: KubeClient, repo: MemoryRepo, event = "workflow_dispatch", projectId = "demo") {
   const runId = await startRun(db.sql, {
-    projectId: "demo",
+    projectId,
     event,
     trigger: event === "pull_request" ? "pull_request" : "manual",
     ref: "refs/heads/main",
     sha: SHA,
-    def: { on: { workflow_dispatch: {} }, jobs: { api: { pipeline: "C", component: "api" } } },
+    def:
+      projectId === "web"
+        ? { on: { workflow_dispatch: {} }, jobs: { site: { pipeline: "N", component: "site" } } }
+        : { on: { workflow_dispatch: {} }, jobs: { api: { pipeline: "C", component: "api" } } },
     changedPaths: null,
   });
   const job = await claimJob(db.sql, "w", 30_000);
@@ -95,6 +116,23 @@ describe("buildHandler", () => {
     const env = JSON.stringify(created[0]);
     assert.ok(env.includes('"IMAGE","value":"registry.example.com/demo/api:abcdef1"'));
     assert.ok(env.includes('"CONTEXT","value":"api"'));
+  });
+
+  it("a pipeline N job builds the app with the node Dockerfile and is delivered like any other", async () => {
+    const repo = new MemoryRepo({ "deploy/web/site/deployment.yaml": "image: registry.example.com/web/site:old\n" });
+    const { client, created } = kube({ succeeded: 1 }, `[stardust-image-digest] ${DIGEST}\n`);
+    const { result, row } = await runOnce(client, repo, "workflow_dispatch", "web");
+    assert.equal(result, "success");
+    assert.equal(row?.detail.digest, DIGEST);
+    const env = JSON.stringify(created[0]);
+    assert.ok(env.includes('"BUILD_KIND","value":"node"'), "a node build");
+    assert.ok(env.includes('"PORT","value":"8080"'));
+    assert.ok(env.includes('"CONTEXT","value":"site"'));
+    assert.ok(env.includes(`"BUILD_ENV_B64","value":"${Buffer.from("BUILD_TARGET=node\n").toString("base64")}"`));
+    assert.equal(
+      repo.files()["deploy/web/site/deployment.yaml"],
+      `image: registry.example.com/web/site:abcdef1@sha256:${"d".repeat(64)}\n`,
+    );
   });
 
   it("a pull request is built but never deployed", async () => {
