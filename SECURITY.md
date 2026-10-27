@@ -11,10 +11,14 @@ advisory will credit you unless you prefer otherwise.
 
 ## Supported versions
 
-stardust has not had a release yet. Until 1.0, only the latest release
-receives security fixes.
+Until 1.0, only the latest release receives security fixes.
 
 ## Release integrity
 
-Release tags are signed, and release images and charts are signed with
-cosign. Deploy only artifacts whose signatures verify.
+Release images and the chart are signed with cosign, keyless, by the release
+workflow on `main` (see [docs/releasing.md](docs/releasing.md) for the
+`cosign verify` command and the identity to expect). Deploy only artifacts
+whose signatures verify, and pin them by digest. Git tags are not signed: the
+signature on the artifact is what ties it to this repository's workflow.
+
+The threat model is in [docs/security/threat-model.md](docs/security/threat-model.md).
