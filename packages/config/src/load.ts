@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import type { z } from "zod";
-import { configSchema, type RawConfig, type StardustConfig, type secretRef } from "./schema.ts";
+import { configSchema, type RawConfig, type StardustConfig, secretRef } from "./schema.ts";
 
 export interface ConfigIssue {
   /** Dotted path into stardust.yaml, e.g. `server.port`. Empty for the document root. */
@@ -99,4 +99,26 @@ async function resolveSecret(
 
 function toIssue(issue: z.core.$ZodIssue): ConfigIssue {
   return { path: issue.path.map(String).join("."), message: issue.message };
+}
+
+/**
+ * Resolves one `{ env: NAME }` / `{ file: PATH }` reference from a plugin
+ * section. `path` is the dotted config path used in the error message.
+ * Throws ConfigError when the reference is malformed or cannot be resolved.
+ */
+export async function resolveSecretRef(ref: unknown, path: string, options: LoadConfigOptions = {}): Promise<string> {
+  const parsed = secretRef.safeParse(ref);
+  if (!parsed.success) {
+    throw new ConfigError("configuration", [{ path, message: "must be { env: NAME } or { file: PATH }" }]);
+  }
+  const issues: ConfigIssue[] = [];
+  const value = await resolveSecret(
+    parsed.data,
+    path,
+    options.env ?? process.env,
+    options.readSecretFile ?? ((p) => readFile(p, "utf8")),
+    issues,
+  );
+  if (value === undefined) throw new ConfigError("configuration", issues);
+  return value;
 }

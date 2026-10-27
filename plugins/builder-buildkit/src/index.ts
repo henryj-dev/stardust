@@ -24,13 +24,21 @@ export const plugin = definePlugin({
     const s = section as Record<string, unknown>;
     const problems: string[] = [];
     for (const key of Object.keys(s)) {
-      if (!["namespace", "registry", "cloneSecret", "pushSecret"].includes(key)) problems.push(`unknown key "${key}"`);
+      if (!["namespace", "registry", "cloneSecret", "pushSecret", "gitBaseUrl", "insecureRegistry"].includes(key)) {
+        problems.push(`unknown key "${key}"`);
+      }
     }
     for (const key of ["namespace", "cloneSecret", "pushSecret"]) {
       if (typeof s[key] !== "string" || !DNS_NAME.test(s[key] as string)) problems.push(`${key} must be a DNS label`);
     }
     if (typeof s.registry !== "string" || !/^[a-z0-9.-]+(:[0-9]+)?(\/[a-z0-9._-]+)*$/.test(s.registry)) {
       problems.push("registry must be a registry host with an optional path, without a tag");
+    }
+    if (s.gitBaseUrl !== undefined && (typeof s.gitBaseUrl !== "string" || !/^https?:\/\/\S+$/.test(s.gitBaseUrl))) {
+      problems.push("gitBaseUrl must be an http(s) URL");
+    }
+    if (s.insecureRegistry !== undefined && typeof s.insecureRegistry !== "boolean") {
+      problems.push("insecureRegistry must be true or false");
     }
     return problems;
   },

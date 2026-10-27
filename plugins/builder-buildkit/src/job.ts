@@ -45,6 +45,8 @@ export interface BuildInput {
 export interface BuilderOptions {
   /** Base URL of the Git host to clone from. Defaults to https://github.com. */
   gitBaseUrl?: string;
+  /** Push over plain HTTP. Only for local registries such as a kind test cluster. */
+  insecureRegistry?: boolean;
   /** Secret with key `token`: a GitHub token that can read the repository. */
   cloneSecret: string;
   /** Secret with key `config.json`: a docker config that can push to the registry. */
@@ -117,7 +119,7 @@ buildctl-daemonless.sh build \\
   --opt "filename=\${DOCKERFILE}" \\
   --opt "build-arg:BUILD_SHA=\${SHA}" \\
   --opt "build-arg:BUILD_TIME=\${BUILD_TIME}" \\
-  --output "type=image,name=\${IMAGE},push=true,oci-mediatypes=true" \\
+  --output "type=image,name=\${IMAGE},push=true,oci-mediatypes=true\${REGISTRY_INSECURE:+,registry.insecure=true}" \\
   --metadata-file /workspace/metadata.json
 DIGEST="$(grep -o 'sha256:[0-9a-f]\\{64\\}' /workspace/metadata.json | head -1)"
 echo "[stardust-image-digest] \${DIGEST}"
@@ -204,6 +206,7 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
                 DOCKERFILE: input.dockerfile ?? "Dockerfile",
                 BUILDKITD_FLAGS: "--oci-worker-no-process-sandbox",
                 DOCKER_CONFIG: "/home/user/.docker",
+                ...(options.insecureRegistry ? { REGISTRY_INSECURE: "true" } : {}),
               }),
               // Rootless BuildKit needs unconfined seccomp and AppArmor to set up
               // its user namespace; it still runs as uid 1000 without privilege.

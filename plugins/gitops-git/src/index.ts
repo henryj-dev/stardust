@@ -22,10 +22,15 @@ export { isRetryable } from "./repo.ts";
  * `plugins.gitops-git` in stardust.yaml:
  *
  *   gitops-git:
- *     repository: acme/deploy
+ *     url: https://github.com/acme/deploy.git
  *     branch: main
+ *     token: { env: DEPLOY_TOKEN }               # optional for local paths
+ *     username: x-access-token                    # optional
  *     buildRevAnnotation: example.com/build-rev   # optional
  */
+const isRef = (v: unknown) =>
+  typeof v === "object" && v !== null && Object.keys(v).length === 1 && ("env" in v || "file" in v);
+
 export const plugin = definePlugin({
   manifest: { name: "gitops-git", description: "Writes desired state to a Git deploy repository." },
   validateConfig(section) {
@@ -33,14 +38,18 @@ export const plugin = definePlugin({
     const s = section as Record<string, unknown>;
     const problems: string[] = [];
     for (const key of Object.keys(s)) {
-      if (!["repository", "branch", "buildRevAnnotation"].includes(key)) problems.push(`unknown key "${key}"`);
+      if (!["url", "branch", "token", "username", "buildRevAnnotation"].includes(key))
+        problems.push(`unknown key "${key}"`);
     }
-    if (typeof s.repository !== "string" || !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(s.repository)) {
-      problems.push("repository must be owner/name");
+    if (typeof s.url !== "string" || !/^(https?:\/\/|file:\/\/|\/)\S+$/.test(s.url)) {
+      problems.push("url must be an http(s) URL, a file:// URL or an absolute path");
+    } else if (/^https?:\/\/[^/]*@/.test(s.url)) {
+      problems.push("url must not contain credentials; use token");
     }
-    if (s.branch !== undefined && (typeof s.branch !== "string" || s.branch === "")) {
-      problems.push("branch must be a non-empty string");
-    }
+    if (typeof s.branch !== "string" || s.branch === "") problems.push("branch must be a non-empty string");
+    if (s.token !== undefined && !isRef(s.token))
+      problems.push("token must be a reference: { env: NAME } or { file: PATH }");
+    if (s.username !== undefined && typeof s.username !== "string") problems.push("username must be a string");
     if (
       s.buildRevAnnotation !== undefined &&
       (typeof s.buildRevAnnotation !== "string" || !s.buildRevAnnotation.includes("/"))
@@ -50,5 +59,6 @@ export const plugin = definePlugin({
     return problems;
   },
 });
+
 export type { GitCliOptions } from "./git-cli.ts";
 export { GitCliRepo } from "./git-cli.ts";

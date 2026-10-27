@@ -126,6 +126,16 @@ describe("inputs cannot become shell code", () => {
   }
 });
 
+describe("registry", () => {
+  it("pushes over TLS unless an insecure registry is configured", () => {
+    const names = (m: ReturnType<typeof manifest>) => build(m).env.map((e: { name: string }) => e.name);
+    assert.ok(!names(manifest()).includes("REGISTRY_INSECURE"));
+    const local = buildJob(input, { ...options, insecureRegistry: true }) as ReturnType<typeof manifest>;
+    assert.ok(names(local).includes("REGISTRY_INSECURE"));
+    assert.match(BUILD_SCRIPT, /\$\{REGISTRY_INSECURE:\+,registry\.insecure=true\}/);
+  });
+});
+
 describe("git host", () => {
   it("clones from github.com by default and from a configured host otherwise", () => {
     const value = (m: ReturnType<typeof manifest>, name: string) =>

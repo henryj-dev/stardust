@@ -105,3 +105,17 @@ describe("parseConfig", () => {
     assert.match(issues[0] ?? "", /not valid YAML/);
   });
 });
+
+describe("resolveSecretRef", () => {
+  it("resolves env and file references and names the path on failure", async () => {
+    const { resolveSecretRef } = await import("./load.ts");
+    assert.equal(await resolveSecretRef({ env: "TOKEN" }, "plugins.x.token", { env: { TOKEN: "t" } }), "t");
+    assert.equal(await resolveSecretRef({ file: "/s" }, "plugins.x.token", { readSecretFile: async () => "f\n" }), "f");
+    await assert.rejects(resolveSecretRef({ env: "TOKEN" }, "plugins.x.token", { env: {} }), (err: ConfigError) =>
+      err.issues.some((i) => i.path === "plugins.x.token" && /TOKEN is not set/.test(i.message)),
+    );
+    await assert.rejects(resolveSecretRef("plain", "plugins.x.token"), (err: ConfigError) =>
+      err.issues.some((i) => i.path === "plugins.x.token"),
+    );
+  });
+});
