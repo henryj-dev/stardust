@@ -50,3 +50,5 @@ export const plugin = definePlugin({
     return problems;
   },
 });
+export type { GitCliOptions } from "./git-cli.ts";
+export { GitCliRepo } from "./git-cli.ts";
