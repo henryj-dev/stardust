@@ -24,6 +24,8 @@ import {
   startRun,
   takePendingLogin,
   type User,
+  type UserChange,
+  updateUser,
 } from "@stardust/db";
 import { type AccessRules, decideAccess, type Identity, type Oidc } from "@stardust/plugin-identity-oidc";
 import {
@@ -345,6 +347,53 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }
+  });
+
+  app.patch("/api/v1/users/:username", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object") return c.json({ error: "a JSON object is required" }, 400);
+    const change: UserChange = {};
+    for (const key of Object.keys(body)) {
+      if (!["isAdmin", "disabled", "displayName", "oidc"].includes(key))
+        return c.json({ error: `unknown field "${key}"` }, 400);
+    }
+    if (body.isAdmin !== undefined) {
+      if (typeof body.isAdmin !== "boolean") return c.json({ error: "isAdmin must be true or false" }, 400);
+      change.isAdmin = body.isAdmin;
+    }
+    if (body.disabled !== undefined) {
+      if (typeof body.disabled !== "boolean") return c.json({ error: "disabled must be true or false" }, 400);
+      change.disabled = body.disabled;
+    }
+    if (body.displayName !== undefined) {
+      if (typeof body.displayName !== "string" || body.displayName.length > 200)
+        return c.json({ error: "displayName must be text of at most 200 characters" }, 400);
+      change.displayName = body.displayName;
+    }
+    if (body.oidc !== undefined) {
+      const o = body.oidc as { issuer?: unknown; subject?: unknown } | null;
+      if (o === null) change.oidc = null;
+      else if (typeof o?.issuer === "string" && o.issuer !== "" && typeof o.subject === "string" && o.subject !== "")
+        change.oidc = { issuer: o.issuer, subject: o.subject };
+      else return c.json({ error: "oidc must be {issuer, subject} or null" }, 400);
+    }
+    const result = await updateUser(sql, c.req.param("username"), change);
+    if (!result.ok) {
+      const [status, error] = {
+        "unknown-user": [404, "unknown user"],
+        "last-admin": [409, "this would leave no enabled administrator"],
+        "identity-taken": [409, "that OpenID identity belongs to another user"],
+      }[result.reason] as [404 | 409, string];
+      return c.json({ error }, status);
+    }
+    log.info("user changed", {
+      username: c.req.param("username"),
+      by: c.get("user").username,
+      fields: Object.keys(change),
+    });
+    return c.json({ ok: true });
   });
 
   app.put("/api/v1/projects/:id/members/:username", async (c) => {

@@ -1,6 +1,14 @@
 export type { Sql } from "postgres";
 export { connect } from "./client.ts";
-export type { ApiToken, SignInPolicy, SignInResult, User, UserRecord } from "./identity.ts";
+export type {
+  ApiToken,
+  SignInPolicy,
+  SignInResult,
+  UpdateUserResult,
+  User,
+  UserChange,
+  UserRecord,
+} from "./identity.ts";
 export {
   API_TOKEN_PREFIX,
   authenticate,
@@ -18,6 +26,7 @@ export {
   setProjectRole,
   signIn,
   signOut,
+  updateUser,
   verifyPassword,
 } from "./identity.ts";
 export { MIGRATIONS_DIR, migrate } from "./migrate.ts";

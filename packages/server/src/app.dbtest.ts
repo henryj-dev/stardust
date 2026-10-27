@@ -262,6 +262,52 @@ describe("reading projects and users", () => {
   });
 });
 
+describe("changing users", () => {
+  const patch = (username: string, body: unknown) =>
+    app.request(`/api/v1/users/${username}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+      headers: { ...admin, "content-type": "application/json" },
+    });
+
+  it("links an OpenID identity, refuses one that belongs to someone else, and unlinks", async () => {
+    await createUser(db.sql, { username: "linked", password: PASSWORD });
+    await createUser(db.sql, { username: "other", oidc: { issuer: "https://id.example", subject: "taken" } });
+    assert.equal((await patch("linked", { oidc: { issuer: "https://id.example", subject: "s-1" } })).status, 200);
+    assert.equal((await patch("linked", { oidc: { issuer: "https://id.example", subject: "taken" } })).status, 409);
+    const users = (await (await app.request("/api/v1/users", { headers: admin })).json()) as {
+      users: { username: string; oidc: unknown }[];
+    };
+    assert.deepEqual(users.users.find((u) => u.username === "linked")?.oidc, {
+      issuer: "https://id.example",
+      subject: "s-1",
+    });
+    assert.equal((await patch("linked", { oidc: null })).status, 200);
+  });
+
+  it("disabling a user ends their sessions; unknown fields and users are refused", async () => {
+    await createUser(db.sql, { username: "leaving", password: PASSWORD });
+    const token = await sessionFor("leaving");
+    assert.equal((await patch("leaving", { disabled: true })).status, 200);
+    assert.equal((await app.request("/api/v1/session", { headers: { authorization: `Bearer ${token}` } })).status, 401);
+    assert.equal((await patch("leaving", { role: "god" })).status, 400);
+    assert.equal((await patch("nobody-at-all", { disabled: true })).status, 404);
+  });
+
+  it("never leaves the installation without an enabled administrator", async () => {
+    // admin may be the only one: demoting or disabling them is refused.
+    const others = (await (await app.request("/api/v1/users", { headers: admin })).json()) as {
+      users: { username: string; isAdmin: boolean; disabled: boolean }[];
+    };
+    const enabledAdmins = others.users.filter((u) => u.isAdmin && !u.disabled).map((u) => u.username);
+    assert.deepEqual(enabledAdmins, ["admin"]);
+    assert.equal((await patch("admin", { isAdmin: false })).status, 409);
+    assert.equal((await patch("admin", { disabled: true })).status, 409);
+    await createUser(db.sql, { username: "second-admin", password: PASSWORD, isAdmin: true });
+    assert.equal((await patch("second-admin", { isAdmin: false })).status, 200, "allowed while admin remains");
+  });
+});
+
 describe("every API route is guarded", () => {
   // Read from the router itself, so a route added later without a check fails
   // here. Routes open to any signed-in user must be listed with the reason.

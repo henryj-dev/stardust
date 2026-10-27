@@ -334,3 +334,53 @@ export async function listUsers(sql: Sql): Promise<UserRecord[]> {
     roles: r.roles,
   }));
 }
+
+export interface UserChange {
+  isAdmin?: boolean;
+  disabled?: boolean;
+  displayName?: string;
+  /** Links an OpenID identity, or unlinks it with null. */
+  oidc?: { issuer: string; subject: string } | null;
+}
+
+export type UpdateUserResult = { ok: true } | { ok: false; reason: "unknown-user" | "last-admin" | "identity-taken" };
+
+/**
+ * Changes a user. Refuses a change that would leave no enabled administrator,
+ * so nobody can lock everyone out through the API. Disabling a user ends their
+ * sessions and API tokens.
+ */
+export async function updateUser(sql: Sql, username: string, change: UserChange): Promise<UpdateUserResult> {
+  return sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext('stardust:admins'))`;
+    const [user] = await tx<{ id: string; is_admin: boolean; disabled: boolean }[]>`
+      SELECT id, is_admin, disabled FROM users WHERE username = ${username} FOR UPDATE`;
+    if (!user) return { ok: false, reason: "unknown-user" } as const;
+    const isAdmin = change.isAdmin ?? user.is_admin;
+    const disabled = change.disabled ?? user.disabled;
+    if (user.is_admin && !user.disabled && (!isAdmin || disabled)) {
+      const [others] = await tx<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM users WHERE is_admin AND NOT disabled AND id <> ${user.id}`;
+      if ((others?.n ?? 0) === 0) return { ok: false, reason: "last-admin" } as const;
+    }
+    if (change.oidc) {
+      const [taken] = await tx`
+        SELECT 1 FROM users WHERE oidc_issuer = ${change.oidc.issuer} AND oidc_subject = ${change.oidc.subject}
+          AND id <> ${user.id}`;
+      if (taken) return { ok: false, reason: "identity-taken" } as const;
+    }
+    await tx`
+      UPDATE users SET
+        is_admin = ${isAdmin},
+        disabled = ${disabled},
+        display_name = COALESCE(${change.displayName ?? null}, display_name),
+        oidc_issuer = ${change.oidc === undefined ? tx`oidc_issuer` : (change.oidc?.issuer ?? null)},
+        oidc_subject = ${change.oidc === undefined ? tx`oidc_subject` : (change.oidc?.subject ?? null)}
+      WHERE id = ${user.id}`;
+    if (disabled && !user.disabled) {
+      await tx`DELETE FROM sessions WHERE user_id = ${user.id}`;
+      await tx`DELETE FROM api_tokens WHERE user_id = ${user.id}`;
+    }
+    return { ok: true } as const;
+  });
+}
