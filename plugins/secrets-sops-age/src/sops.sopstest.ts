@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -65,17 +65,16 @@ describe("sops with age", () => {
   });
 
   it("writes no plain-text file while working", async () => {
-    const before = readdirSync(tmpdir()).length;
+    // Only regular files that appeared during the call are read: a shared /tmp
+    // can hold FIFOs and sockets, and reading a FIFO blocks forever.
+    const existing = new Set(readdirSync(tmpdir()));
     await encryptIfChanged(await encrypt(PLAIN, opts), PLAIN.replace('"k"', '"k3"'), opts);
-    const leaked = readdirSync(tmpdir()).filter((f) => {
-      try {
-        return readFileSync(join(tmpdir(), f), "utf8").includes("hunter2");
-      } catch {
-        return false;
-      }
+    const created = readdirSync(tmpdir()).filter((f) => !existing.has(f));
+    const leaked = created.filter((f) => {
+      const path = join(tmpdir(), f);
+      return statSync(path).isFile() && readFileSync(path, "utf8").includes("hunter2");
     });
     assert.deepEqual(leaked, []);
-    assert.ok(readdirSync(tmpdir()).length >= before);
   });
 
   it("refuses to encrypt without a valid recipient, and fails to decrypt with the wrong key", async () => {
