@@ -1,0 +1,15 @@
+# Minimal stardust configuration.
+# Secrets are never written here: they are read from an environment
+# variable ({ env: NAME }) or a mounted file ({ file: /path }).
+version: 1
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  publicUrl: https://stardust.example.com
+
+database:
+  url: { env: DATABASE_URL }
+
+# Each key enables one plugin. No plugins ship yet.
+plugins: {}

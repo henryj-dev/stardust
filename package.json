@@ -1,0 +1,23 @@
+{
+  "name": "stardust",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.14.0",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run deps && pnpm run test && pnpm --filter @stardust/web run check",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "biome check --error-on-warnings .",
+    "format": "biome format --write .",
+    "deps": "depcruise --config .dependency-cruiser.cjs packages plugins",
+    "test": "node --test \"packages/*/src/**/*.test.ts\" \"plugins/*/src/**/*.test.ts\" \"tools/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.3",
+    "@types/node": "^26.6.5",
+    "dependency-cruiser": "^18.7.0",
+    "typescript": "^6.0.3"
+  }
+}

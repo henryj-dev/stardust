@@ -1,0 +1,14 @@
+{
+  "name": "@stardust/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "@stardust/config": "workspace:*",
+    "hono": "^4.13.14"
+  }
+}
