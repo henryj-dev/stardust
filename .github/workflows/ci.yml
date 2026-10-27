@@ -73,6 +73,19 @@ jobs:
           persist-credentials: false
       - run: tools/chart-test.sh
 
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: >-
+          docker run --rm -v "$PWD:/mnt" -w /mnt
+          koalaman/shellcheck:stable@sha256:bb596a0d169b85ddd81d8b6d3a2ff6d5baf5fca10b97f575ebc647c3dff62b3d
+          -x tools/*.sh examples/kind/*.sh
+
   release-guard:
     name: release guard
     runs-on: ubuntu-24.04
@@ -82,3 +95,25 @@ jobs:
         with:
           persist-credentials: false
       - run: tools/verify-release-tag.test.sh
+
+  e2e-kind:
+    name: e2e (kind)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          cluster_name: stardust
+      - run: examples/kind/up.sh
+      - if: failure()
+        name: Dump cluster state
+        run: |
+          kubectl -n stardust get all,events -o wide || true
+          kubectl -n stardust describe pods || true
+          kubectl -n stardust logs -l app.kubernetes.io/instance=stardust --all-containers --tail=50 || true

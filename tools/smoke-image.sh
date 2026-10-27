@@ -21,8 +21,7 @@ cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 wait_http() { # <port> <path>
-  local i
-  for i in $(seq 1 30); do
+  for _ in $(seq 1 30); do
     if curl -fsS "http://127.0.0.1:$1$2" >/dev/null 2>&1; then return 0; fi
     sleep 1
   done

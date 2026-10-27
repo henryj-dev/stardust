@@ -1,0 +1,21 @@
+# Values for the local kind quickstart: images are built from this checkout
+# and loaded into the cluster, so nothing is pulled.
+image:
+  registry: docker.io/library
+  pullPolicy: Never
+  server: { repository: stardust-server, tag: local }
+  worker: { repository: stardust-worker, tag: local }
+  web: { repository: stardust-web, tag: local }
+
+config:
+  version: 1
+  server:
+    port: 8080
+    publicUrl: http://localhost:8080
+  database:
+    url: { env: DATABASE_URL }
+  plugins: {}
+
+database:
+  existingSecret: stardust-db
+  key: url

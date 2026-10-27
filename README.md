@@ -63,6 +63,14 @@ pnpm install
 pnpm run check          # typecheck, lint, boundary rules, tests, dashboard check
 ```
 
+Run the whole thing in a local kind cluster (needs docker, kind, kubectl and
+helm):
+
+```sh
+examples/kind/up.sh     # builds the images, installs PostgreSQL and the chart
+examples/kind/down.sh
+```
+
 Run the API against the example configuration:
 
 ```sh
