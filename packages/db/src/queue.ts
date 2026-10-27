@@ -83,11 +83,18 @@ export async function renewLease(sql: Sql, jobId: string, workerId: string, leas
  * Records a result and advances the run. False means this worker no longer
  * holds the job (lease expired and reclaimed, or cancelled) and nothing changed.
  */
-export async function finishJob(sql: Sql, jobId: string, workerId: string, result: JobResult): Promise<boolean> {
+export async function finishJob(
+  sql: Sql,
+  jobId: string,
+  workerId: string,
+  result: JobResult,
+  detail: Record<string, unknown> = {},
+): Promise<boolean> {
   if (!canTransition("running", result)) throw new Error(`running -> ${result} is not an allowed transition`);
   return sql.begin(async (tx) => {
     const [row] = await tx<{ run_id: string }[]>`
-      UPDATE jobs SET status = ${result}, finished_at = now(), lease_owner = NULL, lease_expires_at = NULL
+      UPDATE jobs SET status = ${result}, finished_at = now(), lease_owner = NULL, lease_expires_at = NULL,
+        detail = jobs.detail || ${tx.json(detail as never)}
       WHERE id = ${jobId} AND status = 'running' AND lease_owner = ${workerId}
       RETURNING run_id`;
     if (!row) return false;

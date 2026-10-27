@@ -16,7 +16,9 @@ import {
   type Sql,
 } from "@stardust/db";
 
-export type JobHandler = (job: ClaimedJob, signal: AbortSignal) => Promise<JobResult>;
+/** A handler returns the result, optionally with details stored on the job (build Job name, digest, reason). */
+export type HandlerOutcome = JobResult | { result: JobResult; detail?: Record<string, unknown> };
+export type JobHandler = (job: ClaimedJob, signal: AbortSignal) => Promise<HandlerOutcome>;
 
 export interface WorkerOptions {
   sql: Sql;
@@ -51,16 +53,23 @@ export async function runJob(
   );
 
   let result: JobResult;
+  let detail: Record<string, unknown> = {};
   try {
-    result = await handler(job, lost.signal);
+    const outcome = await handler(job, lost.signal);
+    if (typeof outcome === "string") result = outcome;
+    else {
+      result = outcome.result;
+      detail = outcome.detail ?? {};
+    }
   } catch (err) {
     log.error("job handler threw", { job: job.id, name: job.name, error: String(err) });
     result = "failed";
+    detail = { reason: String(err) };
   } finally {
     clearInterval(renew);
   }
 
-  if (lost.signal.aborted || !(await finishJob(sql, job.id, workerId, result))) {
+  if (lost.signal.aborted || !(await finishJob(sql, job.id, workerId, result, detail))) {
     log.warn("lease lost; result discarded", { job: job.id, name: job.name, result });
     return null;
   }

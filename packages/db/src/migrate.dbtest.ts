@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { readdir } from "node:fs/promises";
 import { after, it } from "node:test";
 import { JOB_STATUSES } from "@stardust/core";
 import { connect } from "./client.ts";
-import { migrate } from "./migrate.ts";
+import { MIGRATIONS_DIR, migrate } from "./migrate.ts";
 import { connectToSchema, createTestDb, testDatabaseUrl } from "./testing.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -33,7 +34,10 @@ it("two concurrent migrators apply each file exactly once", async () => {
     await admin.end();
   });
   const [ra, rb] = await Promise.all([migrate(a), migrate(b)]);
-  assert.deepEqual([...ra, ...rb].sort(), ["0001_baseline.sql"]);
+  const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith(".sql")).sort();
+  assert.ok(files.length >= 2);
+  assert.deepEqual([...ra, ...rb].sort(), files, "each file applied once in total");
+  assert.ok(ra.length === 0 || rb.length === 0, "one migrator applied everything, the other waited and found nothing");
 });
 
 it("the jobs.status constraint lists exactly the core job states", async () => {
