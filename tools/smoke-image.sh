@@ -75,6 +75,9 @@ case "$target" in
     stop_gracefully server-sigterm
     ;;
   worker)
+    # The worker writes to the deploy repository with git.
+    docker run --rm --entrypoint git "$image" --version >/dev/null 2>&1 || fail worker-git "git is not in the image"
+    echo "ok   [worker-git]"
     # The worker needs a real database: it migrates it and polls the queue.
     start_pg
     docker run -d --name "$name" --network "$net" \

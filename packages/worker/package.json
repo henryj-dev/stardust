@@ -9,6 +9,8 @@
   "dependencies": {
     "@stardust/config": "workspace:*",
     "@stardust/core": "workspace:*",
-    "@stardust/db": "workspace:*"
+    "@stardust/db": "workspace:*",
+    "@stardust/plugin-builder-buildkit": "workspace:*",
+    "@stardust/plugin-gitops-git": "workspace:*"
   }
 }

@@ -32,7 +32,18 @@ USER node
 EXPOSE 8080
 CMD ["node", "packages/server/src/main.ts"]
 
-FROM server AS worker
+# The worker writes to the deploy repository with the git command line.
+FROM ${NODE_IMAGE} AS worker
+ARG VERSION=dev
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+ENV NODE_ENV=production \
+    STARDUST_VERSION=${VERSION} \
+    STARDUST_CONFIG=/etc/stardust/stardust.yaml
+WORKDIR /app
+COPY --from=prod-deps --chown=node:node /app /app
+USER node
 CMD ["node", "packages/worker/src/main.ts"]
 
 FROM ${NODE_IMAGE} AS web

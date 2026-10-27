@@ -265,6 +265,12 @@ importers:
       '@stardust/db':
         specifier: workspace:*
         version: link:../db
+      '@stardust/plugin-builder-buildkit':
+        specifier: workspace:*
+        version: link:../../plugins/builder-buildkit
+      '@stardust/plugin-gitops-git':
+        specifier: workspace:*
+        version: link:../../plugins/gitops-git
 
   plugins/builder-buildkit:
     dependencies:

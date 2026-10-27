@@ -1,7 +1,10 @@
 import { hostname } from "node:os";
-import { loadConfig } from "@stardust/config";
-import type { Logger } from "@stardust/core";
+import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/config";
+import { createPluginRegistry, type Logger } from "@stardust/core";
 import { connect, migrate } from "@stardust/db";
+import { plugin as builderPlugin, inClusterClient } from "@stardust/plugin-builder-buildkit";
+import { GitCliRepo, plugin as gitopsPlugin } from "@stardust/plugin-gitops-git";
+import { buildHandler } from "./build-handler.ts";
 import { type JobHandler, runWorker } from "./loop.ts";
 
 const configPath = process.env.STARDUST_CONFIG ?? "stardust.yaml";
@@ -13,9 +16,13 @@ const log: Logger = {
   error: (message, fields) => console.error(JSON.stringify({ level: "error", message, ...fields })),
 };
 
-let config: Awaited<ReturnType<typeof loadConfig>>;
+let config: StardustConfig;
 try {
   config = await loadConfig(configPath);
+  const mine = ["builder-buildkit", "gitops-git"];
+  createPluginRegistry([builderPlugin, gitopsPlugin]).resolve(
+    Object.fromEntries(Object.entries(config.plugins).filter(([name]) => mine.includes(name))),
+  );
 } catch (err) {
   console.error((err as Error).message);
   process.exit(1);
@@ -24,12 +31,41 @@ try {
 const sql = connect(config.database.url, { max: 4 });
 await migrate(sql);
 
-// No build executors exist yet. A job that reaches this worker fails loudly
-// instead of hanging, so a run never waits forever on a missing executor.
-const handler: JobHandler = async (job) => {
-  log.error("no executor for this build kind yet", { job: job.id, name: job.name, pipeline: job.def.pipeline });
-  return "failed";
-};
+const builder = config.plugins["builder-buildkit"] as Record<string, unknown> | undefined;
+const gitops = config.plugins["gitops-git"] as Record<string, unknown> | undefined;
+
+let handler: JobHandler;
+if (builder && gitops) {
+  const token = gitops.token ? await resolveSecretRef(gitops.token, "plugins.gitops-git.token") : undefined;
+  handler = buildHandler({
+    sql,
+    kube: inClusterClient(),
+    namespace: builder.namespace as string,
+    registry: builder.registry as string,
+    builder: {
+      cloneSecret: builder.cloneSecret as string,
+      pushSecret: builder.pushSecret as string,
+      ...(builder.gitBaseUrl ? { gitBaseUrl: builder.gitBaseUrl as string } : {}),
+      ...(builder.insecureRegistry === true ? { insecureRegistry: true } : {}),
+    },
+    deployRepo: new GitCliRepo({
+      url: gitops.url as string,
+      branch: gitops.branch as string,
+      ...(token ? { token } : {}),
+      ...(gitops.username ? { username: gitops.username as string } : {}),
+    }),
+    ...(gitops.buildRevAnnotation ? { buildRevAnnotation: gitops.buildRevAnnotation as string } : {}),
+    log,
+  });
+} else {
+  // Without a builder and a deploy repository there is nothing to run jobs
+  // with. Fail them loudly rather than leaving runs waiting forever.
+  log.warn("builder-buildkit or gitops-git is not configured: jobs will fail");
+  handler = async () => ({
+    result: "failed",
+    detail: { reason: "no builder or deploy repository is configured" },
+  });
+}
 
 const stop = new AbortController();
 for (const signal of ["SIGTERM", "SIGINT"] as const) {

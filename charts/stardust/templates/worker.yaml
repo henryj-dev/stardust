@@ -17,7 +17,12 @@ spec:
       annotations:
         checksum/config: {{ toYaml .Values.config | sha256sum }}
     spec:
-      {{- include "stardust.podCommon" . | nindent 6 }}
+      {{- if .Values.builds.enabled }}
+      {{- /* The worker alone talks to the Kubernetes API, with its own account. */}}
+      {{- include "stardust.podCommon" (list . (printf "%s-worker" (include "stardust.fullname" .)) true) | nindent 6 }}
+      {{- else }}
+      {{- include "stardust.podCommon" (list . (include "stardust.serviceAccountName" .) false) | nindent 6 }}
+      {{- end }}
       containers:
         - name: worker
           image: {{ include "stardust.image" (list . "worker") }}

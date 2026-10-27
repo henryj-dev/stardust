@@ -52,6 +52,33 @@ else
   bad no-service-account-token "expected 3 pod specs without a token, found $pods"
 fi
 
+# Builds: the worker alone gets a token, and the Role stays within its namespace.
+out="$(render --set builds.enabled=true --set builds.namespace=ci-builds)"
+worker="$(awk '/^# Source: stardust\/templates\/worker.yaml/{w=1} /^---/{w=0} w' <<<"$out")"
+if grep -q "automountServiceAccountToken: true" <<<"$worker" && grep -q "serviceAccountName: t-stardust-worker" <<<"$worker"; then
+  pass builds-worker-token
+else
+  bad builds-worker-token "the worker does not run with its own token"
+fi
+if [ "$(grep -c '^      automountServiceAccountToken: false' <<<"$out")" = "2" ]; then
+  pass builds-others-no-token
+else
+  bad builds-others-no-token "server and web must stay without a token"
+fi
+role="$(awk '/^kind: Role$/{r=1} /^---/{r=0} r' <<<"$out")"
+if grep -q "namespace: ci-builds" <<<"$role" && ! grep -qE 'secrets|"\*"|\*' <<<"$role" \
+  && [ "$(grep -c 'resources:' <<<"$role")" = "3" ]; then
+  pass builds-role-scoped
+else
+  bad builds-role-scoped "the Role is not limited to jobs, pods and pods/log in the builds namespace"
+fi
+if render --set builds.enabled=true | docker run --rm -i "$KUBECONFORM" -strict -summary -kubernetes-version 1.30.0 - >/dev/null 2>&1; then
+  pass builds-kubeconform
+else
+  bad builds-kubeconform "manifests with builds enabled do not validate"
+fi
+if ! grep -q "kind: Role" <<<"$(render)"; then pass builds-off-no-role; else bad builds-off-no-role "a Role exists with builds disabled"; fi
+
 # Must be rejected, for the stated reason.
 reject() { # <name> <expected message> <helm args...>
   local name="$1" expected="$2"

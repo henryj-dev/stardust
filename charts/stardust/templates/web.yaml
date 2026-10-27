@@ -17,7 +17,7 @@ spec:
       labels:
         {{- include "stardust.selectorLabels" (list . "web") | nindent 8 }}
     spec:
-      {{- include "stardust.podCommon" . | nindent 6 }}
+      {{- include "stardust.podCommon" (list . (include "stardust.serviceAccountName" .) false) | nindent 6 }}
       containers:
         - name: web
           image: {{ include "stardust.image" (list . "web") }}

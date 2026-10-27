@@ -45,25 +45,26 @@ app.kubernetes.io/component: {{ index . 1 }}
 {{- required "database.existingSecret is required: name of a Secret holding the PostgreSQL URL" .Values.database.existingSecret -}}
 {{- end -}}
 
-{{/* Shared pod spec fields. */}}
+{{/* Shared pod spec fields: podCommon <root> <serviceAccountName> <mount the token>. */}}
 {{- define "stardust.podCommon" -}}
-serviceAccountName: {{ include "stardust.serviceAccountName" . }}
-automountServiceAccountToken: false
+{{- $root := index . 0 -}}
+serviceAccountName: {{ index . 1 }}
+automountServiceAccountToken: {{ index . 2 }}
 securityContext:
-  {{- toYaml .Values.podSecurityContext | nindent 2 }}
-{{- with .Values.imagePullSecrets }}
+  {{- toYaml $root.Values.podSecurityContext | nindent 2 }}
+{{- with $root.Values.imagePullSecrets }}
 imagePullSecrets:
   {{- toYaml . | nindent 2 }}
 {{- end }}
-{{- with .Values.nodeSelector }}
+{{- with $root.Values.nodeSelector }}
 nodeSelector:
   {{- toYaml . | nindent 2 }}
 {{- end }}
-{{- with .Values.tolerations }}
+{{- with $root.Values.tolerations }}
 tolerations:
   {{- toYaml . | nindent 2 }}
 {{- end }}
-{{- with .Values.affinity }}
+{{- with $root.Values.affinity }}
 affinity:
   {{- toYaml . | nindent 2 }}
 {{- end }}

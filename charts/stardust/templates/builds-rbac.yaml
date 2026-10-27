@@ -1,0 +1,53 @@
+{{- if .Values.builds.enabled }}
+{{- if .Values.builds.createNamespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.builds.namespace }}
+  labels:
+    {{- include "stardust.labels" . | nindent 4 }}
+---
+{{- end }}
+# The worker creates build Jobs and reads their pods' logs — in the builds
+# namespace only, and nothing else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "stardust.fullname" . }}-worker
+  labels:
+    {{- include "stardust.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "stardust.fullname" . }}-builds
+  namespace: {{ .Values.builds.namespace }}
+  labels:
+    {{- include "stardust.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "stardust.fullname" . }}-builds
+  namespace: {{ .Values.builds.namespace }}
+  labels:
+    {{- include "stardust.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "stardust.fullname" . }}-builds
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "stardust.fullname" . }}-worker
+    namespace: {{ .Release.Namespace }}
+{{- end }}

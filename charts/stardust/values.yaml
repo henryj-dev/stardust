@@ -49,6 +49,14 @@ web:
   port: 3000
   resources: {}
 
+# Builds run as Kubernetes Jobs in this namespace. When enabled, the worker
+# gets its own service account with a token and a Role limited to Jobs,
+# pods and pod logs in that namespace.
+builds:
+  enabled: false
+  namespace: stardust-builds
+  createNamespace: false
+
 serviceAccount:
   create: true
   name: ""
