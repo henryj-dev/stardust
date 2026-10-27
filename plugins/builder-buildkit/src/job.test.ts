@@ -126,6 +126,25 @@ describe("inputs cannot become shell code", () => {
   }
 });
 
+describe("git host", () => {
+  it("clones from github.com by default and from a configured host otherwise", () => {
+    const value = (m: ReturnType<typeof manifest>, name: string) =>
+      clone(m).env.find((e: { name: string }) => e.name === name)?.value;
+    assert.equal(value(manifest(), "GIT_BASE"), "https://github.com");
+    const gitea = buildJob(input, { ...options, gitBaseUrl: "http://gitea.git.svc:3000" }) as ReturnType<
+      typeof manifest
+    >;
+    assert.equal(value(gitea, "GIT_BASE"), "http://gitea.git.svc:3000");
+    assert.equal(clone(gitea).command[2], CLONE_SCRIPT, "the script stays the same");
+    assert.doesNotMatch(CLONE_SCRIPT, /github\.com/);
+  });
+  it("rejects a git base URL that is not http(s)", () => {
+    for (const bad of ["ftp://x", "http://x/a b", "https://x/;rm"]) {
+      assert.throws(() => buildJob(input, { ...options, gitBaseUrl: bad }), /gitBaseUrl/);
+    }
+  });
+});
+
 describe("job shape", () => {
   it("uses pinned images", () => {
     assert.equal(clone().image, DEFAULT_IMAGES.git);

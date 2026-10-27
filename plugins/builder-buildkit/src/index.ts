@@ -35,3 +35,7 @@ export const plugin = definePlugin({
     return problems;
   },
 });
+export type { BuildOutcome, RunBuildOptions } from "./executor.ts";
+export { runBuild } from "./executor.ts";
+export type { KubeClient, KubeResponse } from "./kube.ts";
+export { inClusterClient } from "./kube.ts";

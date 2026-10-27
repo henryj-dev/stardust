@@ -43,6 +43,8 @@ export interface BuildInput {
 }
 
 export interface BuilderOptions {
+  /** Base URL of the Git host to clone from. Defaults to https://github.com. */
+  gitBaseUrl?: string;
   /** Secret with key `token`: a GitHub token that can read the repository. */
   cloneSecret: string;
   /** Secret with key `config.json`: a docker config that can push to the registry. */
@@ -59,6 +61,7 @@ const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 const SHA = /^[0-9a-f]{40}$/;
 const IMAGE_REPOSITORY = /^[a-z0-9]+([._-][a-z0-9]+)*(:[0-9]+)?(\/[a-z0-9]+([._-][a-z0-9]+)*)+$/;
+const GIT_BASE = /^https?:\/\/[A-Za-z0-9.-]+(:[0-9]+)?(\/[A-Za-z0-9._-]+)*$/;
 const RELATIVE_PATH = /^(?!\/)(?!.*(^|\/)\.\.(\/|$))[A-Za-z0-9._/-]+$/;
 
 export class BuildInputError extends Error {}
@@ -93,10 +96,10 @@ mkdir -p "\${HOME}"
 git init -q /workspace/src
 cd /workspace/src
 export GIT_CONFIG_COUNT=1
-export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+export GIT_CONFIG_KEY_0="http.\${GIT_BASE}/.extraheader"
 GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "\${GITHUB_TOKEN}" | base64 | tr -d '\\n')"
 export GIT_CONFIG_VALUE_0
-git fetch -q --depth 1 "https://github.com/\${REPO}.git" "\${SHA}"
+git fetch -q --depth 1 "\${GIT_BASE}/\${REPO}.git" "\${SHA}"
 unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GITHUB_TOKEN
 git checkout -q --detach FETCH_HEAD
 git show -s --format=%cI HEAD > /workspace/build-time
@@ -127,6 +130,8 @@ const env = (pairs: Record<string, string>) => Object.entries(pairs).map(([name,
 
 export function buildJob(input: BuildInput, options: BuilderOptions): Record<string, unknown> {
   validateBuildInput(input);
+  const gitBase = options.gitBaseUrl ?? "https://github.com";
+  if (!GIT_BASE.test(gitBase)) throw new BuildInputError(`gitBaseUrl "${gitBase}" is not an http(s) base URL`);
   const images = options.images ?? DEFAULT_IMAGES;
   const short = input.sha.slice(0, 7);
   const image = `${input.imageRepository}:${short}`;
@@ -177,7 +182,7 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
               image: images.git,
               command: ["sh", "-c", CLONE_SCRIPT],
               env: [
-                ...env({ REPO: input.repo, SHA: input.sha, HOME: "/workspace/home" }),
+                ...env({ GIT_BASE: gitBase, REPO: input.repo, SHA: input.sha, HOME: "/workspace/home" }),
                 {
                   name: "GITHUB_TOKEN",
                   valueFrom: { secretKeyRef: { name: options.cloneSecret, key: "token" } },
