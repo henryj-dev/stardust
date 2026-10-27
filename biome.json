@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/.svelte-kit", "!**/build", "!pnpm-lock.yaml"]
+    "includes": ["**", "!**/.svelte-kit", "!**/build", "!pnpm-lock.yaml", "!charts/*/templates"]
   },
   "formatter": {
     "indentStyle": "space",

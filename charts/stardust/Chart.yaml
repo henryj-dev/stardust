@@ -1,0 +1,12 @@
+apiVersion: v2
+name: stardust
+description: GitOps delivery platform for Kubernetes.
+type: application
+# Both versions are rewritten by the release workflow from the signed tag.
+version: 0.0.0
+appVersion: "0.0.0"
+home: https://github.com/henryj-dev/stardust
+sources:
+  - https://github.com/henryj-dev/stardust
+annotations:
+  artifacthub.io/license: Apache-2.0

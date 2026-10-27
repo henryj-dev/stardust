@@ -1,0 +1,60 @@
+{{- if .Values.web.enabled }}
+{{- $port := int (default 3000 .Values.web.port) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "stardust.fullname" . }}-web
+  labels:
+    {{- include "stardust.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      {{- include "stardust.selectorLabels" (list . "web") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "stardust.selectorLabels" (list . "web") | nindent 8 }}
+    spec:
+      {{- include "stardust.podCommon" . | nindent 6 }}
+      containers:
+        - name: web
+          image: {{ include "stardust.image" (list . "web") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: PORT
+              value: {{ $port | quote }}
+          ports:
+            - name: http
+              containerPort: {{ $port }}
+          readinessProbe:
+            httpGet: { path: /, port: http }
+          livenessProbe:
+            httpGet: { path: /, port: http }
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "stardust.fullname" . }}-web
+  labels:
+    {{- include "stardust.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  selector:
+    {{- include "stardust.selectorLabels" (list . "web") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $port }}
+      targetPort: http
+{{- end }}

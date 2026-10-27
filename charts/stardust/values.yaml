@@ -1,0 +1,72 @@
+# Images. The release workflow writes each component's digest; when a digest
+# is set it is used instead of the tag, so a released chart pins its images.
+image:
+  registry: ghcr.io/henryj-dev
+  pullPolicy: IfNotPresent
+  server:
+    repository: stardust-server
+    tag: "" # defaults to the chart's appVersion
+    digest: ""
+  worker:
+    repository: stardust-worker
+    tag: ""
+    digest: ""
+  web:
+    repository: stardust-web
+    tag: ""
+    digest: ""
+
+imagePullSecrets: []
+
+# Rendered verbatim as stardust.yaml. Secrets are references only
+# ({ env: NAME } or { file: PATH }); a plain-text secret is rejected by the
+# values schema and again by the server at start-up.
+config:
+  version: 1
+  server:
+    port: 8080
+    publicUrl: https://stardust.example.com
+  database:
+    url: { env: DATABASE_URL }
+  plugins: {}
+
+# Existing Secret holding the PostgreSQL connection URL. Required.
+database:
+  existingSecret: ""
+  key: url
+
+server:
+  replicas: 1
+  resources: {}
+
+worker:
+  replicas: 1
+  resources: {}
+
+web:
+  enabled: true
+  replicas: 1
+  port: 3000
+  resources: {}
+
+serviceAccount:
+  create: true
+  name: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
