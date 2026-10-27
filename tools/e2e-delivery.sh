@@ -67,7 +67,9 @@ CLUSTER="$CLUSTER" "$here/examples/kind/up.sh"
 
 # ---------------------------------------------------------------- gitea
 step gitea "Gitea with an admin token"
-kubectl apply -f "$fixtures/gitea.yaml" >/dev/null
+SERVER_IP="$(kubectl -n stardust get svc stardust-server -o jsonpath='{.spec.clusterIP}')"
+[ -n "$SERVER_IP" ] || fail gitea "stardust-server has no cluster IP"
+sed "s/STARDUST_SERVER_IP/$SERVER_IP/" "$fixtures/gitea.yaml" | kubectl apply -f - >/dev/null
 kubectl -n git rollout status deploy/gitea --timeout=300s
 kubectl -n git exec deploy/gitea -- gitea admin user create --admin --username e2e \
   --password "e2e-$(openssl rand -hex 8)" --email e2e@example.com --must-change-password=false >/dev/null
@@ -180,14 +182,17 @@ SHA="$(git -C "$work/app" rev-parse HEAD)"
 
 step run "the run for ${SHA:0:7} finishes"
 run_status() { sapi http://127.0.0.1:18080/api/v1/projects/demo/runs | jq -r --arg sha "$SHA" '.runs[] | select(.sha == $sha) | .status'; }
-for _ in $(seq 1 180); do
+for i in $(seq 1 180); do
   status="$(run_status || true)"
   case "$status" in success | failed | cancelled) break ;; esac
+  # A run that has not started within three minutes never will.
+  if [ -z "$status" ] && [ "$i" -ge 36 ]; then break; fi
   sleep 5
 done
 runs="$(sapi http://127.0.0.1:18080/api/v1/projects/demo/runs)"
 [ "${status:-}" = "success" ] || {
   echo "$runs" | jq --arg sha "$SHA" '.runs[] | select(.sha == $sha)' >&2
+  kubectl -n stardust logs deploy/stardust-server --tail=50 >&2 || true
   kubectl -n stardust logs deploy/stardust-worker --tail=50 >&2 || true
   fail run "the run ended as '${status:-never started}'"
 }

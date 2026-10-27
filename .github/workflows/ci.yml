@@ -177,3 +177,4 @@ jobs:
           kubectl -n stardust logs deploy/stardust-worker --tail=100 || true
           kubectl -n stardust-builds logs -l app.kubernetes.io/component=build --all-containers --tail=100 || true
           kubectl -n flux-system get gitrepositories,kustomizations -o yaml || true
+          kubectl -n git logs deploy/gitea --tail=200 || true

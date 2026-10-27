@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { evaluateOn, PipelineDefError, pipelineDefFromComponents } from "@stardust/core";
+import { evaluateOn, type Logger, PipelineDefError, pipelineDefFromComponents } from "@stardust/core";
 import { getProject, listRuns, type Project, ProjectError, putProject, type Sql, startRun } from "@stardust/db";
 import {
   type CompareResult,
@@ -28,7 +28,10 @@ export interface Services {
   events?: RunEvents;
   /** Interval of SSE heartbeats, so proxies keep idle streams open. */
   heartbeatMs?: number;
+  log?: Logger;
 }
+
+const silent: Logger = { debug() {}, info() {}, warn() {}, error() {} };
 
 const digest = (s: string) => createHash("sha256").update(s).digest();
 function bearerMatches(header: string | undefined, token: string): boolean {
@@ -42,17 +45,27 @@ export function createApp(info: AppInfo, services?: Services): Hono {
   app.get("/healthz", (c) => c.json({ status: "ok", version: info.version }));
   if (!services) return app;
   const { sql } = services;
+  const log = services.log ?? silent;
 
   app.post("/webhooks/github/:project", async (c) => {
-    const project = await getProject(sql, c.req.param("project"));
-    if (!project) return c.json({ error: "unknown project" }, 404);
+    const projectId = c.req.param("project");
+    const event = c.req.header("x-github-event");
+    const delivery = c.req.header("x-github-delivery");
+    const project = await getProject(sql, projectId);
+    if (!project) {
+      log.warn("webhook for an unknown project", { project: projectId, event, delivery });
+      return c.json({ error: "unknown project" }, 404);
+    }
 
     const read = await readBoundedBody(c.req.raw);
-    if ("tooLarge" in read) return c.json({ error: "payload too large" }, 413);
+    if ("tooLarge" in read) {
+      log.warn("webhook payload too large", { project: projectId, event, delivery });
+      return c.json({ error: "payload too large" }, 413);
+    }
     if (!verifySignature(read.body, c.req.header("x-hub-signature-256"), services.webhookSecret)) {
+      log.warn("webhook signature rejected", { project: projectId, event, delivery });
       return c.json({ error: "invalid signature" }, 401);
     }
-    const event = c.req.header("x-github-event");
     if (event === "ping") return c.json({ pong: true });
 
     let payload: Record<string, unknown>;
@@ -63,7 +76,10 @@ export function createApp(info: AppInfo, services?: Services): Hono {
     }
 
     const decision = decideWebhook(event, payload, POLICY[project.webhookKind], project);
-    if (decision.action === "ignore") return c.json({ ignored: true, reason: decision.reason }, 202);
+    if (decision.action === "ignore") {
+      log.info("webhook ignored", { project: projectId, event, delivery, reason: decision.reason });
+      return c.json({ ignored: true, reason: decision.reason }, 202);
+    }
 
     const def = project.pipelineDef ?? pipelineDefFromComponents(project.components);
     const ctx = {
@@ -72,7 +88,9 @@ export function createApp(info: AppInfo, services?: Services): Hono {
       ...(decision.baseBranch !== undefined ? { baseBranch: decision.baseBranch } : {}),
     };
     if (!evaluateOn(def, decision.event, ctx)) {
-      return c.json({ ignored: true, reason: `no trigger matches ${decision.event} ${decision.ref}` }, 202);
+      const reason = `no trigger matches ${decision.event} ${decision.ref}`;
+      log.info("webhook ignored", { project: projectId, event, delivery, reason });
+      return c.json({ ignored: true, reason }, 202);
     }
 
     let changedPaths: string[] | null = null;
@@ -84,6 +102,7 @@ export function createApp(info: AppInfo, services?: Services): Hono {
           repo ? services.compare(repo, base, head) : Promise.reject(new Error("project has no repository")),
       });
       changedPaths = resolved.paths;
+      if (resolved.fallback) log.info("changed paths from the commits", { project: projectId, why: resolved.fallback });
     }
 
     const runId = await startRun(sql, {
@@ -95,6 +114,7 @@ export function createApp(info: AppInfo, services?: Services): Hono {
       def,
       changedPaths,
     });
+    log.info("run started", { project: projectId, event, delivery, run: runId, ref: decision.ref, sha: decision.sha });
     return c.json({ runId }, 201);
   });
 

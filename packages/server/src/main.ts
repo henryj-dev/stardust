@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/config";
-import { createPluginRegistry } from "@stardust/core";
+import { createPluginRegistry, type Logger } from "@stardust/core";
 import { connect, migrate } from "@stardust/db";
 import { plugin as sourceGithub } from "@stardust/plugin-source-github";
 import { createApp, type Services } from "./app.ts";
@@ -8,6 +8,13 @@ import { RunEvents } from "./events.ts";
 import { compareApi } from "./source.ts";
 
 const configPath = process.env.STARDUST_CONFIG ?? "stardust.yaml";
+
+const log: Logger = {
+  debug: (message, fields) => console.debug(JSON.stringify({ level: "debug", message, ...fields })),
+  info: (message, fields) => console.log(JSON.stringify({ level: "info", message, ...fields })),
+  warn: (message, fields) => console.warn(JSON.stringify({ level: "warn", message, ...fields })),
+  error: (message, fields) => console.error(JSON.stringify({ level: "error", message, ...fields })),
+};
 
 let config: StardustConfig;
 let services: Services | undefined;
@@ -36,6 +43,7 @@ if (source && config.server.adminToken) {
   const events = new RunEvents(sql);
   await events.start();
   services = {
+    log,
     events,
     sql,
     adminToken: config.server.adminToken,

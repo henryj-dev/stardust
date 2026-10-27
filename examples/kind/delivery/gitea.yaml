@@ -1,5 +1,5 @@
 # A throwaway Gitea for the delivery test: sqlite, no persistence, webhooks
-# allowed to private addresses (stardust runs in the same cluster).
+# allowed to stardust's service address only.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -26,7 +26,9 @@ spec:
             - { name: GITEA__server__ROOT_URL, value: "http://gitea.git.svc.cluster.local:3000/" }
             - { name: GITEA__server__DOMAIN, value: "gitea.git.svc.cluster.local" }
             - { name: GITEA__database__DB_TYPE, value: "sqlite3" }
-            - { name: GITEA__webhook__ALLOWED_HOST_LIST, value: "*" }
+            # Gitea refuses webhooks to private addresses unless they are listed by
+            # IP; the test puts stardust's service IP here and nothing else.
+            - { name: GITEA__security__ALLOWED_HOST_LIST, value: "STARDUST_SERVER_IP" }
             - { name: GITEA__service__DISABLE_REGISTRATION, value: "true" }
           ports:
             - containerPort: 3000
