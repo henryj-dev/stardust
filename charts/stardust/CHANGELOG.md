@@ -1,5 +1,15 @@
 # stardust
 
+## 0.2.0
+
+### Minor Changes
+
+- [`781c746`](https://github.com/henryj-dev/stardust/commit/781c746daebdfed128397995553de05c5f5295ca) Thanks [@mack-erel](https://github.com/mack-erel)! - Administrators change users with `PATCH /api/v1/users/:username`: link or unlink an OpenID identity, grant or remove administration, disable (which ends the user's sessions and API tokens). A change that would leave no enabled administrator is refused.
+
+- [`f1ab747`](https://github.com/henryj-dev/stardust/commit/f1ab747975588be17bb40fe253f0c9bcd029011e) Thanks [@mack-erel](https://github.com/mack-erel)! - `POST /api/v1/projects/:id/plan` reports what a webhook delivery would do without doing it: the same policy, trigger and changed-path decision the webhook makes, and whether each job would run or be skipped. For running a new installation in the shadow of an existing one, and for checking a pipeline definition. A candidate `pipelineDef` in the request is judged instead of the stored one.
+
+- [`2d79583`](https://github.com/henryj-dev/stardust/commit/2d79583bedf76a70668a85fe8cae327916008ec0) Thanks [@mack-erel](https://github.com/mack-erel)! - Read projects and users through the API: `GET /api/v1/projects` (all for administrators, memberships for others), `GET /api/v1/projects/:id`, and `GET /api/v1/users` (administrators; roles and linked identities, never password hashes).
+
 ## 0.1.1
 
 ### Patch Changes
