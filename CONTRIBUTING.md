@@ -14,6 +14,14 @@ pnpm run check
 request is reviewed. It runs, in order: `typecheck`, `lint`, `deps`
 (boundary rules), `test`, and the dashboard's `svelte-check`.
 
+CI also builds the three images and runs two scripts you can run locally
+with Docker:
+
+- `tools/smoke-image.sh <server|worker|web> <image>` — the image refuses an
+  invalid configuration and starts with a valid one.
+- `tools/scan-secrets.sh` — scans the git history with gitleaks, after proving
+  on a generated fake token that the scanner detects anything at all.
+
 ## Boundaries
 
 `.dependency-cruiser.cjs` enforces:
