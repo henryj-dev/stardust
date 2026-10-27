@@ -50,11 +50,11 @@ function kube(final: Record<string, unknown>, log: string) {
   return { client, created };
 }
 
-async function runOnce(client: KubeClient, repo: MemoryRepo) {
+async function runOnce(client: KubeClient, repo: MemoryRepo, event = "workflow_dispatch") {
   const runId = await startRun(db.sql, {
     projectId: "demo",
-    event: "workflow_dispatch",
-    trigger: "manual",
+    event,
+    trigger: event === "pull_request" ? "pull_request" : "manual",
     ref: "refs/heads/main",
     sha: SHA,
     def: { on: { workflow_dispatch: {} }, jobs: { api: { pipeline: "C", component: "api" } } },
@@ -95,6 +95,17 @@ describe("buildHandler", () => {
     const env = JSON.stringify(created[0]);
     assert.ok(env.includes('"IMAGE","value":"registry.example.com/demo/api:abcdef1"'));
     assert.ok(env.includes('"CONTEXT","value":"api"'));
+  });
+
+  it("a pull request is built but never deployed", async () => {
+    const repo = new MemoryRepo({ [`${DIR}/deployment.yaml`]: "image: registry.example.com/demo/api:old\n" });
+    const { client, created } = kube({ succeeded: 1 }, `[stardust-image-digest] ${DIGEST}\n`);
+    const { result, row } = await runOnce(client, repo, "pull_request");
+    assert.equal(result, "success");
+    assert.equal(created.length, 1, "it was built");
+    assert.equal(row?.detail.digest, DIGEST);
+    assert.match(String(row?.detail.deploy), /not deployed/);
+    assert.equal(repo.commitCount(), 0);
   });
 
   it("a failed build fails the job and leaves the deploy repository alone", async () => {

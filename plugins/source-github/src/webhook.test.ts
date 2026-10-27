@@ -51,13 +51,15 @@ describe("verifySignature", () => {
 });
 
 describe("POLICY", () => {
-  it("matches the predecessor's exported policy table exactly", () => {
+  it("matches the predecessor's exported policy table, except that workspace projects refuse forks", () => {
     // Copied from the predecessor's __fixtures__/webhook-policy.json.
     const predecessor = {
       repo: { skipDisabled: true, skipSelfCommit: true, skipCi: true, judgeForkPr: true },
       workspace: { skipDisabled: true, skipSelfCommit: false, skipCi: true, judgeForkPr: false },
     };
-    assert.deepEqual(JSON.parse(JSON.stringify(POLICY)), predecessor);
+    // The one deliberate difference: a fork's pull request must not build in a workspace project either.
+    const expected = { ...predecessor, workspace: { ...predecessor.workspace, judgeForkPr: true } };
+    assert.deepEqual(JSON.parse(JSON.stringify(POLICY)), expected);
   });
   it("keeps the predecessor's patterns", () => {
     assert.equal(SELF_COMMIT_RE.source, "^chore\\([^/]+\\/[^)]+\\): (image|env) -> ");
@@ -268,13 +270,19 @@ describe("decideWebhook", () => {
     assert.equal(d.action, "ignore");
     assert.ok(d.action === "ignore" && d.reason.startsWith("fork pull request"));
   });
-  it("control: with the check off (workspace policy) the same pull request would run", () => {
-    const d = decideWebhook("pull_request", forkPr, POLICY.workspace, {});
+  it("workspace projects refuse a fork's pull request too", () => {
+    assert.equal(decideWebhook("pull_request", forkPr, POLICY.workspace, {}).action, "ignore");
+  });
+  it("control: with the check off the same pull request would run", () => {
+    const d = decideWebhook("pull_request", forkPr, { ...POLICY.workspace, judgeForkPr: false }, {});
     assert.ok(d.action === "run" && d.ref === "refs/pull/7/head" && d.baseBranch === "main");
   });
   it("only opened, synchronize and reopened pull requests build", () => {
     for (const action of ["closed", "edited", "labeled"]) {
-      assert.equal(decideWebhook("pull_request", { ...forkPr, action }, POLICY.workspace, {}).action, "ignore");
+      assert.equal(
+        decideWebhook("pull_request", { ...forkPr, action }, { ...POLICY.workspace, judgeForkPr: false }, {}).action,
+        "ignore",
+      );
     }
   });
   it("deleted refs and other events are ignored", () => {

@@ -64,6 +64,14 @@ export function buildHandler(deps: BuildHandlerDeps): JobHandler {
     }
     detail.digest = outcome.digest;
 
+    // A pull request is built so its result can be seen, never deployed: its
+    // head is unreviewed code, possibly from someone without push access.
+    if (job.event === "pull_request") {
+      detail.deploy = "skipped: pull requests are built, not deployed";
+      deps.log.info("built pull request", { job: job.id, component: component.name, digest: outcome.digest });
+      return { result: "success", detail };
+    }
+
     const bump = await bumpImage(deps.deployRepo, {
       dir: component.deployDir,
       project: project.id,

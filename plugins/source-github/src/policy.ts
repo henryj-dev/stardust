@@ -20,7 +20,9 @@ export interface WebhookPolicy {
 
 export const POLICY = {
   repo: { skipDisabled: true, skipSelfCommit: true, skipCi: true, judgeForkPr: true },
-  workspace: { skipDisabled: true, skipSelfCommit: false, skipCi: true, judgeForkPr: false },
+  // The predecessor did not judge forks for workspace projects. That let a fork's
+  // pull request build with cluster credentials; refusing them is a deliberate difference.
+  workspace: { skipDisabled: true, skipSelfCommit: false, skipCi: true, judgeForkPr: true },
 } as const satisfies Record<"repo" | "workspace", WebhookPolicy>;
 
 export type WebhookKind = keyof typeof POLICY;

@@ -15,6 +15,8 @@ export interface ClaimedJob {
   name: string;
   attempt: number;
   projectId: string;
+  /** The run's event: push, pull_request, workflow_dispatch… */
+  event: string;
   ref: string;
   sha: string;
   def: JobDef;
@@ -35,6 +37,7 @@ export async function claimJob(
       name: string;
       attempt: number;
       project_id: string;
+      event: string;
       ref: string;
       sha: string;
       job_def: JobDef;
@@ -55,7 +58,7 @@ export async function claimJob(
       FROM next WHERE jobs.id = next.id
       RETURNING jobs.id, jobs.run_id, jobs.name, jobs.attempt
     )
-    SELECT claimed.*, runs.project_id, runs.ref, runs.sha, runs.def -> 'jobs' -> claimed.name AS job_def
+    SELECT claimed.*, runs.project_id, runs.event, runs.ref, runs.sha, runs.def -> 'jobs' -> claimed.name AS job_def
     FROM claimed JOIN runs ON runs.id = claimed.run_id`;
   if (!row) return null;
   return {
@@ -64,6 +67,7 @@ export async function claimJob(
     name: row.name,
     attempt: row.attempt,
     projectId: row.project_id,
+    event: row.event,
     ref: row.ref,
     sha: row.sha,
     def: row.job_def,
