@@ -26,7 +26,10 @@ const AGE_RECIPIENT = /^age1[0-9a-z]{58}$/;
 
 function run(opts: SopsOptions, args: string[], input: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(opts.bin ?? "sops", args, {
+    // sops reads /dev/stdin, which must be a real pipe: on Linux, Node hands a
+    // child a socket for stdin and opening /dev/stdin on it fails (ENXIO). `cat |`
+    // makes the pipe. The binary and arguments are positional, never spliced in.
+    const child = spawn("sh", ["-c", 'cat | "$0" "$@"', opts.bin ?? "sops", ...args], {
       env: {
         PATH: process.env.PATH,
         HOME: process.env.HOME,
