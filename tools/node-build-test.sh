@@ -61,6 +61,9 @@ expect build-env-not-evaluated "b.seen.TRICKY === $(node -e 'console.log(JSON.st
 expect install-scripts-do-not-run 'b.seen.postinstallRan === false'
 user="$(docker run --rm --entrypoint id stardust-node-fixture-default -u)"
 if [ "$user" != 0 ]; then ok runs-as-non-root; else fail runs-as-non-root "uid $user"; fi
+# Kubernetes with runAsNonRoot checks the image's configured user, and only a number passes.
+configured="$(docker image inspect stardust-node-fixture-default --format '{{.Config.User}}')"
+if [[ "$configured" =~ ^[1-9][0-9]*(:[0-9]+)?$ ]]; then ok user-is-numeric; else fail user-is-numeric "image user is '$configured'"; fi
 
 body="$(serve custom-server 8124)"
 expect server-js-preferred 'b.entry === "server.js" && b.note === "shutdown.js was copied"'

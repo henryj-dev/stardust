@@ -185,7 +185,9 @@ COPY --from=build /app/package.json /app/server.js* /app/shutdown.js* ./
 COPY --from=build /app/node_modules ./node_modules
 ENV NODE_ENV=production PORT=\${PORT}
 EXPOSE \${PORT}
-USER node
+# By number, not by name: with runAsNonRoot, Kubernetes refuses an image whose
+# user it cannot tell is not root (the official images' "node" is 1000).
+USER 1000:1000
 CMD ["sh", "-c", "if [ -f server.js ]; then exec node server.js; else exec node build/index.js; fi"]
 `;
 
