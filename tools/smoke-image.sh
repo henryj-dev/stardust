@@ -29,6 +29,17 @@ wait_http() { # <port> <path>
   return 1
 }
 
+# Stops the running container with SIGTERM and requires a clean exit well
+# before docker's 10s kill. PID 1 ignores SIGTERM unless the process handles it.
+stop_gracefully() { # <layer>
+  docker stop --time 10 "$name" >/dev/null
+  local code
+  code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
+  [ "$code" = "0" ] || fail "$1" "expected exit 0 after SIGTERM, got $code"
+  docker logs "$name" 2>&1 | grep -q "stopping (SIGTERM)" || fail "$1" "no shutdown log line"
+  echo "ok   [$1]"
+}
+
 case "$target" in
   server)
     # Layer 1: invalid configuration is refused inside the image.
@@ -43,20 +54,31 @@ case "$target" in
     wait_http 18080 /healthz || fail healthz "GET /healthz did not answer"
     curl -fsS http://127.0.0.1:18080/healthz | grep -q '"status":"ok"' || fail healthz "unexpected /healthz body"
     echo "ok   [healthz]"
+    stop_gracefully server-sigterm
     ;;
   worker)
-    if ! out="$(docker run --rm -e DATABASE_URL=postgres://smoke \
-      -v "$config:/etc/stardust/stardust.yaml:ro" "$image" 2>&1)"; then
-      fail worker-start "exited non-zero: $out"
-    fi
-    grep -q "stardust worker started" <<<"$out" || fail worker-start "unexpected output: $out"
+    docker run -d --name "$name" -e DATABASE_URL=postgres://smoke \
+      -v "$config:/etc/stardust/stardust.yaml:ro" "$image" >/dev/null
+    started=""
+    for _ in $(seq 1 15); do
+      if docker logs "$name" 2>&1 | grep -q "stardust worker started"; then started=1; break; fi
+      sleep 1
+    done
+    [ -n "$started" ] || fail worker-start "no start-up log line"
+    sleep 2
+    [ "$(docker inspect --format '{{.State.Running}}' "$name")" = "true" ] || fail worker-start "worker exited on its own"
     echo "ok   [worker-start]"
+    stop_gracefully worker-sigterm
     ;;
   web)
     docker run -d --name "$name" -p 127.0.0.1:13000:3000 "$image" >/dev/null
     wait_http 13000 / || fail web-root "GET / did not answer"
     curl -fsS http://127.0.0.1:13000/ | grep -q "<title>stardust</title>" || fail web-root "page has no title"
     echo "ok   [web-root]"
+    docker stop --time 10 "$name" >/dev/null
+    code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
+    [ "$code" = "0" ] || fail web-sigterm "expected exit 0 after SIGTERM, got $code"
+    echo "ok   [web-sigterm]"
     ;;
   *)
     echo "usage: $0 <server|worker|web> <image>" >&2
