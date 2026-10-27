@@ -45,6 +45,18 @@ stop_gracefully() { # <layer>
   echo "ok   [$1]"
 }
 
+# A throwaway PostgreSQL on a private network; both processes migrate it at start.
+start_pg() {
+  docker network create "$net" >/dev/null
+  docker run -d --name "$pg" --network "$net" -e POSTGRES_PASSWORD=smoke "$PG_IMAGE" >/dev/null
+  for _ in $(seq 1 30); do
+    docker exec "$pg" pg_isready -U postgres >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  fail postgres "the test database did not start"
+}
+DB_URL="postgres://postgres:smoke@$pg:5432/postgres"
+
 case "$target" in
   server)
     # Layer 1: invalid configuration is refused inside the image.
@@ -54,7 +66,8 @@ case "$target" in
     fi
     echo "ok   [config-refused]"
     # Layer 2: valid configuration starts and serves /healthz.
-    docker run -d --name "$name" -p 127.0.0.1:18080:8080 -e DATABASE_URL=postgres://smoke \
+    start_pg
+    docker run -d --name "$name" --network "$net" -p 127.0.0.1:18080:8080 -e DATABASE_URL="$DB_URL" \
       -v "$config:/etc/stardust/stardust.yaml:ro" "$image" >/dev/null
     wait_http 18080 /healthz || fail healthz "GET /healthz did not answer"
     curl -fsS http://127.0.0.1:18080/healthz | grep -q '"status":"ok"' || fail healthz "unexpected /healthz body"
@@ -63,14 +76,9 @@ case "$target" in
     ;;
   worker)
     # The worker needs a real database: it migrates it and polls the queue.
-    docker network create "$net" >/dev/null
-    docker run -d --name "$pg" --network "$net" -e POSTGRES_PASSWORD=smoke "$PG_IMAGE" >/dev/null
-    for _ in $(seq 1 30); do
-      docker exec "$pg" pg_isready -U postgres >/dev/null 2>&1 && break
-      sleep 1
-    done
+    start_pg
     docker run -d --name "$name" --network "$net" \
-      -e DATABASE_URL="postgres://postgres:smoke@$pg:5432/postgres" \
+      -e DATABASE_URL="$DB_URL" \
       -v "$config:/etc/stardust/stardust.yaml:ro" "$image" >/dev/null
     started=""
     for _ in $(seq 1 30); do

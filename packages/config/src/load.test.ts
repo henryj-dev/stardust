@@ -33,6 +33,14 @@ describe("parseConfig", () => {
     assert.deepEqual(config.plugins, { "source-github": {} });
   });
 
+  it("resolves an optional admin token reference", async () => {
+    const text = VALID.replace("  publicUrl:", "  adminToken: { env: ADMIN }\n  publicUrl:");
+    const config = await parseConfig(text, "test.yaml", { env: { ...env, ADMIN: "t0ken" } });
+    assert.equal(config.server.adminToken, "t0ken");
+    const missing = await issuesOf(text);
+    assert.deepEqual(missing, ["server.adminToken: environment variable ADMIN is not set"]);
+  });
+
   it("reads a secret from a file reference", async () => {
     const text = VALID.replace("{ env: DATABASE_URL }", "{ file: /run/secrets/db }");
     const config = await parseConfig(text, "test.yaml", {

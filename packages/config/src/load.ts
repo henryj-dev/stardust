@@ -51,11 +51,19 @@ export async function parseConfig(
 
   const issues: ConfigIssue[] = [];
   const databaseUrl = await resolveSecret(raw.database.url, "database.url", env, readSecretFile, issues);
+  const adminToken = raw.server.adminToken
+    ? await resolveSecret(raw.server.adminToken, "server.adminToken", env, readSecretFile, issues)
+    : undefined;
   if (issues.length > 0 || databaseUrl === undefined) {
     throw new ConfigError(source, issues);
   }
 
-  return { ...raw, database: { url: databaseUrl } };
+  const { adminToken: _ref, ...server } = raw.server;
+  return {
+    ...raw,
+    server: adminToken === undefined ? server : { ...server, adminToken },
+    database: { url: databaseUrl },
+  };
 }
 
 /** Reads and validates a stardust.yaml file. */

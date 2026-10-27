@@ -217,6 +217,15 @@ importers:
       '@stardust/config':
         specifier: workspace:*
         version: link:../config
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../core
+      '@stardust/db':
+        specifier: workspace:*
+        version: link:../db
+      '@stardust/plugin-source-github':
+        specifier: workspace:*
+        version: link:../../plugins/source-github
       hono:
         specifier: ^4.13.14
         version: 4.13.14
