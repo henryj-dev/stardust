@@ -1,5 +1,11 @@
 # stardust
 
+## 0.3.0
+
+### Minor Changes
+
+- [`8b2cde6`](https://github.com/henryj-dev/stardust/commit/8b2cde6e2c25b0378d007ca2c50bfaabb79378a9) Thanks [@mack-erel](https://github.com/mack-erel)! - Pipeline N builds: a Node application without a Dockerfile of its own is built with its lockfile's package manager and run from `build/` (or its own `server.js`). Components take `port` and `buildEnv` for it. The Dockerfile is a constant; the Node image, port and build environment reach it only as build arguments.
+
 ## 0.2.0
 
 ### Minor Changes
