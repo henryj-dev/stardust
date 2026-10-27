@@ -31,6 +31,16 @@ export interface RunView {
   jobs: JobView[];
 }
 
+export interface ProjectView {
+  id: string;
+  name: string;
+  githubRepo: string | null;
+  pipelineDef: unknown;
+  components: Array<{ name: string; pipeline: string; context?: string; dockerfile?: string; deployDir: string }>;
+  metadata: Record<string, unknown>;
+  webhookKind: "repo" | "workspace";
+}
+
 export class ApiError extends Error {
   readonly status: number;
 
@@ -67,6 +77,10 @@ export interface Client {
   /** True when the token is accepted. */
   checkToken(): Promise<boolean>;
   runs(projectId: string): Promise<RunView[]>;
+  /** Projects the caller may read. */
+  projects(): Promise<ProjectView[]>;
+  /** One project; an ApiError with status 404 when it does not exist or cannot be read. */
+  project(id: string): Promise<ProjectView>;
   /** The raw server-sent event stream of a project's runs. */
   events(projectId: string, signal?: AbortSignal): Promise<Response>;
 }
@@ -136,6 +150,12 @@ export function createClient(options: ClientOptions): Client {
         if (err instanceof ApiError && err.status === 401) return false;
         throw err;
       }
+    },
+    async projects() {
+      return ((await (await get("/api/v1/projects")).json()) as { projects: ProjectView[] }).projects;
+    },
+    async project(id) {
+      return (await (await get(`/api/v1/projects/${encodeURIComponent(id)}`)).json()) as ProjectView;
     },
     async runs(projectId) {
       const body = (await (await get(`/api/v1/projects/${encodeURIComponent(projectId)}/runs`)).json()) as {

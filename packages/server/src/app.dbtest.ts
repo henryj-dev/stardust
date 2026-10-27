@@ -223,6 +223,45 @@ describe("API tokens", () => {
   });
 });
 
+describe("reading projects and users", () => {
+  it("administrators list every project; others only their memberships; a project reads back as it was put", async () => {
+    const all = (await (await app.request("/api/v1/projects", { headers: admin })).json()) as {
+      projects: { id: string }[];
+    };
+    assert.ok(all.projects.some((p) => p.id === "demo"));
+    const viewer = { authorization: `Bearer ${await sessionFor("viewer")}` };
+    const mine = (await (await app.request("/api/v1/projects", { headers: viewer })).json()) as {
+      projects: { id: string }[];
+    };
+    assert.deepEqual(
+      mine.projects.map((p) => p.id),
+      ["demo"],
+    );
+    const outsider = { authorization: `Bearer ${await sessionFor("outsider")}` };
+    const none = (await (await app.request("/api/v1/projects", { headers: outsider })).json()) as {
+      projects: unknown[];
+    };
+    assert.deepEqual(none.projects, []);
+    const one = (await (await app.request("/api/v1/projects/demo", { headers: viewer })).json()) as {
+      githubRepo: string;
+      components: { deployDir: string }[];
+    };
+    assert.equal(one.githubRepo, "acme/demo");
+    assert.equal(one.components[0]?.deployDir, "deploy/demo/api");
+  });
+
+  it("administrators list users with roles and identities, never password hashes", async () => {
+    const res = await app.request("/api/v1/users", { headers: admin });
+    const text = await res.text();
+    assert.equal(res.status, 200);
+    assert.ok(!text.includes("scrypt$"), "no hash");
+    const users = (JSON.parse(text) as { users: { username: string; hasPassword: boolean; roles: unknown[] }[] }).users;
+    const viewer = users.find((u) => u.username === "viewer");
+    assert.deepEqual(viewer?.roles, [{ projectId: "demo", role: "viewer" }]);
+    assert.equal(viewer?.hasPassword, true);
+  });
+});
+
 describe("every API route is guarded", () => {
   // Read from the router itself, so a route added later without a check fails
   // here. Routes open to any signed-in user must be listed with the reason.
@@ -233,6 +272,8 @@ describe("every API route is guarded", () => {
     "GET /api/v1/tokens",
     "POST /api/v1/tokens",
     "DELETE /api/v1/tokens/:tokenId",
+    // Lists only what the caller may read (tested in "reading projects and users").
+    "GET /api/v1/projects",
   ]);
   const PUBLIC = new Set([
     "POST /api/v1/auth/login",

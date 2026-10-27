@@ -290,3 +290,47 @@ export async function setProjectRole(
     INSERT INTO project_members (project_id, user_id, role) VALUES (${projectId}, ${userId}, ${role})
     ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role`;
 }
+
+export interface UserRecord {
+  id: string;
+  username: string;
+  displayName: string;
+  isAdmin: boolean;
+  disabled: boolean;
+  hasPassword: boolean;
+  oidc: { issuer: string; subject: string } | null;
+  roles: Array<{ projectId: string; role: ProjectRole }>;
+}
+
+/** All users with their project roles, for administrators. Never includes password hashes. */
+export async function listUsers(sql: Sql): Promise<UserRecord[]> {
+  const rows = await sql<
+    {
+      id: string;
+      username: string;
+      display_name: string;
+      is_admin: boolean;
+      disabled: boolean;
+      has_password: boolean;
+      oidc_issuer: string | null;
+      oidc_subject: string | null;
+      roles: Array<{ projectId: string; role: ProjectRole }>;
+    }[]
+  >`
+    SELECT u.id, u.username, u.display_name, u.is_admin, u.disabled, u.password_hash IS NOT NULL AS has_password,
+           u.oidc_issuer, u.oidc_subject,
+           COALESCE(json_agg(json_build_object('projectId', m.project_id, 'role', m.role) ORDER BY m.project_id)
+                    FILTER (WHERE m.project_id IS NOT NULL), '[]') AS roles
+    FROM users u LEFT JOIN project_members m ON m.user_id = u.id
+    GROUP BY u.id ORDER BY u.username`;
+  return rows.map((r) => ({
+    id: r.id,
+    username: r.username,
+    displayName: r.display_name,
+    isAdmin: r.is_admin,
+    disabled: r.disabled,
+    hasPassword: r.has_password,
+    oidc: r.oidc_issuer && r.oidc_subject ? { issuer: r.oidc_issuer, subject: r.oidc_subject } : null,
+    roles: r.roles,
+  }));
+}

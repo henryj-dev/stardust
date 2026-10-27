@@ -74,28 +74,43 @@ export async function putProject(sql: Sql, p: Project): Promise<void> {
       updated_at = now()`;
 }
 
+type ProjectRow = {
+  id: string;
+  name: string;
+  github_repo: string | null;
+  pipeline_def: PipelineDef | null;
+  components: Component[];
+  metadata: Record<string, unknown>;
+  webhook_kind: "repo" | "workspace";
+};
+
+const toProject = (row: ProjectRow): Project => ({
+  id: row.id,
+  name: row.name,
+  githubRepo: row.github_repo,
+  pipelineDef: row.pipeline_def,
+  components: row.components,
+  metadata: row.metadata,
+  webhookKind: row.webhook_kind,
+});
+
 export async function getProject(sql: Sql, id: string): Promise<Project | null> {
-  const [row] = await sql<
-    {
-      id: string;
-      name: string;
-      github_repo: string | null;
-      pipeline_def: PipelineDef | null;
-      components: Component[];
-      metadata: Record<string, unknown>;
-      webhook_kind: "repo" | "workspace";
-    }[]
-  >`SELECT id, name, github_repo, pipeline_def, components, metadata, webhook_kind FROM projects WHERE id = ${id}`;
-  if (!row) return null;
-  return {
-    id: row.id,
-    name: row.name,
-    githubRepo: row.github_repo,
-    pipelineDef: row.pipeline_def,
-    components: row.components,
-    metadata: row.metadata,
-    webhookKind: row.webhook_kind,
-  };
+  const [row] = await sql<ProjectRow[]>`
+    SELECT id, name, github_repo, pipeline_def, components, metadata, webhook_kind FROM projects WHERE id = ${id}`;
+  return row ? toProject(row) : null;
+}
+
+/** Every project, or (with a user id) only the ones that user is a member of. Ordered by id. */
+export async function listProjects(sql: Sql, memberOf?: string): Promise<Project[]> {
+  const rows =
+    memberOf === undefined
+      ? await sql<ProjectRow[]>`
+          SELECT id, name, github_repo, pipeline_def, components, metadata, webhook_kind FROM projects ORDER BY id`
+      : await sql<ProjectRow[]>`
+          SELECT p.id, p.name, p.github_repo, p.pipeline_def, p.components, p.metadata, p.webhook_kind
+          FROM projects p JOIN project_members m ON m.project_id = p.id
+          WHERE m.user_id = ${memberOf} ORDER BY p.id`;
+  return rows.map(toProject);
 }
 
 export interface RunView {

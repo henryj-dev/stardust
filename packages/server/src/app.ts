@@ -6,7 +6,9 @@ import {
   createUser,
   getProject,
   listApiTokens,
+  listProjects,
   listRuns,
+  listUsers,
   type Project,
   ProjectError,
   projectRole,
@@ -385,6 +387,25 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       throw err;
     }
     return c.json(await getProject(sql, project.id));
+  });
+
+  // Projects the caller may read: all of them for administrators, else their memberships.
+  app.get("/api/v1/projects", async (c) => {
+    const user = c.get("user");
+    return c.json({ projects: await listProjects(sql, user.isAdmin ? undefined : user.id) });
+  });
+
+  app.get("/api/v1/projects/:id", async (c) => {
+    const denied = await deny(c, "project:read", c.req.param("id"));
+    if (denied) return denied;
+    const project = await getProject(sql, c.req.param("id"));
+    return project ? c.json(project) : c.json({ error: "unknown project" }, 404);
+  });
+
+  app.get("/api/v1/users", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    return c.json({ users: await listUsers(sql) });
   });
 
   app.get("/api/v1/projects/:id/runs", async (c) => {
