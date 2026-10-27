@@ -223,3 +223,13 @@ jobs:
           } >notes.md
           gh release create "v${VERSION}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "v${VERSION}" --notes-file notes.md
+
+  verify:
+    name: verify the release
+    needs: [changesets, publish]
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/verify-release.yml
+    with:
+      version: ${{ needs.changesets.outputs.version }}
