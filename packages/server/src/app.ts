@@ -449,7 +449,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (!project) return c.json({ error: "unknown project" }, 404);
     const read = await readBoundedBody(c.req.raw);
     if ("tooLarge" in read) return c.json({ error: "request body too large" }, 413);
-    let body: { event?: unknown; payload?: unknown; changedPaths?: unknown };
+    let body: { event?: unknown; payload?: unknown; changedPaths?: unknown; pipelineDef?: unknown };
     try {
       body = JSON.parse(read.body) as typeof body;
     } catch {
@@ -462,8 +462,19 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (cp !== undefined && cp !== null && !(Array.isArray(cp) && cp.every((p) => typeof p === "string"))) {
       return c.json({ error: "changedPaths must be a list of paths, or null" }, 400);
     }
+    // A candidate definition is judged instead of the stored one: check a change
+    // before saving it, or replay a recorded delivery with the definition of its day.
+    if (body.pipelineDef !== undefined) {
+      try {
+        loadPipelineDef(body.pipelineDef);
+      } catch (err) {
+        if (err instanceof PipelineDefError) return c.json({ error: err.message }, 422);
+        throw err;
+      }
+    }
+    const judged = body.pipelineDef === undefined ? project : { ...project, pipelineDef: body.pipelineDef as never };
     const plan = await planDelivery({
-      project,
+      project: judged,
       event: body.event,
       payload: body.payload as Record<string, unknown>,
       compare: services.compare,

@@ -560,6 +560,18 @@ describe("planning a delivery", () => {
     );
   });
 
+  it("judges a candidate definition instead of the stored one, and refuses an invalid one", async () => {
+    const candidate = { on: { push: { branches: ["main"] } }, jobs: { api: { pipeline: "C", component: "api" } } };
+    const res = (await (
+      await plan({ event: "push", payload: JSON.parse(push()), changedPaths: ["README.md"], pipelineDef: candidate })
+    ).json()) as {
+      jobs: Record<string, string>;
+    };
+    assert.deepEqual(res.jobs, { api: "run" }, "no path filter in the candidate");
+    const bad = await plan({ event: "push", payload: JSON.parse(push()), changedPaths: [], pipelineDef: { jobs: {} } });
+    assert.equal(bad.status, 422);
+  });
+
   it("reports why nothing would run, and needs write access", async () => {
     const ignored = (await (
       await plan({ event: "push", payload: JSON.parse(push({ ref: "refs/heads/feature" })) })
