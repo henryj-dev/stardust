@@ -79,15 +79,20 @@ plugins:
 ### `source-github`
 
 Receives push and pull-request webhooks at
-`POST /webhooks/github/<project>` and works out what changed. Works with
-GitHub and with hosts that send GitHub-compatible webhooks, such as Gitea.
+`POST /webhooks/github/<project>` and works out what changed, and resolves
+what a [manual run](#manual-runs) builds. Webhooks work with GitHub and with
+hosts that send GitHub-compatible webhooks, such as Gitea; manual runs need
+GitHub's API.
 
-| Key                   |          |                                                                                  |
-| --------------------- | -------- | -------------------------------------------------------------------------------- |
-| `webhookSecret`       | required | Secret the webhook is signed with.                                               |
-| `token`               | one of   | Token for the compare API (a GitHub or Gitea token).                             |
-| `appId`, `privateKey` | one of   | GitHub App credentials. _Not implemented yet; use `token`._                      |
-| `apiBaseUrl`          | optional | Defaults to `https://api.github.com`; Gitea: `https://gitea.example.com/api/v1`. |
+| Key                   |          |                                                                                                       |
+| --------------------- | -------- | ----------------------------------------------------------------------------------------------------- |
+| `webhookSecret`       | optional | Secret the webhook is signed with. Without it no webhook is accepted: runs start only when asked for. |
+| `token`               | optional | Token for the source host's API (a GitHub or Gitea token). Without one, public repositories only.     |
+| `appId`, `privateKey` | optional | GitHub App credentials, instead of `token`. _Not implemented yet._                                    |
+| `apiBaseUrl`          | optional | Defaults to `https://api.github.com`; Gitea: `https://gitea.example.com/api/v1`.                      |
+
+Without a token, GitHub's API answers anonymously at a lower rate limit
+(60 requests an hour per address); a manual run uses one to three.
 
 ### `builder-buildkit`
 
@@ -95,15 +100,15 @@ Builds images in Kubernetes Jobs with rootless BuildKit. Requires
 `builds.enabled: true` in the Helm chart so the worker may create Jobs in
 the builds namespace.
 
-| Key                |          |                                                                                        |
-| ------------------ | -------- | -------------------------------------------------------------------------------------- |
-| `namespace`        | required | Namespace the build Jobs run in.                                                       |
-| `registry`         | required | Registry host and optional path. Images are `<registry>/<project>/<component>`.        |
-| `cloneSecret`      | required | Secret in `namespace` with key `token`: reads the source repository.                   |
-| `pushSecret`       | required | Secret in `namespace` with key `config.json`: a docker config that can push.           |
-| `gitBaseUrl`       | optional | Git host to clone from. Defaults to `https://github.com`.                              |
-| `cloneUsername`    | optional | User name sent with the clone token. GitHub ignores it; Gitea needs the token's owner. |
-| `insecureRegistry` | optional | Push over plain HTTP. For local test registries only.                                  |
+| Key                |          |                                                                                                                                    |
+| ------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `namespace`        | required | Namespace the build Jobs run in.                                                                                                   |
+| `registry`         | required | Registry host and optional path. Images are `<registry>/<project>/<component>`.                                                    |
+| `cloneSecret`      | optional | Secret in `namespace` with key `token`: reads the source repository. Without it the clone is anonymous (public repositories only). |
+| `pushSecret`       | required | Secret in `namespace` with key `config.json`: a docker config that can push.                                                       |
+| `gitBaseUrl`       | optional | Git host to clone from. Defaults to `https://github.com`.                                                                          |
+| `cloneUsername`    | optional | User name sent with the clone token. GitHub ignores it; Gitea needs the token's owner.                                             |
+| `insecureRegistry` | optional | Push over plain HTTP. For local test registries only.                                                                              |
 
 The clone runs in its own container; the build container, which runs the
 Dockerfile, never sees the clone token.
@@ -141,7 +146,8 @@ curl -X PUT https://stardust.example.com/api/v1/projects/demo \
 
 Then point the repository's webhook at
 `https://stardust.example.com/webhooks/github/demo` with the
-`webhookSecret`, for push events.
+`webhookSecret`, for push events — or deliver it only by asking, see
+[Manual runs](#manual-runs).
 
 Every manifest in `deployDir` that references
 `<registry>/demo/api:<tag>` is updated to the new build, pinned by digest.
@@ -172,3 +178,31 @@ build compiles in, such as an adapter; it is not for secrets.
 
 Check a definition before saving it with `POST /api/v1/projects/<id>/plan`,
 which reports what a delivery would run without running it.
+
+### Manual runs
+
+A maintainer of a project (or an administrator) can ask for a commit to be
+built and delivered, from the project's page ("Pull and deliver") or the API:
+
+```sh
+curl -X POST https://stardust.example.com/api/v1/projects/demo/runs \
+  -H "Authorization: Bearer $STARDUST_TOKEN" -H 'content-type: application/json' \
+  -d '{"tag": "v2.7.0"}'
+```
+
+The body names at most one of `branch`, `tag` or `sha` (a full commit hash);
+an empty body takes the head of the default branch. A commit given by hash
+must be in the default branch's history. The run records who asked for it.
+Its definition's `on` block and path filters do not apply: every job runs,
+and the result is delivered.
+
+Set `"webhookKind": "off"` on a project to refuse its webhooks altogether.
+That is the safe way to deliver a public repository, or one you do not
+control: nothing reaches your cluster until someone asks for a specific
+commit, and pinning a tag says exactly which one.
+
+| `webhookKind`    | Webhooks                                              |
+| ---------------- | ----------------------------------------------------- |
+| `repo` (default) | accepted; the repository is the project's own         |
+| `workspace`      | accepted; a monorepo shared with other projects       |
+| `off`            | ignored; the project is delivered by manual runs only |

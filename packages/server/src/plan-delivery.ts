@@ -31,6 +31,7 @@ export async function planDelivery(input: {
   changedPaths?: string[] | null;
 }): Promise<DeliveryPlan> {
   const { project, payload } = input;
+  if (project.webhookKind === "off") return { action: "ignore", reason: "webhooks are off for this project" };
   const decision = decideWebhook(input.event, payload, POLICY[project.webhookKind], project);
   if (decision.action === "ignore") return decision;
 

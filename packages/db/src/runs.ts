@@ -17,6 +17,8 @@ export interface StartRun {
   def: unknown;
   /** Changed paths of a push, for path filters; null when not known. */
   changedPaths: readonly string[] | null;
+  /** The user who asked for a manual run. */
+  requestedBy?: string;
 }
 
 /** Creates a run and its first jobs. Throws PipelineDefError on an invalid definition. */
@@ -24,9 +26,10 @@ export async function startRun(sql: Sql, input: StartRun): Promise<string> {
   const def = loadPipelineDef(input.def);
   return sql.begin(async (tx) => {
     const [run] = await tx<{ id: string }[]>`
-      INSERT INTO runs (project_id, event, trigger, ref, sha, def, changed_paths)
+      INSERT INTO runs (project_id, event, trigger, ref, sha, def, changed_paths, requested_by)
       VALUES (${input.projectId}, ${input.event}, ${input.trigger}, ${input.ref}, ${input.sha},
-              ${tx.json(def as never)}, ${input.changedPaths === null ? null : tx.array([...input.changedPaths])})
+              ${tx.json(def as never)}, ${input.changedPaths === null ? null : tx.array([...input.changedPaths])},
+              ${input.requestedBy ?? null})
       RETURNING id`;
     if (!run) throw new Error("run insert returned no row");
     await advanceRun(tx, run.id);

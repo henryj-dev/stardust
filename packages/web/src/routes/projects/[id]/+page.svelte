@@ -1,7 +1,7 @@
 <script lang="ts">
 import type { RunView } from "@stardust/sdk";
 
-let { data } = $props();
+let { data, form } = $props();
 let runs = $state<RunView[]>([]);
 let live = $state(false);
 
@@ -32,6 +32,20 @@ $effect(() => {
 <main>
   <h1>{data.projectId}</h1>
   <p data-live={live}>{live ? "Live" : "Connecting…"}</p>
+  <form method="POST" action="?/pull" data-pull>
+    <select name="kind" aria-label="What to pull">
+      <option value="branch">Branch</option>
+      <option value="tag">Tag</option>
+      <option value="sha">Commit</option>
+    </select>
+    <input name="ref" placeholder="default branch" aria-label="Branch, tag or commit" />
+    <button type="submit">Pull and deliver</button>
+  </form>
+  {#if form?.pullError}
+    <p role="alert" data-pull-error>{form.pullError}</p>
+  {:else if form?.pulled}
+    <p data-pulled>Started a run for {form.pulled.ref} at <code>{form.pulled.sha.slice(0, 7)}</code>.</p>
+  {/if}
   {#if runs.length === 0}
     <p>No runs yet.</p>
   {:else}
@@ -43,7 +57,7 @@ $effect(() => {
         {#each runs as run (run.id)}
           <tr data-run={run.id} data-status={run.status}>
             <td>{new Date(run.createdAt).toLocaleString()}</td>
-            <td>{run.ref}</td>
+            <td>{run.ref}{#if run.requestedBy}<br /><small>pulled by {run.requestedBy}</small>{/if}</td>
             <td><code>{run.sha.slice(0, 7)}</code></td>
             <td>{run.status}</td>
             <td>

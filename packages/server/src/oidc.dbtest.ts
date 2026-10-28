@@ -38,6 +38,9 @@ async function appWith(rules: AccessRules = {}, autoCreate = true) {
       sql: db.sql,
       webhookSecret: "s",
       compare: async () => ({ files: null }),
+      resolveTarget: async () => {
+        throw new Error("not used here");
+      },
       oidc: { client: async () => client, redirectUri: REDIRECT, displayName: "Test SSO", rules, autoCreate },
     },
   );

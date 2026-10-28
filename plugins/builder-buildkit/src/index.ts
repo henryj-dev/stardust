@@ -19,7 +19,7 @@ const DNS_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
  *   builder-buildkit:
  *     namespace: stardust-builds
  *     registry: registry.example.com/team
- *     cloneSecret: github-clone
+ *     cloneSecret: github-clone       # optional: without it, public repositories only
  *     pushSecret: registry-push
  */
 export const plugin = definePlugin({
@@ -46,8 +46,12 @@ export const plugin = definePlugin({
         problems.push(`unknown key "${key}"`);
       }
     }
-    for (const key of ["namespace", "cloneSecret", "pushSecret"]) {
+    for (const key of ["namespace", "pushSecret"]) {
       if (typeof s[key] !== "string" || !DNS_NAME.test(s[key] as string)) problems.push(`${key} must be a DNS label`);
+    }
+    // Without a clone secret the clone is anonymous: public repositories only.
+    if (s.cloneSecret !== undefined && (typeof s.cloneSecret !== "string" || !DNS_NAME.test(s.cloneSecret))) {
+      problems.push("cloneSecret must be a DNS label");
     }
     if (typeof s.registry !== "string" || !/^[a-z0-9.-]+(:[0-9]+)?(\/[a-z0-9._-]+)*$/.test(s.registry)) {
       problems.push("registry must be a registry host with an optional path, without a tag");

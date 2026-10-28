@@ -25,5 +25,12 @@ it("rejects plain-text secrets, both kinds of credentials, and unknown keys", ()
       .validateConfig({ appId: 1, privateKey: secret, token: secret, webhookSecret: secret })
       .some((p) => p.includes("not both")),
   );
-  assert.ok(plugin.validateConfig({ webhookSecret: secret }).some((p) => p.startsWith("authenticate with")));
+  assert.deepEqual(plugin.validateConfig({ token: "ghp_plain" }), [
+    "token must be a reference: { env: NAME } or { file: PATH }",
+  ]);
+});
+
+it("needs no credentials or webhook secret for public repositories with manual runs only", () => {
+  assert.deepEqual(plugin.validateConfig({}), []);
+  assert.deepEqual(plugin.validateConfig({ apiBaseUrl: "https://api.github.com" }), []);
 });

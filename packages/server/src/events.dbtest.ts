@@ -35,6 +35,9 @@ before(async () => {
       sql: db.sql,
       webhookSecret: "s",
       compare: async () => ({ files: null }),
+      resolveTarget: async () => {
+        throw new Error("not used here");
+      },
       events,
       heartbeatMs: 150,
     },

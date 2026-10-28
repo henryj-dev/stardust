@@ -20,7 +20,8 @@ const isSecretRef = (value: unknown): boolean => {
 /**
  * `plugins.source-github` in stardust.yaml. Authenticate either as a GitHub App
  * or with a token (a GitHub token, or a Gitea token for its GitHub-compatible
- * webhooks), never both:
+ * webhooks), never both — or not at all, for public repositories only. Without
+ * `webhookSecret` no webhook is accepted and runs start only when someone asks:
  *
  *   source-github:
  *     apiBaseUrl: https://api.github.com          # optional
@@ -46,10 +47,10 @@ export const plugin = definePlugin({
     if (app) {
       if (!Number.isInteger(s.appId) || (s.appId as number) <= 0) problems.push("appId must be a positive integer");
       if (!isSecretRef(s.privateKey)) problems.push("privateKey must be a reference: { env: NAME } or { file: PATH }");
-    } else if (!isSecretRef(s.token)) {
-      problems.push("authenticate with appId and privateKey, or with token: { env: NAME } or { file: PATH }");
+    } else if (s.token !== undefined && !isSecretRef(s.token)) {
+      problems.push("token must be a reference: { env: NAME } or { file: PATH }");
     }
-    if (!isSecretRef(s.webhookSecret))
+    if (s.webhookSecret !== undefined && !isSecretRef(s.webhookSecret))
       problems.push("webhookSecret must be a reference: { env: NAME } or { file: PATH }");
     return problems;
   },

@@ -84,6 +84,15 @@ describe("the clone credential never meets the build", () => {
     assert.doesNotMatch(CLONE_SCRIPT, /x-access-token:\$\{GITHUB_TOKEN\}@/);
     assert.match(CLONE_SCRIPT, /unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GITHUB_TOKEN/);
   });
+  it("without a clone secret the clone is anonymous: no secret is read and no header is sent", () => {
+    // biome-ignore lint/suspicious/noExplicitAny: walking a plain manifest object in tests
+    const anonymous = buildJob(input, { pushSecret: "registry-push" }) as any;
+    const c: Container = anonymous.spec.template.spec.initContainers[0];
+    assert.ok(!c.env.some((e) => e.name === "GITHUB_TOKEN" || e.valueFrom !== undefined));
+    // The header is set only inside the token branch, so an empty token sends nothing.
+    assert.match(CLONE_SCRIPT, /if \[ -n "\$\{GITHUB_TOKEN:-\}" \]; then\n {2}export GIT_CONFIG_COUNT=1\n/);
+    assert.equal(CLONE_SCRIPT.match(/GIT_CONFIG_VALUE_0=/g)?.length, 1);
+  });
   it("the clone container is locked down: no privilege, read-only root, no capabilities", () => {
     assert.deepEqual(clone().securityContext, {
       runAsNonRoot: true,

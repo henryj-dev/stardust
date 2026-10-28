@@ -28,6 +28,8 @@ export interface RunView {
   status: string;
   createdAt: string;
   finishedAt: string | null;
+  /** Who asked for a manual run; null for runs a webhook started. */
+  requestedBy: string | null;
   jobs: JobView[];
 }
 
@@ -38,8 +40,11 @@ export interface ProjectView {
   pipelineDef: unknown;
   components: Array<{ name: string; pipeline: string; context?: string; dockerfile?: string; deployDir: string }>;
   metadata: Record<string, unknown>;
-  webhookKind: "repo" | "workspace";
+  webhookKind: "repo" | "workspace" | "off";
 }
+
+/** What to pull: the default branch when empty, or one branch, tag or commit. */
+export type PullTarget = { branch: string } | { tag: string } | { sha: string } | Record<string, never>;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -77,6 +82,11 @@ export interface Client {
   /** True when the token is accepted. */
   checkToken(): Promise<boolean>;
   runs(projectId: string): Promise<RunView[]>;
+  /**
+   * Starts a manual run: builds and delivers the commit the target resolves to.
+   * An ApiError carries the server's reason (400 bad target, 422 no such ref, 403/404 no access).
+   */
+  pull(projectId: string, target?: PullTarget): Promise<{ runId: string; ref: string; sha: string }>;
   /** Projects the caller may read. */
   projects(): Promise<ProjectView[]>;
   /** One project; an ApiError with status 404 when it does not exist or cannot be read. */
@@ -162,6 +172,19 @@ export function createClient(options: ClientOptions): Client {
         runs: RunView[];
       };
       return body.runs;
+    },
+    async pull(projectId, target = {}) {
+      const path = `/api/v1/projects/${encodeURIComponent(projectId)}/runs`;
+      const res = await doFetch(`${base}${path}`, {
+        method: "POST",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify(target),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `POST ${path} failed: ${res.status}`);
+      }
+      return (await res.json()) as { runId: string; ref: string; sha: string };
     },
     events(projectId, signal) {
       return get(`/api/v1/projects/${encodeURIComponent(projectId)}/events`, {

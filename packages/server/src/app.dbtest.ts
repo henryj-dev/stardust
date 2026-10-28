@@ -10,12 +10,25 @@ import { createUser, ensureBootstrapAdmin, signIn } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
 import { createApp } from "./app.ts";
 import { MAX_WEBHOOK_BYTES } from "./body.ts";
+import { type PullTarget, TargetError } from "./source.ts";
 
 const SECRET = "webhook-secret";
 const PASSWORD = "correct horse battery";
 let db: TestDb;
 let app: ReturnType<typeof createApp>;
 let compareCalls: string[] = [];
+let targetCalls: Array<{ repo: string; target: PullTarget }> = [];
+// A source host with a default branch "main" at f…f and a tag v1 at c…c.
+const resolveTarget = async (repo: string, target: PullTarget) => {
+  targetCalls.push({ repo, target });
+  if ("tag" in target) {
+    if (target.tag !== "v1") throw new TargetError(`tag ${target.tag} was not found`, true);
+    return { ref: "refs/tags/v1", sha: "c".repeat(40) };
+  }
+  if ("sha" in target) return { ref: "refs/heads/main", sha: target.sha };
+  if ("branch" in target && target.branch === "down") throw new TargetError("the source host answered 503", false);
+  return { ref: `refs/heads/${"branch" in target ? target.branch : "main"}`, sha: "f".repeat(40) };
+};
 
 before(async () => {
   db = await createTestDb();
@@ -28,6 +41,7 @@ before(async () => {
         compareCalls.push(`${repo} ${base}...${head}`);
         return { files: [{ filename: "api/main.go" }] };
       },
+      resolveTarget,
     },
   );
   await ensureBootstrapAdmin(db.sql, "admin", PASSWORD);
@@ -495,6 +509,7 @@ describe("webhooks", () => {
         sql: db.sql,
         webhookSecret: SECRET,
         compare: async () => ({ files: [{ filename: "README.md" }] }),
+        resolveTarget,
       },
     );
     const body = push();
@@ -584,5 +599,116 @@ describe("planning a delivery", () => {
     assert.equal((await plan({ event: "push" })).status, 400);
     const viewer = { authorization: `Bearer ${await sessionFor("viewer")}` };
     assert.equal((await plan({ event: "push", payload: {} }, viewer)).status, 403);
+  });
+});
+
+describe("manual runs", () => {
+  const pull = (project: string, body: unknown, headers: Record<string, string> = admin) =>
+    app.request(`/api/v1/projects/${project}/runs`, {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { ...headers, "content-type": "application/json" },
+    });
+  const jobsOf = async (runId: string) =>
+    Object.fromEntries(
+      (await db.sql<{ name: string; status: string }[]>`SELECT name, status FROM jobs WHERE run_id = ${runId}`).map(
+        (j) => [j.name, j.status],
+      ),
+    );
+
+  it("builds the default branch's head with every job, ignoring triggers and path filters, and records who asked", async () => {
+    targetCalls = [];
+    const res = await pull("demo", {});
+    assert.equal(res.status, 201);
+    const body = (await res.json()) as { runId: string; ref: string; sha: string };
+    assert.deepEqual([body.ref, body.sha], ["refs/heads/main", "f".repeat(40)]);
+    assert.deepEqual(targetCalls, [{ repo: "acme/demo", target: {} }]);
+    // demo's only job has a path filter (api/**); a manual run has no changed paths and runs it anyway.
+    assert.deepEqual(await jobsOf(body.runId), { api: "queued" });
+    const [run] = await db.sql<{ event: string; trigger: string; requested_by: string }[]>`
+      SELECT event, trigger, requested_by FROM runs WHERE id = ${body.runId}`;
+    assert.deepEqual(run, { event: "manual", trigger: "manual", requested_by: "admin" });
+    const listed = (await (await app.request("/api/v1/projects/demo/runs", { headers: admin })).json()) as {
+      runs: Array<{ id: string; requestedBy: string | null }>;
+    };
+    assert.equal(listed.runs.find((r) => r.id === body.runId)?.requestedBy, "admin");
+  });
+
+  it("builds a tag or a commit; a branch the definition's `on` block does not name still runs", async () => {
+    const tag = (await (await pull("demo", { tag: "v1" })).json()) as { ref: string; sha: string };
+    assert.deepEqual([tag.ref, tag.sha], ["refs/tags/v1", "c".repeat(40)]);
+    const commit = (await (await pull("demo", { sha: "d".repeat(40) })).json()) as { sha: string };
+    assert.equal(commit.sha, "d".repeat(40));
+    const feature = await pull("demo", { branch: "feature" });
+    assert.equal(feature.status, 201);
+  });
+
+  it("refuses a bad target before asking the source host, and reports what the host said", async () => {
+    targetCalls = [];
+    for (const body of [
+      { branch: "main", tag: "v1" },
+      { ref: "main" },
+      { sha: "abc123" },
+      { branch: "../x" },
+      { branch: "-x" },
+      { tag: "a b" },
+      { branch: 7 },
+    ]) {
+      assert.equal((await pull("demo", body)).status, 400, JSON.stringify(body));
+    }
+    assert.deepEqual(targetCalls, [], "the source host was not asked");
+    const missing = await pull("demo", { tag: "v9" });
+    assert.equal(missing.status, 422);
+    assert.match(((await missing.json()) as { error: string }).error, /v9 was not found/);
+    assert.equal((await pull("demo", { branch: "down" })).status, 502);
+  });
+
+  it("needs write access: a viewer is refused, an outsider learns nothing", async () => {
+    const before = await runCount();
+    const viewer = { authorization: `Bearer ${await sessionFor("viewer")}` };
+    assert.equal((await pull("demo", {}, viewer)).status, 403);
+    const outsider = { authorization: `Bearer ${await sessionFor("outsider")}` };
+    assert.equal((await pull("demo", {}, outsider)).status, 404);
+    assert.equal((await pull("nope", {})).status, 404);
+    assert.equal(await runCount(), before);
+  });
+
+  it("a project with webhooks off ignores every delivery and is delivered by asking", async () => {
+    const put = await app.request("/api/v1/projects/quiet", {
+      method: "PUT",
+      headers: admin,
+      body: JSON.stringify({
+        githubRepo: "acme/quiet",
+        webhookKind: "off",
+        components: [{ name: "app", pipeline: "C", deployDir: "deploy/quiet/app" }],
+      }),
+    });
+    assert.equal(put.status, 200);
+    const before = await runCount();
+    const body = push({ repository: { full_name: "acme/quiet" } });
+    const res = await app.request("/webhooks/github/quiet", {
+      method: "POST",
+      body,
+      headers: { "x-github-event": "push", "x-hub-signature-256": sign(body) },
+    });
+    assert.equal(res.status, 202);
+    assert.match(((await res.json()) as { reason: string }).reason, /webhooks are off/);
+    assert.equal(await runCount(), before);
+    const pulled = (await (await pull("quiet", {})).json()) as { runId: string };
+    assert.deepEqual(await jobsOf(pulled.runId), { app: "queued" });
+  });
+
+  it("without a webhook secret no webhook is accepted, signed or not", async () => {
+    const closed = createApp(
+      { version: "test" },
+      { sql: db.sql, compare: async () => ({ files: null }), resolveTarget },
+    );
+    const body = push();
+    const res = await closed.request("/webhooks/github/demo", {
+      method: "POST",
+      body,
+      headers: { "x-github-event": "push", "x-hub-signature-256": sign(body) },
+    });
+    assert.equal(res.status, 404);
   });
 });

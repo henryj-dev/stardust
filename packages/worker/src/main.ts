@@ -43,7 +43,7 @@ if (builder && gitops) {
     namespace: builder.namespace as string,
     registry: builder.registry as string,
     builder: {
-      cloneSecret: builder.cloneSecret as string,
+      ...(builder.cloneSecret ? { cloneSecret: builder.cloneSecret as string } : {}),
       pushSecret: builder.pushSecret as string,
       ...(builder.gitBaseUrl ? { gitBaseUrl: builder.gitBaseUrl as string } : {}),
       ...(builder.insecureRegistry === true ? { insecureRegistry: true } : {}),

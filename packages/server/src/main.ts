@@ -6,7 +6,7 @@ import { createOidc, plugin as identityOidc, type Oidc } from "@stardust/plugin-
 import { plugin as sourceGithub } from "@stardust/plugin-source-github";
 import { createApp, type Services } from "./app.ts";
 import { RunEvents } from "./events.ts";
-import { compareApi } from "./source.ts";
+import { compareApi, targetApi } from "./source.ts";
 
 const configPath = process.env.STARDUST_CONFIG ?? "stardust.yaml";
 
@@ -50,16 +50,23 @@ if (source) {
   const at = "plugins.source-github";
   const events = new RunEvents(sql);
   await events.start();
+  const apiBaseUrl = (source.apiBaseUrl as string | undefined) ?? "https://api.github.com";
+  // Both are optional: public repositories need no token, and without a webhook secret
+  // no webhook is accepted (runs start only when someone asks for one).
+  const token = source.token === undefined ? undefined : await resolveSecretRef(source.token, `${at}.token`);
+  const webhookSecret =
+    source.webhookSecret === undefined
+      ? undefined
+      : await resolveSecretRef(source.webhookSecret, `${at}.webhookSecret`);
+  if (!webhookSecret) log.info("webhooks are off: no plugins.source-github.webhookSecret");
   services = {
     log,
     events,
     sql,
     ...(await oidcServices()),
-    webhookSecret: await resolveSecretRef(source.webhookSecret, `${at}.webhookSecret`),
-    compare: compareApi(
-      (source.apiBaseUrl as string | undefined) ?? "https://api.github.com",
-      await resolveSecretRef(source.token, `${at}.token`),
-    ),
+    ...(webhookSecret ? { webhookSecret } : {}),
+    compare: compareApi(apiBaseUrl, token),
+    resolveTarget: targetApi(apiBaseUrl, token),
   };
 } else {
   console.warn("source-github is not configured: only /healthz is served");

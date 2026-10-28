@@ -59,8 +59,11 @@ export interface BuilderOptions {
   cloneUsername?: string;
   /** Push over plain HTTP. Only for local registries such as a kind test cluster. */
   insecureRegistry?: boolean;
-  /** Secret with key `token`: a GitHub token that can read the repository. */
-  cloneSecret: string;
+  /**
+   * Secret with key `token`: a GitHub token that can read the repository.
+   * Without it the clone is anonymous, which works for public repositories only.
+   */
+  cloneSecret?: string;
   /** Secret with key `config.json`: a docker config that can push to the registry. */
   pushSecret: string;
   /** Optional per-project secret mounted read-only at /run/secrets/project. */
@@ -122,10 +125,12 @@ export const CLONE_SCRIPT = `set -eu
 mkdir -p "\${HOME}"
 git init -q /workspace/src
 cd /workspace/src
-export GIT_CONFIG_COUNT=1
-export GIT_CONFIG_KEY_0="http.\${GIT_BASE}/.extraheader"
-GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf '%s:%s' "\${GIT_USERNAME}" "\${GITHUB_TOKEN}" | base64 | tr -d '\\n')"
-export GIT_CONFIG_VALUE_0
+if [ -n "\${GITHUB_TOKEN:-}" ]; then
+  export GIT_CONFIG_COUNT=1
+  export GIT_CONFIG_KEY_0="http.\${GIT_BASE}/.extraheader"
+  GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf '%s:%s' "\${GIT_USERNAME}" "\${GITHUB_TOKEN}" | base64 | tr -d '\\n')"
+  export GIT_CONFIG_VALUE_0
+fi
 git fetch -q --depth 1 "\${GIT_BASE}/\${REPO}.git" "\${SHA}"
 unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GITHUB_TOKEN
 git checkout -q --detach FETCH_HEAD
@@ -283,10 +288,9 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
                   SHA: input.sha,
                   HOME: "/workspace/home",
                 }),
-                {
-                  name: "GITHUB_TOKEN",
-                  valueFrom: { secretKeyRef: { name: options.cloneSecret, key: "token" } },
-                },
+                ...(options.cloneSecret
+                  ? [{ name: "GITHUB_TOKEN", valueFrom: { secretKeyRef: { name: options.cloneSecret, key: "token" } } }]
+                  : []),
               ],
               securityContext: { ...restricted, seccompProfile: { type: "RuntimeDefault" } },
               volumeMounts: [{ name: "workspace", mountPath: "/workspace" }],

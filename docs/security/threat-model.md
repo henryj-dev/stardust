@@ -44,6 +44,22 @@ pull request.
   (`fork.ts`).
 - The changed-path list comes from the source host's compare API, not from the
   payload alone.
+- A project with `webhookKind: "off"` ignores every delivery, signed or not;
+  an installation without a `webhookSecret` accepts no webhook at all.
+
+### Manual runs → build
+
+- `POST /api/v1/projects/<id>/runs` needs write access to the project. The
+  run records who asked.
+- The target is checked before the source host is asked: one of a branch, a
+  tag or a full commit hash, with ref names limited to characters git and a
+  URL path accept as they are.
+- A commit given by hash must be in the default branch's history. GitHub
+  serves commits from anywhere in a repository's fork network under the
+  repository's name, so a hash alone could otherwise build someone's fork.
+- A manual run deploys what it builds. Delivering a repository you do not
+  control is a decision to run its code: pin a tag you have read, and keep
+  such projects at `webhookKind: "off"` so a merge upstream does not deploy.
 
 ### Repository contents → build
 
@@ -59,8 +75,8 @@ pull request.
   the build steps: `RUN` steps execute in BuildKit's own sandbox and do not
   see it. But **whatever a built commit produces is pushed under the
   project's tag and then deployed**, so who can get a commit built is who can
-  deploy. Builds start only for pushes the policy accepts, never for fork pull
-  requests.
+  deploy. Builds start only for pushes the policy accepts and for manual runs,
+  never for fork pull requests.
 
 ### Worker → deploy repository
 

@@ -26,8 +26,15 @@ export interface Project {
   pipelineDef: PipelineDef | null;
   components: Component[];
   metadata: Record<string, unknown>;
-  webhookKind: "repo" | "workspace";
+  /**
+   * How webhooks are treated: "repo" (a repository of its own), "workspace" (a
+   * monorepo shared with others), or "off" (none are accepted; runs start only
+   * when someone asks for one).
+   */
+  webhookKind: WebhookKind;
 }
+
+export type WebhookKind = "repo" | "workspace" | "off";
 
 const ID = /^[a-z][a-z0-9-]{0,62}$/;
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -41,7 +48,8 @@ export function validateProject(p: Project): void {
   if (!ID.test(p.id)) problems.push(`id "${p.id}" must be lower-case letters, digits and dashes`);
   if (p.githubRepo !== null && !REPO.test(p.githubRepo))
     problems.push(`githubRepo "${p.githubRepo}" is not owner/name`);
-  if (!["repo", "workspace"].includes(p.webhookKind)) problems.push("webhookKind must be repo or workspace");
+  if (!["repo", "workspace", "off"].includes(p.webhookKind))
+    problems.push("webhookKind must be repo, workspace or off");
   const seen = new Set<string>();
   for (const [i, c] of p.components.entries()) {
     const at = `components[${i}]`;
@@ -103,7 +111,7 @@ type ProjectRow = {
   pipeline_def: PipelineDef | null;
   components: Component[];
   metadata: Record<string, unknown>;
-  webhook_kind: "repo" | "workspace";
+  webhook_kind: WebhookKind;
 };
 
 const toProject = (row: ProjectRow): Project => ({
@@ -144,6 +152,8 @@ export interface RunView {
   status: string;
   createdAt: string;
   finishedAt: string | null;
+  /** Who asked for a manual run; null for runs a webhook started. */
+  requestedBy: string | null;
   jobs: Array<{ name: string; status: string; attempt: number; detail: Record<string, unknown> }>;
 }
 
@@ -164,8 +174,9 @@ export async function listRuns(sql: Sql, projectId: string, limit = 20, onlyRun?
       status: string;
       created_at: Date;
       finished_at: Date | null;
+      requested_by: string | null;
     }[]
-  >`SELECT id, event, trigger, ref, sha, status, created_at, finished_at FROM runs
+  >`SELECT id, event, trigger, ref, sha, status, created_at, finished_at, requested_by FROM runs
     WHERE project_id = ${projectId} ${onlyRun ? sql`AND id = ${onlyRun}` : sql``}
     ORDER BY created_at DESC LIMIT ${limit}`;
   if (runs.length === 0) return [];
@@ -183,6 +194,7 @@ export async function listRuns(sql: Sql, projectId: string, limit = 20, onlyRun?
     status: r.status,
     createdAt: r.created_at.toISOString(),
     finishedAt: r.finished_at?.toISOString() ?? null,
+    requestedBy: r.requested_by,
     jobs: jobs
       .filter((j) => j.run_id === r.id)
       .map((j) => ({ name: j.name, status: j.status, attempt: j.attempt, detail: j.detail })),

@@ -5,6 +5,7 @@ import {
   loadPipelineDef,
   type PipelineDef,
   PipelineDefError,
+  pipelineDefFromComponents,
   planRun,
 } from "@stardust/core";
 import {
@@ -43,6 +44,7 @@ import { streamSSE } from "hono/streaming";
 import { readBoundedBody } from "./body.ts";
 import type { RunEvents } from "./events.ts";
 import { planDelivery } from "./plan-delivery.ts";
+import { type PullTarget, type ResolvedTarget, TargetError } from "./source.ts";
 
 export interface AppInfo {
   readonly version: string;
@@ -50,7 +52,10 @@ export interface AppInfo {
 
 export interface Services {
   sql: Sql;
-  webhookSecret: string;
+  /** Without it, webhooks are not accepted at all; runs start only when someone asks for one. */
+  webhookSecret?: string;
+  /** The commit a manual run builds, from the source host. */
+  resolveTarget: (repo: string, target: PullTarget) => Promise<ResolvedTarget>;
   /** Net change of a push, from the source host's compare API. */
   compare: (repo: string, base: string, head: string) => Promise<CompareResult>;
   /** Live run updates. Without it the events endpoint is not served. */
@@ -87,6 +92,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     const projectId = c.req.param("project");
     const event = c.req.header("x-github-event");
     const delivery = c.req.header("x-github-delivery");
+    if (!services.webhookSecret) return c.json({ error: "webhooks are not configured" }, 404);
     // The signature first: an unsigned caller learns nothing, not even which projects exist.
     const read = await readBoundedBody(c.req.raw);
     if ("tooLarge" in read) {
@@ -492,6 +498,51 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     return c.json({ ...rest, jobs: planRun(def, plan.event, plan.changedPaths) });
   });
 
+  // A manual run: someone with write access asks for a commit to be built and
+  // delivered. It is how projects with webhooks off are delivered, and how a
+  // public repository is delivered without letting every merge deploy. The
+  // definition's `on` block and path filters do not apply: the person asking
+  // has chosen the commit, and every job runs.
+  app.post("/api/v1/projects/:id/runs", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:write", id);
+    if (denied) return denied;
+    const project = await getProject(sql, id);
+    if (!project) return c.json({ error: "unknown project" }, 404);
+    if (!project.githubRepo) return c.json({ error: "the project has no repository to build from" }, 409);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const target = pullTarget(body ?? {});
+    if (typeof target === "string") return c.json({ error: target }, 400);
+
+    let resolved: ResolvedTarget;
+    try {
+      resolved = await services.resolveTarget(project.githubRepo, target);
+    } catch (err) {
+      if (err instanceof TargetError) return c.json({ error: err.message }, err.notFound ? 422 : 502);
+      throw err;
+    }
+    const user = c.get("user");
+    const runId = await startRun(sql, {
+      projectId: project.id,
+      event: "manual",
+      trigger: "manual",
+      ref: resolved.ref,
+      sha: resolved.sha,
+      def: project.pipelineDef ?? pipelineDefFromComponents(project.components),
+      changedPaths: null,
+      requestedBy: user.username,
+    });
+    log.info("run started", {
+      project: id,
+      event: "manual",
+      run: runId,
+      ref: resolved.ref,
+      sha: resolved.sha,
+      by: user.username,
+    });
+    return c.json({ runId, ref: resolved.ref, sha: resolved.sha }, 201);
+  });
+
   app.get("/api/v1/projects/:id/runs", async (c) => {
     const denied = await deny(c, "project:read", c.req.param("id"));
     if (denied) return denied;
@@ -535,4 +586,27 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   });
 
   return app;
+}
+
+// A git ref name as people type it: no leading dash or slash, no "..", no
+// characters git refuses or a URL would need escaping for.
+const REF_NAME = /^(?![-/])(?!.*\.\.)(?!.*\/\/)(?!.*[/.]$)[A-Za-z0-9._/-]{1,200}$/;
+const COMMIT = /^[0-9a-f]{40}$/;
+
+/** The target of a manual run from its request body, or why the body is wrong. */
+export function pullTarget(body: Record<string, unknown>): PullTarget | string {
+  const given = (["branch", "tag", "sha"] as const).filter((k) => body[k] !== undefined);
+  const unknown = Object.keys(body).filter((k) => !["branch", "tag", "sha"].includes(k));
+  if (unknown.length > 0) return `unknown field "${unknown[0]}"; give one of branch, tag or sha`;
+  if (given.length > 1) return "give at most one of branch, tag or sha";
+  const key = given[0];
+  if (key === undefined) return {};
+  const value = body[key];
+  if (key === "sha") {
+    return typeof value === "string" && COMMIT.test(value)
+      ? { sha: value }
+      : "sha must be a full 40-character commit hash";
+  }
+  if (typeof value !== "string" || !REF_NAME.test(value)) return `${key} is not a valid ref name`;
+  return key === "branch" ? { branch: value } : { tag: value };
 }
