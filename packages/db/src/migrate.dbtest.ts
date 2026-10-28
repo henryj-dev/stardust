@@ -43,12 +43,14 @@ it("two concurrent migrators apply each file exactly once", async () => {
 it("the jobs.status constraint lists exactly the core job states", async () => {
   const db = await createTestDb();
   cleanups.push(db.close);
+  // This schema's constraints are picked first and only then described: other test
+  // files drop their schemas meanwhile, and describing one of theirs fails.
   const [row] = await db.sql<{ def: string }[]>`
-    SELECT pg_get_constraintdef(c.oid) AS def
-    FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
-    JOIN pg_namespace n ON n.oid = t.relnamespace
-    WHERE n.nspname = ${db.schema} AND t.relname = 'jobs' AND c.contype = 'c'
-      AND pg_get_constraintdef(c.oid) LIKE '%status%'`;
+    WITH mine AS MATERIALIZED (
+      SELECT c.oid FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+      WHERE n.nspname = ${db.schema} AND t.relname = 'jobs' AND c.contype = 'c')
+    SELECT def FROM (SELECT pg_get_constraintdef(oid) AS def FROM mine) d WHERE def LIKE '%status%'`;
   assert.ok(row, "no status constraint on jobs");
   const inDb = [...row.def.matchAll(/'([a-z]+)'/g)].map((m) => m[1]).sort();
   assert.deepEqual(inDb, [...JOB_STATUSES].sort());
