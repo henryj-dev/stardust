@@ -51,6 +51,11 @@ the previous pods keep running until the new ones are ready.
 
 ## Upgrade notes
 
+- **0.3.0 → 0.3.1**: no configuration changes. Pipeline N images built by
+  0.3.0 name their user `node`, which Kubernetes refuses to start under
+  `runAsNonRoot`; push again after upgrading so the component is rebuilt.
+- **0.2.x → 0.3.0**: no configuration changes. Components may now use
+  pipeline `N`, with the new `port` and `buildEnv` fields.
 - **0.1.x → 0.2.0**: no configuration changes. New API endpoints only
   (reading projects and users, changing users, planning a delivery).
 - **0.0.x → 0.1.0**: `server.adminToken` is gone. Configure
@@ -60,4 +65,4 @@ the previous pods keep running until the new ones are ready.
   deployed.
 
 This page was checked by doing it: a testbed installed with Flux went from
-0.1.1 to 0.2.0 by changing only the version range above.
+0.1.1 to 0.2.0, 0.3.0 and 0.3.1 by changing only the version range above.
