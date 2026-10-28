@@ -1,6 +1,6 @@
 {
   "name": "stardust",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "The stardust release: server, worker and web images and this Helm chart, versioned together."
 }
