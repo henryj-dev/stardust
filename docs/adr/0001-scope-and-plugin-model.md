@@ -1,6 +1,6 @@
 # 0001 — Scope and plugin model
 
-- Status: Proposed
+- Status: Accepted (2026-10-28)
 - Date: 2026-10-27
 
 ## Context

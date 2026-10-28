@@ -1,6 +1,6 @@
 # 0002 — Release flow and artifact trust
 
-- Status: Proposed
+- Status: Accepted (2026-10-28)
 - Date: 2026-10-27
 
 ## Context

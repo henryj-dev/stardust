@@ -5,9 +5,9 @@ A record is never edited after it is accepted; a later record supersedes it.
 
 | #                                      | Title                                   | Status   |
 | -------------------------------------- | --------------------------------------- | -------- |
-| [0001](0001-scope-and-plugin-model.md) | Scope and plugin model                  | Proposed |
-| [0002](0002-release-trust.md)          | Release flow and artifact trust         | Proposed |
-| [0003](0003-compatibility-contract.md) | Compatibility with existing deployments | Proposed |
-| [0004](0004-runtime-stack.md)          | Runtime stack                           | Proposed |
+| [0001](0001-scope-and-plugin-model.md) | Scope and plugin model                  | Accepted |
+| [0002](0002-release-trust.md)          | Release flow and artifact trust         | Accepted |
+| [0003](0003-compatibility-contract.md) | Compatibility with existing deployments | Accepted |
+| [0004](0004-runtime-stack.md)          | Runtime stack                           | Accepted |
 
 Status is one of `Proposed`, `Accepted`, `Superseded by NNNN`.

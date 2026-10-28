@@ -1,6 +1,6 @@
 # 0004 — Runtime stack
 
-- Status: Proposed
+- Status: Accepted (2026-10-28)
 - Date: 2026-10-27
 
 ## Decision
