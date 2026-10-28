@@ -12,9 +12,11 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 fixtures="$here/tools/fixtures/node-app"
 work="$(mktemp -d)"
-ids=()
+# Containers are found by a label for this run: serve() runs in a command
+# substitution, a subshell, so a list it appended to would never reach here.
+run_label="stardust-node-build-test=$$-$(basename "$work")"
 cleanup() {
-  for id in ${ids[@]+"${ids[@]}"}; do docker rm -f "$id" >/dev/null 2>&1 || true; done
+  docker ps -aq --filter "label=$run_label" | while read -r id; do docker rm -f "$id" >/dev/null 2>&1 || true; done
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -37,8 +39,7 @@ serve() { # <fixture> <port> -> response body
     --build-arg "NODE_IMAGE=$(cat "$work/node-image")" --build-arg "PORT=$2" --build-arg "BUILD_ENV=$build_env" \
     -t "$tag" "$fixtures/$1" >/dev/null || fail "$1" "the build failed"
   local id
-  id="$(docker run -d -p "127.0.0.1::$2" "$tag")"
-  ids+=("$id")
+  id="$(docker run -d --label "$run_label" -p "127.0.0.1::$2" "$tag")"
   local hostport
   hostport="$(docker port "$id" "$2/tcp" | head -1)"
   for _ in $(seq 1 30); do
