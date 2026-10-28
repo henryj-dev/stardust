@@ -1,5 +1,11 @@
 # stardust
 
+## 0.4.2
+
+### Patch Changes
+
+- [`97810a1`](https://github.com/henryj-dev/stardust/commit/97810a13c4fe06676e657f8a0c9791f1d1b4eb06) Thanks [@mack-erel](https://github.com/mack-erel)! - The dashboard honours `ORIGIN`. 0.4.1 set it from `config.server.publicUrl`, but SvelteKit 3 reads the origin only at build time, so it had no effect and forms posted over plain http were still refused as cross-site. The image now starts through its own entry point, which gives the adapter that origin on every request.
+
 ## 0.4.1
 
 ### Patch Changes
