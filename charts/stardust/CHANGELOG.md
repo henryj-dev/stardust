@@ -1,5 +1,11 @@
 # stardust
 
+## 0.4.1
+
+### Patch Changes
+
+- [`4f1ca8f`](https://github.com/henryj-dev/stardust/commit/4f1ca8fb73bf354849a7d2047c971c5fb130082f) Thanks [@mack-erel](https://github.com/mack-erel)! - An empty plugin section (`source-github:` with nothing after it, or `{}` in Helm values, which Helm renders as null) enables the plugin with its defaults instead of stopping the server with "must be a mapping". The chart gives the dashboard `ORIGIN` from `config.server.publicUrl`: without it the dashboard assumed https and refused sign-in and every form posted over plain http as cross-site.
+
 ## 0.4.0
 
 ### Minor Changes
