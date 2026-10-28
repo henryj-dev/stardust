@@ -28,8 +28,17 @@ export const configSchema = z.strictObject({
   database: z.strictObject({
     url: secretRef,
   }),
-  /** Each key enables one plugin; the value is validated by that plugin. */
-  plugins: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * Each key enables one plugin; the value is validated by that plugin. An
+   * empty section (`source-github:` with nothing after it) is an empty mapping:
+   * YAML reads it as null, and so does Helm when values set it to `{}`.
+   */
+  plugins: z
+    .record(z.string(), z.unknown())
+    .default({})
+    .transform((plugins) =>
+      Object.fromEntries(Object.entries(plugins).map(([name, section]) => [name, section ?? {}])),
+    ),
 });
 
 export type RawConfig = z.infer<typeof configSchema>;

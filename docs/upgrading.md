@@ -51,6 +51,12 @@ the previous pods keep running until the new ones are ready.
 
 ## Upgrade notes
 
+- **0.4.0 → 0.4.1**: no configuration changes. The dashboard's origin now
+  comes from `config.server.publicUrl`; set it to the address people use.
+- **0.3.x → 0.4.0**: no configuration changes. The source token, the webhook
+  secret and the builder's clone secret became optional. Under Helm, write an
+  otherwise empty plugin section with at least one key until 0.4.1: Helm
+  renders `{}` as null, which 0.4.0 refuses.
 - **0.3.0 → 0.3.1**: no configuration changes. Pipeline N images built by
   0.3.0 name their user `node`, which Kubernetes refuses to start under
   `runAsNonRoot`; push again after upgrading so the component is rebuilt.

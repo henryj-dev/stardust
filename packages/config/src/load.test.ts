@@ -33,6 +33,13 @@ describe("parseConfig", () => {
     assert.deepEqual(config.plugins, { "source-github": {} });
   });
 
+  it("reads an empty plugin section as an empty mapping, as Helm renders `{}`", async () => {
+    const config = await parseConfig(VALID.replace("  source-github: {}", "  source-github:"), "test.yaml", { env });
+    assert.deepEqual(config.plugins, { "source-github": {} });
+    const helm = await parseConfig(VALID.replace("  source-github: {}", "  source-github: null"), "test.yaml", { env });
+    assert.deepEqual(helm.plugins, { "source-github": {} });
+  });
+
   it("resolves the bootstrap administrator's password reference", async () => {
     const text = VALID.replace(
       "  publicUrl:",

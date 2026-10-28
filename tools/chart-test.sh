@@ -52,6 +52,15 @@ else
   bad no-service-account-token "expected 3 pod specs without a token, found $pods"
 fi
 
+# The dashboard's origin comes from publicUrl, without its path.
+origin() { render "$@" | awk '/^# Source: stardust\/templates\/web.yaml/{w=1} /^---/{w=0} w' | grep -A1 -- '- name: ORIGIN' | sed -n 's/^ *value: //p'; }
+if [ "$(origin --set config.server.publicUrl=http://stardust.example.com:3000/base/)" = '"http://stardust.example.com:3000"' ] \
+  && [ "$(origin)" = '"https://stardust.example.com"' ]; then
+  pass web-origin-from-public-url
+else
+  bad web-origin-from-public-url "the web pod's ORIGIN is not publicUrl's origin"
+fi
+
 # Builds: the worker alone gets a token, and the Role stays within its namespace.
 out="$(render --set builds.enabled=true --set builds.namespace=ci-builds)"
 worker="$(awk '/^# Source: stardust\/templates\/worker.yaml/{w=1} /^---/{w=0} w' <<<"$out")"

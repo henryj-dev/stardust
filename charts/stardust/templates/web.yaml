@@ -29,6 +29,12 @@ spec:
               value: {{ $port | quote }}
             - name: STARDUST_API_URL
               value: {{ printf "http://%s-server:%d" (include "stardust.fullname" .) (int (default 8080 .Values.config.server.port)) | quote }}
+            {{- with .Values.config.server.publicUrl }}
+            # Where people reach the dashboard. Without it the adapter assumes https and
+            # refuses every form posted over plain http as cross-site.
+            - name: ORIGIN
+              value: {{ regexFind "^https?://[^/]+" . | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ $port }}
