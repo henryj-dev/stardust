@@ -1,5 +1,11 @@
 # stardust
 
+## 0.5.0
+
+### Minor Changes
+
+- [`3c1497b`](https://github.com/henryj-dev/stardust/commit/3c1497b5e8669e793fe3e844e1d674c7b504cf61) Thanks [@mack-erel](https://github.com/mack-erel)! - The deploy repository can be written as a GitHub App (`plugins.gitops-git.githubApp`: `appId`, `privateKey`) instead of with a long-lived token. stardust asks for installation tokens narrowed to the deploy repository and to `contents: write`, renews them before they expire, and gives git the credential only for commands that reach the host.
+
 ## 0.4.2
 
 ### Patch Changes
