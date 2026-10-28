@@ -51,6 +51,7 @@ ENV NODE_ENV=production PORT=3000
 WORKDIR /app
 COPY --from=web-build --chown=node:node /app/packages/web/build ./build
 COPY --from=web-build --chown=node:node /app/packages/web/package.json ./package.json
+COPY --from=web-build --chown=node:node /app/packages/web/server.ts ./server.ts
 USER node
 EXPOSE 3000
-CMD ["node", "build"]
+CMD ["node", "server.ts"]

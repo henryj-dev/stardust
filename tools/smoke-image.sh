@@ -106,6 +106,22 @@ case "$target" in
     code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
     [ "$code" = "0" ] || fail web-sigterm "expected exit 0 after SIGTERM, got $code"
     echo "ok   [web-sigterm]"
+    docker rm -f "$name" >/dev/null
+    # ORIGIN is the dashboard's origin: a form posted from it passes the
+    # cross-site check over plain http; one from anywhere else does not.
+    docker run -d --name "$name" -p 127.0.0.1:13000:3000 -e ORIGIN=http://stardust.test:8443 "$image" >/dev/null
+    wait_http 13000 / || fail web-origin "GET / did not answer with ORIGIN set"
+    post() { curl -s -o /dev/null -w '%{http_code}' -H "Origin: $1" -H 'content-type: application/x-www-form-urlencoded' \
+      --data 'username=x&password=y' 'http://127.0.0.1:13000/login?/password'; }
+    own="$(post http://stardust.test:8443)"
+    other="$(post http://127.0.0.1:13000)"
+    [ "$own" != 403 ] || fail web-origin "a form from ORIGIN was refused as cross-site"
+    [ "$other" = 403 ] || fail web-origin "a form from another origin answered $other, not 403"
+    echo "ok   [web-origin] own origin $own, other origin 403"
+    docker stop --time 10 "$name" >/dev/null
+    code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
+    [ "$code" = "0" ] || fail web-sigterm "expected exit 0 after SIGTERM, got $code"
+    echo "ok   [web-sigterm]"
     ;;
   *)
     echo "usage: $0 <server|worker|web> <image>" >&2
