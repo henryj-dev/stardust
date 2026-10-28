@@ -118,13 +118,20 @@ Dockerfile, never sees the clone token.
 Writes desired state to a deploy repository with compare-and-swap commits,
 so concurrent writers never overwrite each other.
 
-| Key                  |          |                                                                                                                                                               |
-| -------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`                | required | `https://…` (no credentials in the URL), `file://…` or a path.                                                                                                |
-| `branch`             | required | Branch the GitOps controller watches.                                                                                                                         |
-| `token`              | optional | Token for pushing.                                                                                                                                            |
-| `username`           | optional | User name sent with the token. Defaults to `x-access-token`.                                                                                                  |
-| `buildRevAnnotation` | optional | Annotation key (for example `example.com/build-rev`). Where a manifest already carries it, it is set to the job id so a rebuild of the same commit rolls out. |
+| Key                  |          |                                                                                                                                                                 |
+| -------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`                | required | `https://…` (no credentials in the URL), `file://…` or a path.                                                                                                  |
+| `branch`             | required | Branch the GitOps controller watches.                                                                                                                           |
+| `token`              | optional | Token for pushing.                                                                                                                                              |
+| `username`           | optional | User name sent with the token. Defaults to `x-access-token`.                                                                                                    |
+| `buildRevAnnotation` | optional | Annotation key (for example `example.com/build-rev`). Where a manifest already carries it, it is set to the job id so a rebuild of the same commit rolls out.   |
+| `githubApp`          | optional | Push as a GitHub App instead of with `token`: `appId`, `privateKey` (a reference) and optionally `apiBaseUrl`. Needs a `https://github.com/<owner>/<name>` url. |
+
+With `githubApp`, stardust finds the App's installation on the deploy
+repository and asks for installation tokens narrowed to that repository and
+to `contents: write`, whatever else the installation grants. A token lasts an
+hour and is renewed five minutes before it expires. Install the App on the
+deploy repository only, with "Contents: Read and write".
 
 ## Projects
 

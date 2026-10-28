@@ -153,5 +153,7 @@ Found in the pre-publication review (2026-10-27) and not fixed yet:
 - **OpenID sign-out does not end the provider's session**, and the provider
   revoking a user does not end that user's stardust sessions before they
   expire.
-- **GitHub App authentication is not implemented.** The source token is a
-  long-lived personal or bot token.
+- **GitHub App authentication covers the deploy repository only**
+  (`gitops-git.githubApp`: hour-long installation tokens narrowed to that
+  repository and `contents: write`). The source plugin still takes a
+  long-lived token when it needs one; public repositories need none.

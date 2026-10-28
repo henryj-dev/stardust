@@ -21,11 +21,16 @@ export interface GitCliOptions {
   /** Repository URL: https://… or a local path / file:// URL. */
   url: string;
   branch: string;
-  /** Sent as `Authorization: Basic base64(username:token)` when set. */
-  token?: string;
+  /**
+   * Sent as `Authorization: Basic base64(username:token)` when set. A function
+   * is asked before each git command, for tokens that expire (a GitHub App's).
+   */
+  token?: string | (() => Promise<string>);
   username?: string;
   author?: { name: string; email: string };
 }
+
+const NETWORK = new Set(["fetch", "ls-remote", "push"]);
 
 interface Run {
   stdout: string;
@@ -50,22 +55,29 @@ export class GitCliRepo implements RepoIO {
       GIT_COMMITTER_NAME: author.name,
       GIT_COMMITTER_EMAIL: author.email,
     };
-    if (options.token) {
-      const basic = Buffer.from(`${options.username ?? "x-access-token"}:${options.token}`).toString("base64");
-      Object.assign(this.env, {
-        GIT_CONFIG_COUNT: "1",
-        GIT_CONFIG_KEY_0: "http.extraHeader",
-        GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}`,
-      });
-    }
   }
 
-  private git(args: string[], input?: string, extraEnv: NodeJS.ProcessEnv = {}): Promise<Run> {
+  /** The credential header as git configuration, with the token as it is now. */
+  private async auth(): Promise<NodeJS.ProcessEnv> {
+    const { token } = this.options;
+    const value = typeof token === "function" ? await token() : token;
+    if (!value) return {};
+    const basic = Buffer.from(`${this.options.username ?? "x-access-token"}:${value}`).toString("base64");
+    return {
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.extraHeader",
+      GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}`,
+    };
+  }
+
+  private async git(args: string[], input?: string, extraEnv: NodeJS.ProcessEnv = {}): Promise<Run> {
+    // Only commands that talk to the host get the credential; local ones never see it.
+    const auth = NETWORK.has(args[0] ?? "") ? await this.auth() : {};
     return new Promise((resolve) => {
       const child = execFile(
         "git",
         args,
-        { cwd: this.dir ?? undefined, env: { ...this.env, ...extraEnv }, maxBuffer: 64 * 1024 * 1024 },
+        { cwd: this.dir ?? undefined, env: { ...this.env, ...auth, ...extraEnv }, maxBuffer: 64 * 1024 * 1024 },
         (error, stdout, stderr) => {
           const code = error ? ((error as { code?: unknown }).code as number) || 1 : 0;
           resolve({ stdout, stderr, code: typeof code === "number" ? code : 1 });

@@ -3,7 +3,7 @@ import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/con
 import { createPluginRegistry, type Logger } from "@stardust/core";
 import { connect, migrate } from "@stardust/db";
 import { plugin as builderPlugin, inClusterClient } from "@stardust/plugin-builder-buildkit";
-import { GitCliRepo, plugin as gitopsPlugin } from "@stardust/plugin-gitops-git";
+import { GitCliRepo, plugin as gitopsPlugin, installationTokens, repoFromUrl } from "@stardust/plugin-gitops-git";
 import { buildHandler } from "./build-handler.ts";
 import { type JobHandler, runWorker } from "./loop.ts";
 
@@ -37,6 +37,16 @@ const gitops = config.plugins["gitops-git"] as Record<string, unknown> | undefin
 let handler: JobHandler;
 if (builder && gitops) {
   const token = gitops.token ? await resolveSecretRef(gitops.token, "plugins.gitops-git.token") : undefined;
+  // A GitHub App instead of a token: installation tokens for the deploy repository, renewed before they expire.
+  const app = gitops.githubApp as { appId: number; privateKey: unknown; apiBaseUrl?: string } | undefined;
+  const appTokens = app
+    ? installationTokens({
+        appId: app.appId,
+        privateKey: await resolveSecretRef(app.privateKey, "plugins.gitops-git.githubApp.privateKey"),
+        repo: repoFromUrl(gitops.url as string) as string,
+        ...(app.apiBaseUrl ? { apiBaseUrl: app.apiBaseUrl } : {}),
+      })
+    : undefined;
   handler = buildHandler({
     sql,
     kube: inClusterClient(),
@@ -52,7 +62,7 @@ if (builder && gitops) {
     deployRepo: new GitCliRepo({
       url: gitops.url as string,
       branch: gitops.branch as string,
-      ...(token ? { token } : {}),
+      ...(appTokens ? { token: appTokens } : token ? { token } : {}),
       ...(gitops.username ? { username: gitops.username as string } : {}),
     }),
     ...(gitops.buildRevAnnotation ? { buildRevAnnotation: gitops.buildRevAnnotation as string } : {}),
