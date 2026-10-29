@@ -98,14 +98,19 @@ dep_version() { docker run --rm --entrypoint node "stardust-node-fixture-$1" -p 
 lane install-pnpm-frozen "pnpm-lock.yaml, frozen" "$(variant pnpm empty.pnpm-lock.yaml:pnpm-lock.yaml)"
 lane install-npm-imported "imported package-lock.json into pnpm-lock.yaml" \
   "$(variant npm pinned.package.json:package.json pinned.package-lock.json:package-lock.json)"
-[ "$(dep_version install-npm-imported)" = 2.1.2 ] && ok npm-pins-kept || fail npm-pins-kept "ms $(dep_version install-npm-imported), the lockfile pins 2.1.2"
+pins() { # <name> <lane>: the lane installed the 2.1.2 its lockfile pins
+  local v
+  v="$(dep_version "$2")"
+  if [ "$v" = 2.1.2 ]; then ok "$1"; else fail "$1" "ms $v, the lockfile pins 2.1.2"; fi
+}
+pins npm-pins-kept install-npm-imported
 lane install-yarn-imported "imported yarn.lock into pnpm-lock.yaml" \
   "$(variant yarn pinned.package.json:package.json pinned.yarn.lock:yarn.lock)"
-[ "$(dep_version install-yarn-imported)" = 2.1.2 ] && ok yarn-pins-kept || fail yarn-pins-kept "ms $(dep_version install-yarn-imported), the lockfile pins 2.1.2"
+pins yarn-pins-kept install-yarn-imported
 lane install-bun-fresh "bun.lock is not a lockfile pnpm reads, resolving fresh" \
   "$(variant bun pinned.package.json:package.json empty.bun.lock:bun.lock)"
 # Fresh means from package.json: ^2.1.2 resolves past the 2.1.2 the other lockfiles pin.
-[ "$(dep_version install-bun-fresh)" != 2.1.2 ] && ok bun-resolved-fresh || fail bun-resolved-fresh "ms 2.1.2 came from nowhere"
+if [ "$(dep_version install-bun-fresh)" != 2.1.2 ]; then ok bun-resolved-fresh; else fail bun-resolved-fresh "ms 2.1.2 came from nowhere"; fi
 lane install-none-fresh "no lockfile, resolving fresh" "$(variant none)"
 # An app that names another package manager still installs with pnpm (corepack and pnpm would both refuse).
 yarn_named="$(variant yarn-named pinned.package.json:package.json pinned.yarn.lock:yarn.lock)"
@@ -117,6 +122,9 @@ if docker build --progress=plain -f "$work/Dockerfile" --build-arg "NODE_IMAGE=$
   -t stardust-node-fixture-two "$two" >"$work/build-two.log" 2>&1; then
   fail two-package-managers-refused "the build went ahead with both package-lock.json and yarn.lock"
 fi
-grep -qF "lockfiles of more than one package manager: package-lock.json yarn.lock" "$work/build-two.log" &&
-  ok two-package-managers-refused || fail two-package-managers-refused "it failed for another reason"
+if grep -qF "lockfiles of more than one package manager: package-lock.json yarn.lock" "$work/build-two.log"; then
+  ok two-package-managers-refused
+else
+  fail two-package-managers-refused "it failed for another reason"
+fi
 echo "ok   [node-build] the generated Dockerfile builds and runs Node apps"
