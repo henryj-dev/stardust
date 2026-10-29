@@ -153,18 +153,34 @@ echo "[stardust-image-digest] \${DIGEST}"
 `;
 
 /**
+ * The pnpm that `kind: "node"` builds install with, unless the app's
+ * `package.json` names a pnpm of its own in `packageManager`.
+ */
+export const NODE_BUILD_PNPM = "12.14.0";
+
+/**
  * The Dockerfile for `kind: "node"` builds: a Node application without a
- * Dockerfile of its own, built with its lockfile's package manager and run
- * from `build/` (the SvelteKit adapter-node layout). It is a constant: the
- * Node image, the port and the build environment arrive as build arguments,
- * and the build environment is decoded and exported one `KEY=value` line at a
- * time, never evaluated by a shell.
+ * Dockerfile of its own, installed with pnpm, built with its `build` script and
+ * run by node from `build/` (the SvelteKit adapter-node layout). It is a
+ * constant: the Node image, the port and the build environment arrive as build
+ * arguments, and the build environment is decoded and exported one `KEY=value`
+ * line at a time, never evaluated by a shell.
+ *
+ * Every app installs with pnpm, whatever lockfile it carries:
+ * - `pnpm-lock.yaml` is used as it is (`--frozen-lockfile`);
+ * - an npm or yarn lockfile is turned into one with `pnpm import`, so the
+ *   versions it pinned are the versions installed;
+ * - a lockfile pnpm cannot read (bun's), one `pnpm import` refuses, or none at
+ *   all: the dependencies are resolved fresh from `package.json`;
+ * - lockfiles of more than one package manager: the build stops, since nothing
+ *   says which of them is meant.
+ * The build log names the way that was taken (`[node-build] install: …`).
  *
  * Carried over from the predecessor, where each line came from a failed start:
  * install scripts do not run (`--ignore-scripts`); `server.js` and
  * `shutdown.js` are copied when present and `server.js` is preferred over
  * `build/index.js` (a custom server that terminates TLS, and the module it
- * imports for shutdown). New: an app without dependencies gets an empty
+ * imports for shutdown). An app without dependencies gets an empty
  * node_modules, which a package manager does not create (found by the fixture).
  */
 export const NODE_DOCKERFILE = `# syntax=docker/dockerfile:1
@@ -172,15 +188,33 @@ ARG NODE_IMAGE
 FROM \${NODE_IMAGE} AS build
 ARG BUILD_ENV=""
 WORKDIR /app
-RUN corepack enable
+# An app whose packageManager names npm or yarn still installs with pnpm: corepack
+# would refuse to run pnpm there (strict), and so would pnpm itself (pm_on_fail).
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 COREPACK_ENABLE_STRICT=0 pnpm_config_pm_on_fail=ignore
+RUN corepack enable && corepack prepare pnpm@${NODE_BUILD_PNPM} --activate
 COPY . ./
-RUN printf '%s' "\${BUILD_ENV}" | base64 -d > /tmp/build.env \\
- && while IFS= read -r line; do if [ -n "$line" ]; then export "$line"; fi; done < /tmp/build.env \\
- && rm /tmp/build.env \\
- && if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile --ignore-scripts && pnpm run build; \\
-    elif [ -f yarn.lock ]; then yarn install --frozen-lockfile --ignore-scripts && yarn build; \\
-    else npm ci --ignore-scripts && npm run build; fi \\
- && mkdir -p node_modules
+RUN set -e; \\
+    printf '%s' "\${BUILD_ENV}" | base64 -d > /tmp/build.env; \\
+    while IFS= read -r line; do if [ -n "$line" ]; then export "$line"; fi; done < /tmp/build.env; \\
+    rm /tmp/build.env; \\
+    found=""; kinds=""; \\
+    for f in pnpm-lock.yaml package-lock.json npm-shrinkwrap.json yarn.lock bun.lock bun.lockb; do \\
+      [ -f "$f" ] || continue; found="$found $f"; \\
+      case "$f" in pnpm-lock.yaml) k=pnpm;; package-lock.json|npm-shrinkwrap.json) k=npm;; yarn.lock) k=yarn;; *) k=bun;; esac; \\
+      case " $kinds " in *" $k "*) ;; *) kinds="$kinds $k";; esac; \\
+    done; \\
+    set -- $kinds; \\
+    if [ "$#" -gt 1 ]; then echo "[node-build] lockfiles of more than one package manager:$found; keep one" >&2; exit 1; fi; \\
+    case "\${1:-}" in \\
+      pnpm) echo "[node-build] install: pnpm-lock.yaml, frozen"; pnpm install --frozen-lockfile --ignore-scripts;; \\
+      npm|yarn) \\
+        if pnpm import; then echo "[node-build] install: imported$found into pnpm-lock.yaml"; pnpm install --frozen-lockfile --ignore-scripts; \\
+        else echo "[node-build] install:$found could not be imported, resolving fresh"; rm -f pnpm-lock.yaml; pnpm install --no-frozen-lockfile --ignore-scripts; fi;; \\
+      bun) echo "[node-build] install:$found is not a lockfile pnpm reads, resolving fresh"; pnpm install --no-frozen-lockfile --ignore-scripts;; \\
+      *) echo "[node-build] install: no lockfile, resolving fresh"; pnpm install --no-frozen-lockfile --ignore-scripts;; \\
+    esac; \\
+    pnpm run build; \\
+    mkdir -p node_modules
 
 FROM \${NODE_IMAGE}
 ARG PORT=3000
