@@ -12,6 +12,7 @@ import {
   DEFAULT_IMAGES,
   DIGEST_FROM_METADATA,
   DIGEST_LINE,
+  NODE_BUILD_PNPM,
   NODE_DOCKERFILE,
 } from "./job.ts";
 
@@ -288,6 +289,18 @@ describe("node builds", () => {
       assert.throws(() => buildJob({ ...node, ...change } as BuildInput, options), expected);
     }
     assert.throws(() => buildJob({ ...input, port: 3000 }, options), /node builds only/);
+  });
+
+  it("install with one pinned pnpm whatever the lockfile, and run with node", () => {
+    assert.match(NODE_BUILD_PNPM, /^\d+\.\d+\.\d+$/);
+    assert.match(
+      NODE_DOCKERFILE,
+      new RegExp(`corepack prepare pnpm@${NODE_BUILD_PNPM.replaceAll(".", "\\.")} --activate`),
+    );
+    // No other package manager installs or builds; which way pnpm takes is tools/node-build-test.sh's to prove.
+    assert.doesNotMatch(NODE_DOCKERFILE, /\bnpm (ci|install|run)\b|\byarn (install|build)\b|\bbun (install|run)\b/);
+    assert.match(NODE_DOCKERFILE, /pnpm run build/);
+    assert.match(NODE_DOCKERFILE, /exec node server\.js; else exec node build\/index\.js/);
   });
 
   it("leave Dockerfile builds as they were", () => {

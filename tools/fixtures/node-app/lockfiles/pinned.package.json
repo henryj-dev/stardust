@@ -1,0 +1,13 @@
+{
+  "name": "node-build-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node make.mjs",
+    "postinstall": "touch /tmp/postinstall-ran"
+  },
+  "dependencies": {
+    "ms": "^2.1.2"
+  }
+}

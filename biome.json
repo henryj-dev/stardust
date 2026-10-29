@@ -6,7 +6,15 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/.svelte-kit", "!**/build", "!pnpm-lock.yaml", "!charts/*/templates", "!.changeset"]
+    "includes": [
+      "**",
+      "!**/.svelte-kit",
+      "!**/build",
+      "!pnpm-lock.yaml",
+      "!tools/fixtures/node-app/lockfiles",
+      "!charts/*/templates",
+      "!.changeset"
+    ]
   },
   "formatter": {
     "indentStyle": "space",

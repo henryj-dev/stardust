@@ -5,7 +5,10 @@
 #   - the build environment arrived as plain values, a shell-looking one too,
 #     and nothing in it was executed;
 #   - install scripts did not run;
-#   - server.js wins when present, and the module it imports was copied.
+#   - server.js wins when present, and the module it imports was copied;
+#   - every lockfile installs with pnpm, each by the way meant for it (the build
+#     log names it): pnpm's frozen, npm's and yarn's imported with their pinned
+#     versions kept, bun's or none resolved fresh, two package managers' refused.
 #
 #   tools/node-build-test.sh        (needs docker and node)
 set -euo pipefail
@@ -68,4 +71,60 @@ if [[ "$configured" =~ ^[1-9][0-9]*(:[0-9]+)?$ ]]; then ok user-is-numeric; else
 
 body="$(serve custom-server 8124)"
 expect server-js-preferred 'b.entry === "server.js" && b.note === "shutdown.js was copied"'
+
+# The default fixture with its lockfile replaced by the parts named (tools/fixtures/node-app/lockfiles).
+parts="$here/tools/fixtures/node-app/lockfiles"
+variant() { # <name> <part:target>... -> directory
+  local dir="$work/variant-$1"
+  shift
+  cp -R "$fixtures/default" "$dir"
+  rm -f "$dir/package-lock.json"
+  local p
+  for p in "$@"; do cp "$parts/${p%%:*}" "$dir/${p#*:}"; done
+  printf '%s' "$dir"
+}
+# lane <name> <expected install line> <variant dir> -> builds; fails unless the log names the way taken
+# --no-cache: a cached install step prints nothing, and the log would not say which way it took.
+lane() {
+  local tag="stardust-node-fixture-$1" log="$work/build-$1.log"
+  docker build --no-cache --progress=plain -f "$work/Dockerfile" \
+    --build-arg "NODE_IMAGE=$(cat "$work/node-image")" --build-arg "PORT=8125" --build-arg "BUILD_ENV=$build_env" \
+    -t "$tag" "$3" >"$log" 2>&1 || { tail -20 "$log" >&2; fail "$1" "the build failed"; }
+  grep -qF "[node-build] install: $2" "$log" || { grep -F "[node-build]" "$log" >&2; fail "$1" "the log does not say: $2"; }
+  ok "$1"
+}
+dep_version() { docker run --rm --entrypoint node "stardust-node-fixture-$1" -p 'require("/app/node_modules/ms/package.json").version'; }
+
+lane install-pnpm-frozen "pnpm-lock.yaml, frozen" "$(variant pnpm empty.pnpm-lock.yaml:pnpm-lock.yaml)"
+lane install-npm-imported "imported package-lock.json into pnpm-lock.yaml" \
+  "$(variant npm pinned.package.json:package.json pinned.package-lock.json:package-lock.json)"
+pins() { # <name> <lane>: the lane installed the 2.1.2 its lockfile pins
+  local v
+  v="$(dep_version "$2")"
+  if [ "$v" = 2.1.2 ]; then ok "$1"; else fail "$1" "ms $v, the lockfile pins 2.1.2"; fi
+}
+pins npm-pins-kept install-npm-imported
+lane install-yarn-imported "imported yarn.lock into pnpm-lock.yaml" \
+  "$(variant yarn pinned.package.json:package.json pinned.yarn.lock:yarn.lock)"
+pins yarn-pins-kept install-yarn-imported
+lane install-bun-fresh "bun.lock is not a lockfile pnpm reads, resolving fresh" \
+  "$(variant bun pinned.package.json:package.json empty.bun.lock:bun.lock)"
+# Fresh means from package.json: ^2.1.2 resolves past the 2.1.2 the other lockfiles pin.
+if [ "$(dep_version install-bun-fresh)" != 2.1.2 ]; then ok bun-resolved-fresh; else fail bun-resolved-fresh "ms 2.1.2 came from nowhere"; fi
+lane install-none-fresh "no lockfile, resolving fresh" "$(variant none)"
+# An app that names another package manager still installs with pnpm (corepack and pnpm would both refuse).
+yarn_named="$(variant yarn-named pinned.package.json:package.json pinned.yarn.lock:yarn.lock)"
+node -e 'const f=process.argv[1], p=JSON.parse(require("fs").readFileSync(f)); p.packageManager="yarn@1.22.22"; require("fs").writeFileSync(f, JSON.stringify(p))' "$yarn_named/package.json"
+lane install-other-pm-named "imported yarn.lock into pnpm-lock.yaml" "$yarn_named"
+
+two="$(variant two pinned.package.json:package.json pinned.package-lock.json:package-lock.json pinned.yarn.lock:yarn.lock)"
+if docker build --progress=plain -f "$work/Dockerfile" --build-arg "NODE_IMAGE=$(cat "$work/node-image")" \
+  -t stardust-node-fixture-two "$two" >"$work/build-two.log" 2>&1; then
+  fail two-package-managers-refused "the build went ahead with both package-lock.json and yarn.lock"
+fi
+if grep -qF "lockfiles of more than one package manager: package-lock.json yarn.lock" "$work/build-two.log"; then
+  ok two-package-managers-refused
+else
+  fail two-package-managers-refused "it failed for another reason"
+fi
 echo "ok   [node-build] the generated Dockerfile builds and runs Node apps"

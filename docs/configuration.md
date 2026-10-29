@@ -166,11 +166,23 @@ Every manifest in `deployDir` that references
 | `C`      | the repository's own Dockerfile         | `context` (default the root), `dockerfile` (default `Dockerfile` in the context) |
 | `N`      | a Node application without a Dockerfile | `context`, `port` (default 3000), `buildEnv`                                     |
 
-A pipeline `N` build installs with the lockfile's package manager (pnpm, yarn
-or npm; install scripts do not run), runs the `build` script, and starts
-`server.js` if the app has one, otherwise `build/index.js` (the SvelteKit
+A pipeline `N` build installs with pnpm whatever lockfile the app carries
+(install scripts do not run), runs the `build` script, and starts `server.js`
+with node if the app has one, otherwise `build/index.js` (the SvelteKit
 `adapter-node` layout). `buildEnv` is set during the build only, for choices a
 build compiles in, such as an adapter; it is not for secrets.
+
+The lockfile decides how pnpm installs:
+
+| Lockfile                                                | Install                                                                                            |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `pnpm-lock.yaml`                                        | as it is (`--frozen-lockfile`)                                                                     |
+| `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock` | turned into `pnpm-lock.yaml` by `pnpm import`, keeping its versions; if that fails, resolved fresh |
+| `bun.lock`, `bun.lockb`, or none                        | resolved fresh from `package.json`                                                                 |
+| lockfiles of more than one package manager              | the build stops: keep one                                                                          |
+
+The build log names the way taken (`[node-build] install: …`). pnpm is pinned
+(12.14.0) unless the app's `packageManager` names a pnpm version of its own.
 
 ```json
 {
