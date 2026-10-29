@@ -1,5 +1,11 @@
 # stardust
 
+## 0.6.0
+
+### Minor Changes
+
+- [#11](https://github.com/henryj-dev/stardust/pull/11) [`ea0af5e`](https://github.com/henryj-dev/stardust/commit/ea0af5ea238704b6cf41d35ed5593391e97ad8a2) Thanks [@mack-erel](https://github.com/mack-erel)! - Pipeline `N` builds install with pnpm whatever lockfile the app carries, and run with node. A `pnpm-lock.yaml` is used as it is; an npm or yarn lockfile is turned into one by `pnpm import`, so its pinned versions are kept; a bun lockfile, or none, is resolved fresh from `package.json`; lockfiles of more than one package manager stop the build. pnpm is pinned (12.14.0) unless the app names its own in `packageManager`. Apps that carried only a bun lockfile could not be built before.
+
 ## 0.5.0
 
 ### Minor Changes
