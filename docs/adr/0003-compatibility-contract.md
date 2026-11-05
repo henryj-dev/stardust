@@ -1,6 +1,6 @@
 # 0003 — Compatibility with existing deployments
 
-- Status: Accepted (2026-10-28)
+- Status: Accepted (2026-10-28), amended (2026-11-05)
 - Date: 2026-10-27
 
 ## Context
@@ -46,3 +46,14 @@ The formats other systems depend on are kept; internal implementation is not.
   is kept for it.
 - Format compatibility is checked by golden tests that render existing inputs
   and compare outputs by content hash.
+
+## Amendment (2026-11-05): no webhooks
+
+stardust no longer takes webhooks: a run starts only when someone with write
+access asks for one. The webhook clauses above are historical:
+
+- There is no webhook signing secret to move. A `webhookSecret` left in
+  `stardust.yaml` is accepted and ignored.
+- There is no webhook URL, old or new. Switching a project over is the moment
+  its runs are first asked for on the new installation, and the old system's
+  hook is removed from the source host at the same time.

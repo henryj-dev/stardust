@@ -20,9 +20,9 @@ export type BumpResult =
   | { status: "error"; kind: "no_reference"; message: string };
 
 /**
- * The commit message stardust writes. Its format is a contract: the GitHub
- * source ignores pushes whose head commit matches it (`SELF_COMMIT_RE`), which
- * is what stops a bump from triggering another build.
+ * The commit message stardust writes. Its format is a contract: people filter
+ * stardust's own commits by it (in a deploy repository's history, or in CI that
+ * should not react to them), so it does not change between releases.
  */
 export function bumpMessage(project: string, component: string, shortSha: string): string {
   return `chore(${project}/${component}): image -> ${shortSha}`;

@@ -1,15 +1,5 @@
 import { definePlugin } from "@stardust/core";
 
-export type { Decision, ProjectView } from "./decide.ts";
-export { decideWebhook, refToBranchTag } from "./decide.ts";
-export type { ForkVerdict } from "./fork.ts";
-export { judgeForkPullRequest } from "./fork.ts";
-export type { ChangedPaths, CompareResult } from "./paths.ts";
-export { COMPARE_FILES_LIMIT, resolveChangedPaths, unionOfCommits } from "./paths.ts";
-export type { WebhookKind, WebhookPolicy } from "./policy.ts";
-export { isProjectDisabled, judgePush, POLICY, SELF_COMMIT_RE, SKIP_CI_RE } from "./policy.ts";
-export { verifySignature } from "./signature.ts";
-
 const isSecretRef = (value: unknown): boolean => {
   if (typeof value !== "object" || value === null) return false;
   const keys = Object.keys(value);
@@ -18,25 +8,32 @@ const isSecretRef = (value: unknown): boolean => {
 };
 
 /**
+ * Keys an older stardust.yaml may still carry. They are accepted and ignored,
+ * so an upgrade needs no change to the configuration; the server says so once.
+ */
+export const RETIRED_KEYS: Readonly<Record<string, string>> = {
+  webhookSecret: "webhooks were removed; runs start only when someone asks for one",
+};
+
+/**
  * `plugins.source-github` in stardust.yaml. Authenticate either as a GitHub App
  * or with a token (a GitHub token, or a Gitea token for its GitHub-compatible
- * webhooks), never both — or not at all, for public repositories only. Without
- * `webhookSecret` no webhook is accepted and runs start only when someone asks:
+ * API), never both — or not at all, for public repositories only. Runs start
+ * only when someone asks for one (the API or the dashboard):
  *
  *   source-github:
  *     apiBaseUrl: https://api.github.com          # optional
  *     appId: 123456
  *     privateKey: { file: /run/secrets/github-app.pem }
- *     webhookSecret: { env: GITHUB_WEBHOOK_SECRET }
  */
 export const plugin = definePlugin({
-  manifest: { name: "source-github", description: "Builds from GitHub repositories (or GitHub-compatible webhooks)." },
+  manifest: { name: "source-github", description: "Builds from GitHub repositories (or a GitHub-compatible API)." },
   validateConfig(section) {
     const problems: string[] = [];
     if (typeof section !== "object" || section === null) return ["must be a mapping"];
     const s = section as Record<string, unknown>;
     for (const key of Object.keys(s)) {
-      if (!["apiBaseUrl", "appId", "privateKey", "token", "webhookSecret"].includes(key))
+      if (!["apiBaseUrl", "appId", "privateKey", "token"].includes(key) && !(key in RETIRED_KEYS))
         problems.push(`unknown key "${key}"`);
     }
     if (s.apiBaseUrl !== undefined && (typeof s.apiBaseUrl !== "string" || !/^https?:\/\/[^\s]+$/.test(s.apiBaseUrl))) {
@@ -50,8 +47,6 @@ export const plugin = definePlugin({
     } else if (s.token !== undefined && !isSecretRef(s.token)) {
       problems.push("token must be a reference: { env: NAME } or { file: PATH }");
     }
-    if (s.webhookSecret !== undefined && !isSecretRef(s.webhookSecret))
-      problems.push("webhookSecret must be a reference: { env: NAME } or { file: PATH }");
     return problems;
   },
 });

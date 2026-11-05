@@ -28,7 +28,7 @@ export interface RunView {
   status: string;
   createdAt: string;
   finishedAt: string | null;
-  /** Who asked for a manual run; null for runs a webhook started. */
+  /** Who asked for the run; null for runs from before webhooks were removed. */
   requestedBy: string | null;
   jobs: JobView[];
 }
@@ -40,7 +40,6 @@ export interface ProjectView {
   pipelineDef: unknown;
   components: Array<{ name: string; pipeline: string; context?: string; dockerfile?: string; deployDir: string }>;
   metadata: Record<string, unknown>;
-  webhookKind: "repo" | "workspace" | "off";
 }
 
 /** What to pull: the default branch when empty, or one branch, tag or commit. */

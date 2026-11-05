@@ -22,7 +22,6 @@ const project = (id: string) => ({
   pipelineDef: { on: { workflow_dispatch: {} }, jobs: { api: { pipeline: "N" as const } } },
   components: [],
   metadata: {},
-  webhookKind: "repo" as const,
 });
 
 before(async () => {
@@ -33,8 +32,6 @@ before(async () => {
     { version: "test" },
     {
       sql: db.sql,
-      webhookSecret: "s",
-      compare: async () => ({ files: null }),
       resolveTarget: async () => {
         throw new Error("not used here");
       },

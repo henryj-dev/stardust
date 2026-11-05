@@ -1,22 +1,18 @@
 /**
- * The HTTP application against a real database: a signed push for a
- * registered project starts a run with its first jobs; anything unsigned,
- * oversized, ignored by policy or not matched by a trigger starts nothing.
+ * The HTTP application against a real database: sign-in and permissions, the
+ * admin API, and runs, which start only when someone asks for one.
  */
 import assert from "node:assert/strict";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { createUser, ensureBootstrapAdmin, signIn } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
 import { createApp } from "./app.ts";
-import { MAX_WEBHOOK_BYTES } from "./body.ts";
 import { type PullTarget, TargetError } from "./source.ts";
 
-const SECRET = "webhook-secret";
 const PASSWORD = "correct horse battery";
 let db: TestDb;
 let app: ReturnType<typeof createApp>;
-let compareCalls: string[] = [];
 let targetCalls: Array<{ repo: string; target: PullTarget }> = [];
 // A source host with a default branch "main" at f…f and a tag v1 at c…c.
 const resolveTarget = async (repo: string, target: PullTarget) => {
@@ -36,11 +32,6 @@ before(async () => {
     { version: "test" },
     {
       sql: db.sql,
-      webhookSecret: SECRET,
-      compare: async (repo, base, head) => {
-        compareCalls.push(`${repo} ${base}...${head}`);
-        return { files: [{ filename: "api/main.go" }] };
-      },
       resolveTarget,
     },
   );
@@ -55,23 +46,6 @@ const sessionFor = async (username: string) => {
   if (!result.ok) throw new Error(`cannot sign in as ${username}`);
   return result.token;
 };
-const sign = (body: string) => `sha256=${createHmac("sha256", SECRET).update(body).digest("hex")}`;
-const push = (over: Record<string, unknown> = {}) =>
-  JSON.stringify({
-    ref: "refs/heads/main",
-    before: "a".repeat(40),
-    after: "b".repeat(40),
-    head_commit: { message: "feat: x" },
-    commits: [],
-    repository: { full_name: "acme/demo" },
-    ...over,
-  });
-const deliver = (body: string, headers: Record<string, string> = {}) =>
-  app.request("/webhooks/github/demo", {
-    method: "POST",
-    body,
-    headers: { "x-github-event": "push", "x-hub-signature-256": sign(body), ...headers },
-  });
 const runCount = async () => (await db.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM runs`)[0]?.n;
 
 describe("admin API", () => {
@@ -378,230 +352,6 @@ describe("every API route is guarded", () => {
   });
 });
 
-describe("webhooks", () => {
-  it("a signed push starts a run with changed paths from compare", async () => {
-    compareCalls = [];
-    const res = await deliver(push());
-    assert.equal(res.status, 201);
-    const { runId } = (await res.json()) as { runId: string };
-    assert.deepEqual(compareCalls, [`acme/demo ${"a".repeat(40)}...${"b".repeat(40)}`]);
-    const jobs = await db.sql<
-      { name: string; status: string }[]
-    >`SELECT name, status FROM jobs WHERE run_id = ${runId}`;
-    assert.deepEqual(
-      jobs.map((j) => ({ ...j })),
-      [{ name: "api", status: "queued" }],
-    );
-    const runs = await app.request("/api/v1/projects/demo/runs", { headers: admin });
-    assert.equal(((await runs.json()) as { runs: unknown[] }).runs.length, 1);
-  });
-
-  it("refuses a bad signature, a missing one and an unknown project without starting anything", async () => {
-    const before = await runCount();
-    const body = push();
-    assert.equal((await deliver(body, { "x-hub-signature-256": "sha256=00" })).status, 401);
-    assert.equal(
-      (await app.request("/webhooks/github/demo", { method: "POST", body, headers: { "x-github-event": "push" } }))
-        .status,
-      401,
-    );
-    // Unsigned, an unknown project answers like a known one: names do not leak.
-    assert.equal((await app.request("/webhooks/github/nope", { method: "POST", body })).status, 401);
-    assert.equal(
-      (
-        await app.request("/webhooks/github/nope", {
-          method: "POST",
-          body,
-          headers: { "x-hub-signature-256": sign(body) },
-        })
-      ).status,
-      404,
-    );
-    assert.equal(await runCount(), before);
-  });
-
-  it("without an `on` block, only a push to the default branch starts a run", async () => {
-    const put = await app.request("/api/v1/projects/plain", {
-      method: "PUT",
-      headers: admin,
-      body: JSON.stringify({
-        name: "Plain",
-        githubRepo: "acme/plain",
-        pipelineDef: { jobs: { api: { pipeline: "C", component: "api" } } },
-        components: [{ name: "api", pipeline: "C", context: "api", deployDir: "deploy/plain/api" }],
-      }),
-    });
-    assert.equal(put.status, 200);
-    const to = (branch: string, defaultBranch?: string) => {
-      const body = push({
-        ref: `refs/heads/${branch}`,
-        after: randomBytes(20).toString("hex"),
-        repository: { full_name: "acme/plain", ...(defaultBranch ? { default_branch: defaultBranch } : {}) },
-      });
-      return app.request("/webhooks/github/plain", {
-        method: "POST",
-        body,
-        headers: { "x-github-event": "push", "x-hub-signature-256": sign(body) },
-      });
-    };
-    assert.equal((await to("feature", "main")).status, 202);
-    assert.equal((await to("main")).status, 202, "default branch unknown: nothing runs");
-    assert.equal((await to("main", "main")).status, 201);
-  });
-
-  it("refuses a signed delivery about another repository", async () => {
-    const before = await runCount();
-    const body = push({ repository: { full_name: "mallory/copy-of-demo" } });
-    assert.equal((await deliver(body)).status, 403);
-    assert.equal((await deliver(push({ repository: undefined }))).status, 403, "no repository at all");
-    assert.equal(
-      (await deliver(push({ repository: { full_name: "ACME/Demo" } }))).status,
-      201,
-      "names are case-insensitive",
-    );
-    assert.equal(await runCount(), (before ?? 0) + 1);
-  });
-
-  it("a re-sent delivery starts nothing the second time", async () => {
-    const before = await runCount();
-    const body = push({ after: "c".repeat(40) });
-    const id = { "x-github-delivery": "5f1c0a2e-0000-4000-8000-000000000001" };
-    assert.equal((await deliver(body, id)).status, 201);
-    const again = await deliver(body, id);
-    assert.equal(again.status, 202);
-    assert.match(((await again.json()) as { reason: string }).reason, /duplicate/);
-    assert.equal(await runCount(), (before ?? 0) + 1);
-  });
-
-  it("refuses an oversized body, even without Content-Length", async () => {
-    const big = "x".repeat(MAX_WEBHOOK_BYTES + 1);
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode(big));
-        controller.close();
-      },
-    });
-    const res = await app.request("/webhooks/github/demo", {
-      method: "POST",
-      body: stream,
-      headers: { "x-github-event": "push", "x-hub-signature-256": sign(big) },
-      // Node needs duplex for a streamed request body.
-      duplex: "half",
-    });
-    assert.equal(res.status, 413);
-  });
-
-  it("answers ping, and ignores skip-ci pushes and branches without a trigger", async () => {
-    const before = await runCount();
-    assert.equal((await deliver("{}", { "x-github-event": "ping" })).status, 200);
-    const skip = await deliver(push({ head_commit: { message: "docs [skip ci]" } }));
-    assert.equal(skip.status, 202);
-    const other = await deliver(push({ ref: "refs/heads/feature" }));
-    assert.equal(other.status, 202);
-    assert.match(((await other.json()) as { reason: string }).reason, /no trigger/);
-    assert.equal(await runCount(), before);
-  });
-
-  it("a push whose net change misses the job's path filter skips the job", async () => {
-    const quiet = createApp(
-      { version: "test" },
-      {
-        sql: db.sql,
-        webhookSecret: SECRET,
-        compare: async () => ({ files: [{ filename: "README.md" }] }),
-        resolveTarget,
-      },
-    );
-    const body = push();
-    const res = await quiet.request("/webhooks/github/demo", {
-      method: "POST",
-      body,
-      headers: { "x-github-event": "push", "x-hub-signature-256": sign(body) },
-    });
-    const { runId } = (await res.json()) as { runId: string };
-    const [job] = await db.sql<{ status: string }[]>`SELECT status FROM jobs WHERE run_id = ${runId}`;
-    assert.equal(job?.status, "skipped");
-    const [run] = await db.sql<{ status: string }[]>`SELECT status FROM runs WHERE id = ${runId}`;
-    assert.equal(run?.status, "success");
-  });
-});
-
-// Last: it starts a run of its own, which earlier tests that count runs do not expect.
-describe("planning a delivery", () => {
-  const plan = (body: unknown, headers: Record<string, string> = admin) =>
-    app.request("/api/v1/projects/demo/plan", {
-      method: "POST",
-      body: JSON.stringify(body),
-      headers: { ...headers, "content-type": "application/json" },
-    });
-
-  it("reports what a push would run and writes nothing", async () => {
-    const before = await runCount();
-    const res = await plan({
-      event: "push",
-      payload: JSON.parse(push({ after: "d".repeat(40) })),
-      changedPaths: ["api/x.go"],
-    });
-    assert.equal(res.status, 200);
-    const body = (await res.json()) as { action: string; jobs: Record<string, string>; pathsFrom: string; sha: string };
-    assert.deepEqual([body.action, body.pathsFrom, body.sha], ["run", "given", "d".repeat(40)]);
-    assert.deepEqual(body.jobs, { api: "run" });
-    const skipped = (await (
-      await plan({ event: "push", payload: JSON.parse(push()), changedPaths: ["README.md"] })
-    ).json()) as {
-      jobs: Record<string, string>;
-    };
-    assert.deepEqual(skipped.jobs, { api: "skip" });
-    assert.equal(await runCount(), before, "no run was started");
-  });
-
-  it("gives the same answer a delivery acts on", async () => {
-    // Without given paths it asks the compare API, like the webhook (which here reports api/main.go).
-    const planned = (await (
-      await plan({ event: "push", payload: JSON.parse(push({ after: "e".repeat(40) })) })
-    ).json()) as {
-      jobs: Record<string, string>;
-      pathsFrom: string;
-    };
-    const body = push({ after: "e".repeat(40) });
-    const { runId } = (await (await deliver(body)).json()) as { runId: string };
-    const jobs = await db.sql<
-      { name: string; status: string }[]
-    >`SELECT name, status FROM jobs WHERE run_id = ${runId}`;
-    assert.equal(planned.pathsFrom, "compare");
-    assert.deepEqual(
-      Object.fromEntries(jobs.map((j) => [j.name, j.status === "queued" ? "run" : "skip"])),
-      planned.jobs,
-    );
-  });
-
-  it("judges a candidate definition instead of the stored one, and refuses an invalid one", async () => {
-    const candidate = { on: { push: { branches: ["main"] } }, jobs: { api: { pipeline: "C", component: "api" } } };
-    const res = (await (
-      await plan({ event: "push", payload: JSON.parse(push()), changedPaths: ["README.md"], pipelineDef: candidate })
-    ).json()) as {
-      jobs: Record<string, string>;
-    };
-    assert.deepEqual(res.jobs, { api: "run" }, "no path filter in the candidate");
-    const bad = await plan({ event: "push", payload: JSON.parse(push()), changedPaths: [], pipelineDef: { jobs: {} } });
-    assert.equal(bad.status, 422);
-  });
-
-  it("reports why nothing would run, and needs write access", async () => {
-    const ignored = (await (
-      await plan({ event: "push", payload: JSON.parse(push({ ref: "refs/heads/feature" })) })
-    ).json()) as {
-      action: string;
-      reason: string;
-    };
-    assert.equal(ignored.action, "ignore");
-    assert.match(ignored.reason, /no trigger/);
-    assert.equal((await plan({ event: "push" })).status, 400);
-    const viewer = { authorization: `Bearer ${await sessionFor("viewer")}` };
-    assert.equal((await plan({ event: "push", payload: {} }, viewer)).status, 403);
-  });
-});
-
 describe("manual runs", () => {
   const pull = (project: string, body: unknown, headers: Record<string, string> = admin) =>
     app.request(`/api/v1/projects/${project}/runs`, {
@@ -673,7 +423,7 @@ describe("manual runs", () => {
     assert.equal(await runCount(), before);
   });
 
-  it("a project with webhooks off ignores every delivery and is delivered by asking", async () => {
+  it("an older client's webhookKind is accepted and dropped; the project is delivered by asking", async () => {
     const put = await app.request("/api/v1/projects/quiet", {
       method: "PUT",
       headers: admin,
@@ -684,31 +434,36 @@ describe("manual runs", () => {
       }),
     });
     assert.equal(put.status, 200);
-    const before = await runCount();
-    const body = push({ repository: { full_name: "acme/quiet" } });
-    const res = await app.request("/webhooks/github/quiet", {
-      method: "POST",
-      body,
-      headers: { "x-github-event": "push", "x-hub-signature-256": sign(body) },
-    });
-    assert.equal(res.status, 202);
-    assert.match(((await res.json()) as { reason: string }).reason, /webhooks are off/);
-    assert.equal(await runCount(), before);
+    assert.equal("webhookKind" in ((await put.json()) as object), false);
     const pulled = (await (await pull("quiet", {})).json()) as { runId: string };
     assert.deepEqual(await jobsOf(pulled.runId), { app: "queued" });
   });
+});
 
-  it("without a webhook secret no webhook is accepted, signed or not", async () => {
-    const closed = createApp(
-      { version: "test" },
-      { sql: db.sql, compare: async () => ({ files: null }), resolveTarget },
-    );
-    const body = push();
-    const res = await closed.request("/webhooks/github/demo", {
-      method: "POST",
-      body,
-      headers: { "x-github-event": "push", "x-hub-signature-256": sign(body) },
+describe("no webhooks", () => {
+  it("a signed GitHub delivery finds no route and starts nothing", async () => {
+    const before = await runCount();
+    const body = JSON.stringify({
+      ref: "refs/heads/main",
+      after: "b".repeat(40),
+      repository: { full_name: "acme/demo" },
     });
-    assert.equal(res.status, 404);
+    const signature = `sha256=${createHmac("sha256", "any-secret").update(body).digest("hex")}`;
+    for (const path of ["/webhooks/github/demo", "/webhook/github/acme/demo"]) {
+      const res = await app.request(path, {
+        method: "POST",
+        body,
+        headers: { "x-github-event": "push", "x-hub-signature-256": signature },
+      });
+      assert.equal(res.status, 404, path);
+    }
+    assert.equal(await runCount(), before);
+  });
+
+  it("there is no plan endpoint either", () => {
+    assert.equal(
+      app.routes.some((r) => r.path.includes("/plan") || r.path.startsWith("/webhook")),
+      false,
+    );
   });
 });

@@ -133,8 +133,7 @@ describe("bumpImage against a repository that enforces compare-and-swap", () => 
     assert.equal(repo.log.at(-1), `commit:${bumpMessage("demo", "api", "1234567")}`);
   });
 
-  it("the message matches what the GitHub source treats as a self-commit", () => {
-    // Same pattern as plugins/source-github SELF_COMMIT_RE; plugins may not import each other.
+  it("the message keeps its documented format", () => {
     assert.match(bumpMessage("demo", "api", "1234567"), /^chore\([^/]+\/[^)]+\): (image|env) -> /);
   });
 

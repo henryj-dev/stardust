@@ -26,15 +26,7 @@ export interface Project {
   pipelineDef: PipelineDef | null;
   components: Component[];
   metadata: Record<string, unknown>;
-  /**
-   * How webhooks are treated: "repo" (a repository of its own), "workspace" (a
-   * monorepo shared with others), or "off" (none are accepted; runs start only
-   * when someone asks for one).
-   */
-  webhookKind: WebhookKind;
 }
-
-export type WebhookKind = "repo" | "workspace" | "off";
 
 const ID = /^[a-z][a-z0-9-]{0,62}$/;
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -48,8 +40,6 @@ export function validateProject(p: Project): void {
   if (!ID.test(p.id)) problems.push(`id "${p.id}" must be lower-case letters, digits and dashes`);
   if (p.githubRepo !== null && !REPO.test(p.githubRepo))
     problems.push(`githubRepo "${p.githubRepo}" is not owner/name`);
-  if (!["repo", "workspace", "off"].includes(p.webhookKind))
-    problems.push("webhookKind must be repo, workspace or off");
   const seen = new Set<string>();
   for (const [i, c] of p.components.entries()) {
     const at = `components[${i}]`;
@@ -95,12 +85,12 @@ export function validateProject(p: Project): void {
 export async function putProject(sql: Sql, p: Project): Promise<void> {
   validateProject(p);
   await sql`
-    INSERT INTO projects (id, name, github_repo, pipeline_def, components, metadata, webhook_kind)
+    INSERT INTO projects (id, name, github_repo, pipeline_def, components, metadata)
     VALUES (${p.id}, ${p.name}, ${p.githubRepo}, ${p.pipelineDef === null ? null : sql.json(p.pipelineDef as never)},
-            ${sql.json(p.components as never)}, ${sql.json(p.metadata as never)}, ${p.webhookKind})
+            ${sql.json(p.components as never)}, ${sql.json(p.metadata as never)})
     ON CONFLICT (id) DO UPDATE SET
       name = EXCLUDED.name, github_repo = EXCLUDED.github_repo, pipeline_def = EXCLUDED.pipeline_def,
-      components = EXCLUDED.components, metadata = EXCLUDED.metadata, webhook_kind = EXCLUDED.webhook_kind,
+      components = EXCLUDED.components, metadata = EXCLUDED.metadata,
       updated_at = now()`;
 }
 
@@ -111,7 +101,6 @@ type ProjectRow = {
   pipeline_def: PipelineDef | null;
   components: Component[];
   metadata: Record<string, unknown>;
-  webhook_kind: WebhookKind;
 };
 
 const toProject = (row: ProjectRow): Project => ({
@@ -121,12 +110,11 @@ const toProject = (row: ProjectRow): Project => ({
   pipelineDef: row.pipeline_def,
   components: row.components,
   metadata: row.metadata,
-  webhookKind: row.webhook_kind,
 });
 
 export async function getProject(sql: Sql, id: string): Promise<Project | null> {
   const [row] = await sql<ProjectRow[]>`
-    SELECT id, name, github_repo, pipeline_def, components, metadata, webhook_kind FROM projects WHERE id = ${id}`;
+    SELECT id, name, github_repo, pipeline_def, components, metadata FROM projects WHERE id = ${id}`;
   return row ? toProject(row) : null;
 }
 
@@ -135,9 +123,9 @@ export async function listProjects(sql: Sql, memberOf?: string): Promise<Project
   const rows =
     memberOf === undefined
       ? await sql<ProjectRow[]>`
-          SELECT id, name, github_repo, pipeline_def, components, metadata, webhook_kind FROM projects ORDER BY id`
+          SELECT id, name, github_repo, pipeline_def, components, metadata FROM projects ORDER BY id`
       : await sql<ProjectRow[]>`
-          SELECT p.id, p.name, p.github_repo, p.pipeline_def, p.components, p.metadata, p.webhook_kind
+          SELECT p.id, p.name, p.github_repo, p.pipeline_def, p.components, p.metadata
           FROM projects p JOIN project_members m ON m.project_id = p.id
           WHERE m.user_id = ${memberOf} ORDER BY p.id`;
   return rows.map(toProject);
@@ -152,7 +140,7 @@ export interface RunView {
   status: string;
   createdAt: string;
   finishedAt: string | null;
-  /** Who asked for a manual run; null for runs a webhook started. */
+  /** Who asked for the run; null for runs from before webhooks were removed. */
   requestedBy: string | null;
   jobs: Array<{ name: string; status: string; attempt: number; detail: Record<string, unknown> }>;
 }

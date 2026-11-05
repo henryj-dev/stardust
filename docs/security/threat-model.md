@@ -12,16 +12,16 @@ pull request.
 | Deploy repository credentials (`gitops-git.token`) | Whatever is committed there is deployed by the GitOps controller. **This is the most valuable credential: write access here is deployment.** |
 | Registry push credentials (builds namespace)       | Pushing an image under a deployed tag replaces what runs.                                                                                    |
 | age identity (`secrets-sops-age.ageKeyFile`)       | Decrypts every secret in the deploy repository.                                                                                              |
-| Webhook secret                                     | Lets a sender start builds.                                                                                                                  |
 | Sessions, API tokens, passwords                    | Act as a user. Stored as SHA-256 (tokens) and scrypt (passwords).                                                                            |
 | The PostgreSQL database                            | Holds the above as hashes, plus projects, runs and pending OpenID logins. Holds no plain credential.                                         |
 
 ## Who
 
-- **Anyone on the internet** who can reach the webhook URL and the dashboard.
-- **A contributor to a watched repository**, who controls commit contents,
-  branch names, file paths, Dockerfiles and commit messages, and may open
-  pull requests from forks.
+- **Anyone on the internet** who can reach the dashboard and the API.
+- **A contributor to a delivered repository**, who controls commit contents,
+  branch names, file paths, Dockerfiles and commit messages. They cannot start
+  a build: stardust takes no webhooks, and a run starts only when a user with
+  write access asks for one.
 - **A signed-in user** with fewer rights than they want (viewer, or no role).
 - **The OpenID provider's users**, who may choose their own username or email.
 - Out of scope: someone with cluster-admin, write access to the deploy
@@ -30,24 +30,13 @@ pull request.
 
 ## Boundaries and the controls on each
 
-### Webhook → server
+### No webhooks
 
-- HMAC-SHA256 over the raw body with a constant-time compare, before any
-  parsing or project lookup (`plugins/source-github/src/signature.ts`). The body is read up to
-  5 MiB and refused beyond (`packages/server/src/body.ts`).
-- The secret is shared by every webhook, so a valid signature only proves the
-  sender holds it. A delivery must also name the project's own repository, and
-  a delivery ID that already started a run starts nothing when re-sent.
-- Policy decides what a delivery may start (`plugins/source-github/src/policy.ts`):
-  only configured events and branches, deleted refs ignored, and pull requests
-  from forks refused — failing closed when the head repository cannot be read
-  (`fork.ts`).
-- The changed-path list comes from the source host's compare API, not from the
-  payload alone.
-- A project with `webhookKind: "off"` ignores every delivery, signed or not;
-  an installation without a `webhookSecret` accepts no webhook at all.
+- stardust exposes no webhook route (`/webhooks/…` answers 404), so nothing
+  outside an authenticated API call can start a build. Removed in favour of
+  asking for runs; there is no shared signing secret left to leak.
 
-### Manual runs → build
+### Runs → build
 
 - `POST /api/v1/projects/<id>/runs` needs write access to the project. The
   run records who asked.
@@ -57,9 +46,9 @@ pull request.
 - A commit given by hash must be in the default branch's history. GitHub
   serves commits from anywhere in a repository's fork network under the
   repository's name, so a hash alone could otherwise build someone's fork.
-- A manual run deploys what it builds. Delivering a repository you do not
-  control is a decision to run its code: pin a tag you have read, and keep
-  such projects at `webhookKind: "off"` so a merge upstream does not deploy.
+- A run deploys what it builds. Delivering a repository you do not control is
+  a decision to run its code: pin a tag you have read. A merge upstream does
+  not deploy by itself.
 
 ### Repository contents → build
 
@@ -75,12 +64,13 @@ pull request.
   the build steps: `RUN` steps execute in BuildKit's own sandbox and do not
   see it. But **whatever a built commit produces is pushed under the
   project's tag and then deployed**, so who can get a commit built is who can
-  deploy. Builds start only for pushes the policy accepts and for manual runs,
-  never for fork pull requests.
+  deploy. Builds start only when a user with write access asks for one.
 
 ### Worker → deploy repository
 
 - **A pull request is built, never deployed**: its head is unreviewed code.
+  No new pull-request runs are created since webhooks were removed; the guard
+  stays for runs recorded before that.
 - Image bumps are commits made with compare-and-swap on the expected head
   (`--force-with-lease`), so a concurrent change is never overwritten.
 - Env changes (not yet exposed through the API) are meant to reach pods by
@@ -130,9 +120,6 @@ pull request.
 
 Found in the pre-publication review (2026-10-27) and not fixed yet:
 
-- **One webhook secret for all projects.** Repository binding and delivery
-  deduplication limit what it allows, but anyone who can configure a webhook on
-  a watched repository holds it. A secret per project is the fix.
 - **Anyone can lock an account** by failing to sign in as it ten times in 15
   minutes, including the bootstrap administrator. The lockout is per username,
   not per username and address.

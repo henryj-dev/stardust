@@ -143,7 +143,6 @@ describe("project roles and permissions", () => {
       pipelineDef: null,
       components: [],
       metadata: {},
-      webhookKind: "repo",
     });
     const viewer = await createUser(db.sql, { username: "viewer", password: PASSWORD });
     await setProjectRole(db.sql, "demo", viewer.id, "viewer");
