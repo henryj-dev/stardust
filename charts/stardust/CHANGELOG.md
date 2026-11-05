@@ -1,5 +1,11 @@
 # stardust
 
+## 0.7.0
+
+### Minor Changes
+
+- [#13](https://github.com/henryj-dev/stardust/pull/13) [`c32037a`](https://github.com/henryj-dev/stardust/commit/c32037abaf6b1f17a3a8d1d1f8449aada0bc9be2) Thanks [@mack-erel](https://github.com/mack-erel)! - Webhooks are removed: a run starts only when someone with write access asks for one ("Pull and deliver", or `POST /api/v1/projects/:id/runs`), so a push or a merge never deploys by itself. `POST /webhooks/github/:project` and `POST /api/v1/projects/:id/plan` are gone, and projects no longer have a `webhookKind`. Upgrading needs no configuration change: a `webhookSecret` left in `plugins.source-github` is accepted, ignored and logged. Resolving a branch also works with Gitea's API now, which answers `branches/<name>` rather than `commits/heads/<name>`.
+
 ## 0.6.0
 
 ### Minor Changes
