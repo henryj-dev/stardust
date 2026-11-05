@@ -28,7 +28,6 @@ before(async () => {
     pipelineDef: { on: { workflow_dispatch: {} }, jobs: { api: { pipeline: "C", component: "api" } } },
     components: [{ name: "api", pipeline: "C", context: "api", deployDir: DIR }],
     metadata: {},
-    webhookKind: "repo",
   });
   await putProject(db.sql, {
     id: "web",
@@ -46,7 +45,6 @@ before(async () => {
       },
     ],
     metadata: {},
-    webhookKind: "repo",
   });
 });
 after(async () => db.close());

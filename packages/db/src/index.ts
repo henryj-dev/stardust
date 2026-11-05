@@ -32,9 +32,9 @@ export {
 export { MIGRATIONS_DIR, migrate } from "./migrate.ts";
 export type { ExternalIdentity, IdentitySignIn, PendingLoginRow } from "./oidc.ts";
 export { savePendingLogin, signInWithIdentity, takePendingLogin, usernameFrom } from "./oidc.ts";
-export type { Component, Project, RunView, WebhookKind } from "./projects.ts";
+export type { Component, Project, RunView } from "./projects.ts";
 export { getProject, getRun, listProjects, listRuns, ProjectError, putProject, validateProject } from "./projects.ts";
 export type { ClaimedJob, JobResult } from "./queue.ts";
 export { claimJob, finishJob, reclaimExpired, renewLease } from "./queue.ts";
 export type { StartRun } from "./runs.ts";
-export { advanceRun, claimDelivery, releaseDelivery, startRun } from "./runs.ts";
+export { advanceRun, startRun } from "./runs.ts";

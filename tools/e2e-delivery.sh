@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Push-to-deploy end to end in a kind cluster:
 #
-#   a commit pushed to Gitea → Gitea's GitHub-compatible webhook → stardust
-#   starts a run → the worker builds the image in a Job and pushes it to a
-#   local registry → the deploy repository is bumped to the digest → Flux
-#   applies it → a pod runs the image that was just built.
+#   a commit pushed to Gitea → nothing happens by itself (stardust takes no
+#   webhooks) → an operator asks for a run through the API → the worker builds
+#   the pushed commit in a Job and pushes it to a local registry → the deploy
+#   repository is bumped to the digest → Flux applies it → a pod runs the
+#   image that was just built.
 #
 # Expects a kind cluster created with examples/kind/delivery/kind-config.yaml
 # (CI's e2e-delivery job does that) and docker, kind, kubectl, helm, curl, jq.
@@ -67,9 +68,7 @@ CLUSTER="$CLUSTER" "$here/examples/kind/up.sh"
 
 # ---------------------------------------------------------------- gitea
 step gitea "Gitea with an admin token"
-SERVER_IP="$(kubectl -n stardust get svc stardust-server -o jsonpath='{.spec.clusterIP}')"
-[ -n "$SERVER_IP" ] || fail gitea "stardust-server has no cluster IP"
-sed "s/STARDUST_SERVER_IP/$SERVER_IP/" "$fixtures/gitea.yaml" | kubectl apply -f - >/dev/null
+kubectl apply -f "$fixtures/gitea.yaml" >/dev/null
 kubectl -n git rollout status deploy/gitea --timeout=300s
 kubectl -n git exec deploy/gitea -- gitea admin user create --admin --username e2e \
   --password "e2e-$(openssl rand -hex 8)" --email e2e@example.com --must-change-password=false >/dev/null
@@ -115,14 +114,13 @@ kubectl apply -f "$fixtures/flux.yaml" >/dev/null
 
 # ---------------------------------------------------------------- stardust delivery config
 step configure "stardust with the GitHub source, BuildKit builder and Git deploy repository"
-WEBHOOK_SECRET="$(openssl rand -hex 16)"
 ADMIN_PASSWORD="$(openssl rand -hex 16)"
 kubectl create namespace stardust-builds
 kubectl -n stardust-builds create secret generic git-clone --from-literal=token="$TOKEN"
 kubectl -n stardust-builds create secret generic registry-push --from-literal=config.json='{"auths":{}}'
 kubectl -n stardust create secret generic stardust-delivery \
   --from-literal=SOURCE_TOKEN="$TOKEN" --from-literal=DEPLOY_TOKEN="$TOKEN" \
-  --from-literal=WEBHOOK_SECRET="$WEBHOOK_SECRET" --from-literal=ADMIN_PASSWORD="$ADMIN_PASSWORD"
+  --from-literal=ADMIN_PASSWORD="$ADMIN_PASSWORD"
 cat >"$work/delivery-values.yaml" <<EOF
 builds:
   enabled: true
@@ -142,7 +140,6 @@ config:
     source-github:
       apiBaseUrl: $GITEA/api/v1
       token: { env: SOURCE_TOKEN }
-      webhookSecret: { env: WEBHOOK_SECRET }
     builder-buildkit:
       namespace: stardust-builds
       registry: "$REG"
@@ -167,14 +164,11 @@ sapi() { curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" -H "content-type: app
 sapi -X PUT http://127.0.0.1:18080/api/v1/projects/demo -d '{
   "name": "Demo",
   "githubRepo": "e2e/app",
-  "pipelineDef": { "on": { "push": { "branches": ["main"] } }, "jobs": { "api": { "pipeline": "C", "component": "api" } } },
+  "pipelineDef": { "jobs": { "api": { "pipeline": "C", "component": "api" } } },
   "components": [{ "name": "api", "pipeline": "C", "deployDir": "deploy/demo/api" }]
 }' >/dev/null
-api -X POST "http://127.0.0.1:13000/api/v1/repos/e2e/app/hooks" -d "{
-  \"type\": \"gitea\", \"active\": true, \"events\": [\"push\"], \"branch_filter\": \"*\",
-  \"config\": { \"url\": \"http://stardust-server.stardust.svc.cluster.local:8080/webhooks/github/demo\",
-                \"content_type\": \"json\", \"secret\": \"$WEBHOOK_SECRET\" }
-}" >/dev/null
+code="$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18080/webhooks/github/demo -d '{}')"
+[ "$code" = 404 ] || fail configure "the old webhook route answered $code, not 404"
 
 # ---------------------------------------------------------------- the push
 MESSAGE="delivered-$(openssl rand -hex 6)"
@@ -183,8 +177,17 @@ echo "$MESSAGE" >"$work/app/message.txt"
 gitpush "$work/app" app "feat: $MESSAGE"
 SHA="$(git -C "$work/app" rev-parse HEAD)"
 
-step run "the run for ${SHA:0:7} finishes"
 run_status() { sapi http://127.0.0.1:18080/api/v1/projects/demo/runs | jq -r --arg sha "$SHA" '.runs[] | select(.sha == $sha) | .status'; }
+step no-trigger "the push alone starts nothing"
+sleep 15
+[ -z "$(run_status)" ] || fail no-trigger "a run for ${SHA:0:7} started without being asked for"
+
+step ask "an operator asks for the default branch's head"
+asked="$(sapi -X POST http://127.0.0.1:18080/api/v1/projects/demo/runs -d '{}')"
+[ "$(echo "$asked" | jq -r .sha)" = "$SHA" ] || fail ask "the run is for $(echo "$asked" | jq -r .sha), not the pushed ${SHA:0:7}"
+[ "$(echo "$asked" | jq -r .ref)" = refs/heads/main ] || fail ask "the run is for $(echo "$asked" | jq -r .ref)"
+
+step run "the run for ${SHA:0:7} finishes"
 for i in $(seq 1 180); do
   status="$(run_status || true)"
   case "$status" in success | failed | cancelled) break ;; esac
@@ -217,4 +220,4 @@ kubectl -n demo rollout status deploy/api --timeout=300s
 step running "the new pod prints this run's message"
 logs_have_message() { kubectl -n demo logs deploy/api | grep -qx "$MESSAGE"; }
 wait_for running 120 logs_have_message
-echo "ok   [delivery] push -> build -> deploy commit -> Flux -> running pod"
+echo "ok   [delivery] push -> asked-for run -> build -> deploy commit -> Flux -> running pod"

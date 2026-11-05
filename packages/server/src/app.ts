@@ -1,16 +1,6 @@
-import {
-  type Action,
-  can,
-  type Logger,
-  loadPipelineDef,
-  type PipelineDef,
-  PipelineDefError,
-  pipelineDefFromComponents,
-  planRun,
-} from "@stardust/core";
+import { type Action, can, type Logger, PipelineDefError, pipelineDefFromComponents } from "@stardust/core";
 import {
   authenticate,
-  claimDelivery,
   createApiToken,
   createUser,
   getProject,
@@ -22,7 +12,6 @@ import {
   ProjectError,
   projectRole,
   putProject,
-  releaseDelivery,
   revokeApiToken,
   type Sql,
   savePendingLogin,
@@ -37,13 +26,10 @@ import {
   updateUser,
 } from "@stardust/db";
 import { type AccessRules, decideAccess, type Identity, type Oidc } from "@stardust/plugin-identity-oidc";
-import { type CompareResult, verifySignature } from "@stardust/plugin-source-github";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
-import { readBoundedBody } from "./body.ts";
 import type { RunEvents } from "./events.ts";
-import { planDelivery } from "./plan-delivery.ts";
 import { type PullTarget, type ResolvedTarget, TargetError } from "./source.ts";
 
 export interface AppInfo {
@@ -52,12 +38,8 @@ export interface AppInfo {
 
 export interface Services {
   sql: Sql;
-  /** Without it, webhooks are not accepted at all; runs start only when someone asks for one. */
-  webhookSecret?: string;
   /** The commit a manual run builds, from the source host. */
   resolveTarget: (repo: string, target: PullTarget) => Promise<ResolvedTarget>;
-  /** Net change of a push, from the source host's compare API. */
-  compare: (repo: string, base: string, head: string) => Promise<CompareResult>;
   /** Live run updates. Without it the events endpoint is not served. */
   events?: RunEvents;
   /** Sign-in through an OpenID provider. Without it only passwords work. */
@@ -88,84 +70,11 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   const { sql } = services;
   const log = services.log ?? silent;
 
-  app.post("/webhooks/github/:project", async (c) => {
-    const projectId = c.req.param("project");
-    const event = c.req.header("x-github-event");
-    const delivery = c.req.header("x-github-delivery");
-    if (!services.webhookSecret) return c.json({ error: "webhooks are not configured" }, 404);
-    // The signature first: an unsigned caller learns nothing, not even which projects exist.
-    const read = await readBoundedBody(c.req.raw);
-    if ("tooLarge" in read) {
-      log.warn("webhook payload too large", { project: projectId, event, delivery });
-      return c.json({ error: "payload too large" }, 413);
-    }
-    if (!verifySignature(read.body, c.req.header("x-hub-signature-256"), services.webhookSecret)) {
-      log.warn("webhook signature rejected", { project: projectId, event, delivery });
-      return c.json({ error: "invalid signature" }, 401);
-    }
-    const project = await getProject(sql, projectId);
-    if (!project) {
-      log.warn("webhook for an unknown project", { project: projectId, event, delivery });
-      return c.json({ error: "unknown project" }, 404);
-    }
-
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(read.body) as Record<string, unknown>;
-    } catch {
-      return c.json({ error: "body is not JSON" }, 400);
-    }
-
-    // A ping starts nothing; organisation webhooks send it without a repository.
-    if (event === "ping") return c.json({ pong: true });
-
-    // The secret is shared by every webhook, so a signature only proves the
-    // sender holds it. The delivery must also be about this project's repository:
-    // otherwise any repository with a stardust webhook could aim at any project.
-    const from = (payload.repository as { full_name?: unknown } | undefined)?.full_name;
-    if (project.githubRepo && (typeof from !== "string" || from.toLowerCase() !== project.githubRepo.toLowerCase())) {
-      log.warn("webhook from another repository", { project: projectId, event, delivery, repository: from });
-      return c.json({ error: "this delivery is not for the project's repository" }, 403);
-    }
-
-    const plan = await planDelivery({ project, event, payload, compare: services.compare });
-    if (plan.action === "ignore") {
-      log.info("webhook ignored", { project: projectId, event, delivery, reason: plan.reason });
-      return c.json({ ignored: true, reason: plan.reason }, 202);
-    }
-    if (plan.fallback) log.info("changed paths from the commits", { project: projectId, why: plan.fallback });
-
-    // A re-sent copy of a delivery that already started a run starts nothing.
-    if (delivery && !(await claimDelivery(sql, delivery, project.id))) {
-      log.info("webhook ignored", { project: projectId, event, delivery, reason: "duplicate delivery" });
-      return c.json({ ignored: true, reason: "duplicate delivery" }, 202);
-    }
-    let runId: string;
-    try {
-      runId = await startRun(sql, {
-        projectId: project.id,
-        event: plan.event,
-        trigger: plan.trigger,
-        ref: plan.ref,
-        sha: plan.sha,
-        def: plan.def,
-        changedPaths: plan.changedPaths,
-      });
-    } catch (err) {
-      if (delivery) await releaseDelivery(sql, delivery);
-      throw err;
-    }
-    log.info("run started", { project: projectId, event, delivery, run: runId, ref: plan.ref, sha: plan.sha });
-    return c.json({ runId }, 201);
-  });
-
-  // API bodies are small; the webhook has its own, larger bound.
-  // The plan endpoint takes a whole webhook payload and bounds it like the webhook does.
-  const smallBodies = bodyLimit({
-    maxSize: 64 * 1024,
-    onError: (c) => c.json({ error: "request body too large" }, 413),
-  });
-  app.use("/api/v1/*", (c, next) => (c.req.path.endsWith("/plan") ? next() : smallBodies(c, next)));
+  // API bodies are small.
+  app.use(
+    "/api/v1/*",
+    bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ error: "request body too large" }, 413) }),
+  );
 
   app.post("/api/v1/auth/login", async (c) => {
     const body = (await c.req.json().catch(() => null)) as { username?: unknown; password?: unknown } | null;
@@ -414,7 +323,6 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       pipelineDef: body.pipelineDef ?? null,
       components: body.components ?? [],
       metadata: body.metadata ?? {},
-      webhookKind: body.webhookKind ?? "repo",
     };
     try {
       await putProject(sql, project);
@@ -444,65 +352,11 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     return c.json({ users: await listUsers(sql) });
   });
 
-  // What a delivery would do, without doing it: the same decision as the webhook
-  // (policy, triggers, changed paths) and the fate of every job, assuming each
-  // job that runs succeeds. Nothing is written. For shadow-running a new
-  // installation next to an existing one, and for checking a pipeline definition.
-  app.post("/api/v1/projects/:id/plan", async (c) => {
-    const denied = await deny(c, "project:write", c.req.param("id"));
-    if (denied) return denied;
-    const project = await getProject(sql, c.req.param("id"));
-    if (!project) return c.json({ error: "unknown project" }, 404);
-    const read = await readBoundedBody(c.req.raw);
-    if ("tooLarge" in read) return c.json({ error: "request body too large" }, 413);
-    let body: { event?: unknown; payload?: unknown; changedPaths?: unknown; pipelineDef?: unknown };
-    try {
-      body = JSON.parse(read.body) as typeof body;
-    } catch {
-      return c.json({ error: "body is not JSON" }, 400);
-    }
-    if (typeof body.event !== "string" || typeof body.payload !== "object" || body.payload === null) {
-      return c.json({ error: "event and payload are required" }, 400);
-    }
-    const cp = body.changedPaths;
-    if (cp !== undefined && cp !== null && !(Array.isArray(cp) && cp.every((p) => typeof p === "string"))) {
-      return c.json({ error: "changedPaths must be a list of paths, or null" }, 400);
-    }
-    // A candidate definition is judged instead of the stored one: check a change
-    // before saving it, or replay a recorded delivery with the definition of its day.
-    if (body.pipelineDef !== undefined) {
-      try {
-        loadPipelineDef(body.pipelineDef);
-      } catch (err) {
-        if (err instanceof PipelineDefError) return c.json({ error: err.message }, 422);
-        throw err;
-      }
-    }
-    const judged = body.pipelineDef === undefined ? project : { ...project, pipelineDef: body.pipelineDef as never };
-    const plan = await planDelivery({
-      project: judged,
-      event: body.event,
-      payload: body.payload as Record<string, unknown>,
-      compare: services.compare,
-      ...(cp !== undefined ? { changedPaths: cp as string[] | null } : {}),
-    });
-    if (plan.action === "ignore") return c.json(plan);
-    let def: PipelineDef;
-    try {
-      def = loadPipelineDef(plan.def);
-    } catch (err) {
-      if (err instanceof PipelineDefError) return c.json({ error: err.message }, 422);
-      throw err;
-    }
-    const { def: _def, ...rest } = plan;
-    return c.json({ ...rest, jobs: planRun(def, plan.event, plan.changedPaths) });
-  });
-
-  // A manual run: someone with write access asks for a commit to be built and
-  // delivered. It is how projects with webhooks off are delivered, and how a
-  // public repository is delivered without letting every merge deploy. The
-  // definition's `on` block and path filters do not apply: the person asking
-  // has chosen the commit, and every job runs.
+  // A run: someone with write access asks for a commit to be built and
+  // delivered. It is the only way a run starts — stardust takes no webhooks, so
+  // a merge to a public repository never deploys by itself. The definition's
+  // `on` block and path filters do not apply: the person asking has chosen the
+  // commit, and every job runs.
   app.post("/api/v1/projects/:id/runs", async (c) => {
     const id = c.req.param("id");
     const denied = await deny(c, "project:write", id);

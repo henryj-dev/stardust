@@ -18,7 +18,6 @@ const project: Project = {
   pipelineDef: { on: { push: { branches: ["main"] } }, jobs: { api: { pipeline: "C", component: "api" } } },
   components: [{ name: "api", pipeline: "C", deployDir: "deploy/demo/api" }],
   metadata: { owner: "team-a" },
-  webhookKind: "repo",
 };
 
 it("stores and reads a project, as objects rather than JSON strings", async () => {

@@ -78,18 +78,21 @@ plugins:
 
 ### `source-github`
 
-Receives push and pull-request webhooks at
-`POST /webhooks/github/<project>` and works out what changed, and resolves
-what a [manual run](#manual-runs) builds. Webhooks work with GitHub and with
-hosts that send GitHub-compatible webhooks, such as Gitea; manual runs need
-GitHub's API.
+Resolves what a [run](#runs) builds: the head of a branch, a tag, or a
+commit, through GitHub's API or a GitHub-compatible one such as Gitea's.
+Branches and the default branch work with both; tags and commit hashes are
+known to work with GitHub only (Gitea's compare API does not say whether a
+commit is in a branch's history, so a hash is refused there). stardust takes
+no webhooks: nothing is built until someone asks.
 
-| Key                   |          |                                                                                                       |
-| --------------------- | -------- | ----------------------------------------------------------------------------------------------------- |
-| `webhookSecret`       | optional | Secret the webhook is signed with. Without it no webhook is accepted: runs start only when asked for. |
-| `token`               | optional | Token for the source host's API (a GitHub or Gitea token). Without one, public repositories only.     |
-| `appId`, `privateKey` | optional | GitHub App credentials, instead of `token`. _Not implemented yet._                                    |
-| `apiBaseUrl`          | optional | Defaults to `https://api.github.com`; Gitea: `https://gitea.example.com/api/v1`.                      |
+| Key                   |          |                                                                                                   |
+| --------------------- | -------- | ------------------------------------------------------------------------------------------------- |
+| `token`               | optional | Token for the source host's API (a GitHub or Gitea token). Without one, public repositories only. |
+| `appId`, `privateKey` | optional | GitHub App credentials, instead of `token`. _Not implemented yet._                                |
+| `apiBaseUrl`          | optional | Defaults to `https://api.github.com`; Gitea: `https://gitea.example.com/api/v1`.                  |
+
+A `webhookSecret` left over from an older configuration is ignored (the
+server logs that it is), so upgrading needs no edit.
 
 Without a token, GitHub's API answers anonymously at a lower rate limit
 (60 requests an hour per address); a manual run uses one to three.
@@ -144,17 +147,13 @@ curl -X PUT https://stardust.example.com/api/v1/projects/demo \
     "name": "Demo",
     "githubRepo": "acme/demo",
     "pipelineDef": {
-      "on": { "push": { "branches": ["main"] } },
-      "jobs": { "api": { "pipeline": "C", "component": "api", "if": { "paths": ["api/**"] } } }
+      "jobs": { "api": { "pipeline": "C", "component": "api" } }
     },
     "components": [{ "name": "api", "pipeline": "C", "context": "api", "deployDir": "deploy/demo/api" }]
   }'
 ```
 
-Then point the repository's webhook at
-`https://stardust.example.com/webhooks/github/demo` with the
-`webhookSecret`, for push events — or deliver it only by asking, see
-[Manual runs](#manual-runs).
+Then deliver it by asking for a run, see [Runs](#runs).
 
 Every manifest in `deployDir` that references
 `<registry>/demo/api:<tag>` is updated to the new build, pinned by digest.
@@ -195,10 +194,7 @@ The build log names the way taken (`[node-build] install: …`). pnpm is pinned
 }
 ```
 
-Check a definition before saving it with `POST /api/v1/projects/<id>/plan`,
-which reports what a delivery would run without running it.
-
-### Manual runs
+### Runs
 
 A maintainer of a project (or an administrator) can ask for a commit to be
 built and delivered, from the project's page ("Pull and deliver") or the API:
@@ -212,16 +208,11 @@ curl -X POST https://stardust.example.com/api/v1/projects/demo/runs \
 The body names at most one of `branch`, `tag` or `sha` (a full commit hash);
 an empty body takes the head of the default branch. A commit given by hash
 must be in the default branch's history. The run records who asked for it.
-Its definition's `on` block and path filters do not apply: every job runs,
-and the result is delivered.
+Every job of the definition runs, and the result is delivered.
 
-Set `"webhookKind": "off"` on a project to refuse its webhooks altogether.
-That is the safe way to deliver a public repository, or one you do not
-control: nothing reaches your cluster until someone asks for a specific
-commit, and pinning a tag says exactly which one.
+This is the only way a run starts. A merge, even to a public repository you do
+not control, reaches your cluster only when someone asks for a specific commit,
+and pinning a tag says exactly which one.
 
-| `webhookKind`    | Webhooks                                              |
-| ---------------- | ----------------------------------------------------- |
-| `repo` (default) | accepted; the repository is the project's own         |
-| `workspace`      | accepted; a monorepo shared with other projects       |
-| `off`            | ignored; the project is delivered by manual runs only |
+A definition may still carry an `on` block and `if.paths` filters from an
+older installation; they are accepted and have no effect.

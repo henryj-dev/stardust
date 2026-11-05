@@ -51,6 +51,14 @@ the previous pods keep running until the new ones are ready.
 
 ## Upgrade notes
 
+- **0.6.x → 0.7.0**: no configuration changes. Webhooks are gone: runs start
+  only when asked for ("Pull and deliver", or `POST /api/v1/projects/<id>/runs`).
+  `POST /webhooks/github/<project>` and `POST /api/v1/projects/<id>/plan`
+  answer 404. A `webhookSecret` in `plugins.source-github` is ignored (the
+  server logs it), and a project's `webhookKind` is no longer read or returned.
+  Remove the hook from your source repositories when convenient. The
+  `webhook_deliveries` table is dropped; `projects.webhook_kind` stays one more
+  release so the previous pods keep working during the rollout.
 - **0.4.1 → 0.4.2**: no configuration changes. The dashboard's origin comes
   from `config.server.publicUrl`; set it to the address people use. (0.4.1
   set it, but it took effect only in 0.4.2.)

@@ -1,37 +1,7 @@
-import type { CompareResult } from "@stardust/plugin-source-github";
-
 const headers = (token: string | undefined): Record<string, string> => ({
   accept: "application/vnd.github+json",
   ...(token ? { authorization: `Bearer ${token}` } : {}),
 });
-
-/**
- * The compare API of GitHub (or a host that mirrors its shape). A response
- * without a `files` list — Gitea's, for one — yields `files: null`, which makes
- * the caller fall back to the commits' union: more builds, never fewer.
- * Without a token the request is anonymous, which is enough for public
- * repositories (at a lower rate limit).
- */
-export function compareApi(apiBaseUrl: string, token: string | undefined, fetchFn: typeof fetch = fetch) {
-  const base = apiBaseUrl.replace(/\/+$/, "");
-  return async (repo: string, head1: string, head2: string): Promise<CompareResult> => {
-    const res = await fetchFn(`${base}/repos/${repo}/compare/${head1}...${head2}`, {
-      headers: headers(token),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!res.ok) throw Object.assign(new Error(`compare returned ${res.status}`), { reason: `http_${res.status}` });
-    const body = (await res.json()) as { files?: unknown };
-    if (!Array.isArray(body.files)) return { files: null };
-    return {
-      files: body.files
-        .filter((f): f is { filename: string; previous_filename?: unknown } => typeof f?.filename === "string")
-        .map((f) => ({
-          filename: f.filename,
-          ...(typeof f.previous_filename === "string" ? { previous_filename: f.previous_filename } : {}),
-        })),
-    };
-  };
-}
 
 /** What an operator asks to pull: the default branch, or one branch, tag or commit. */
 export type PullTarget = { branch: string } | { tag: string } | { sha: string } | Record<string, never>;
@@ -88,6 +58,20 @@ export function targetApi(apiBaseUrl: string, token: string | undefined, fetchFn
     return body.default_branch;
   };
 
+  // GitHub answers `commits/heads/<branch>`; Gitea does not (404) but answers
+  // `branches/<branch>` with the head as `commit.id`. The second is asked only
+  // after the first said 404, so GitHub never reaches it for a branch that exists.
+  const branchHead = async (repo: string, branch: string, what: string): Promise<string> => {
+    try {
+      return commitSha(await get(`${repo}/commits/heads/${path(branch)}`, what), what);
+    } catch (err) {
+      if (!(err instanceof TargetError) || !err.notFound) throw err;
+    }
+    const body = await get(`${repo}/branches/${path(branch)}`, what);
+    const commit = (body.commit ?? {}) as Record<string, unknown>;
+    return commitSha({ sha: commit.sha ?? commit.id }, what);
+  };
+
   return async (repo: string, target: PullTarget): Promise<ResolvedTarget> => {
     if ("tag" in target) {
       const what = `tag ${target.tag}`;
@@ -107,7 +91,6 @@ export function targetApi(apiBaseUrl: string, token: string | undefined, fetchFn
     }
     const branch = "branch" in target ? target.branch : await defaultBranch(repo);
     const what = `branch ${branch}`;
-    const sha = commitSha(await get(`${repo}/commits/heads/${path(branch)}`, what), what);
-    return { ref: `refs/heads/${branch}`, sha };
+    return { ref: `refs/heads/${branch}`, sha: await branchHead(repo, branch, what) };
   };
 }

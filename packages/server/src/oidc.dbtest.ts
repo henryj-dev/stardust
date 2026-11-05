@@ -36,8 +36,6 @@ async function appWith(rules: AccessRules = {}, autoCreate = true) {
     { version: "test" },
     {
       sql: db.sql,
-      webhookSecret: "s",
-      compare: async () => ({ files: null }),
       resolveTarget: async () => {
         throw new Error("not used here");
       },

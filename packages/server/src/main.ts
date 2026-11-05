@@ -3,10 +3,10 @@ import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/con
 import { createPluginRegistry, type Logger } from "@stardust/core";
 import { connect, ensureBootstrapAdmin, migrate } from "@stardust/db";
 import { createOidc, plugin as identityOidc, type Oidc } from "@stardust/plugin-identity-oidc";
-import { plugin as sourceGithub } from "@stardust/plugin-source-github";
+import { RETIRED_KEYS, plugin as sourceGithub } from "@stardust/plugin-source-github";
 import { createApp, type Services } from "./app.ts";
 import { RunEvents } from "./events.ts";
-import { compareApi, targetApi } from "./source.ts";
+import { targetApi } from "./source.ts";
 
 const configPath = process.env.STARDUST_CONFIG ?? "stardust.yaml";
 
@@ -51,21 +51,16 @@ if (source) {
   const events = new RunEvents(sql);
   await events.start();
   const apiBaseUrl = (source.apiBaseUrl as string | undefined) ?? "https://api.github.com";
-  // Both are optional: public repositories need no token, and without a webhook secret
-  // no webhook is accepted (runs start only when someone asks for one).
+  // Optional: public repositories need no token.
   const token = source.token === undefined ? undefined : await resolveSecretRef(source.token, `${at}.token`);
-  const webhookSecret =
-    source.webhookSecret === undefined
-      ? undefined
-      : await resolveSecretRef(source.webhookSecret, `${at}.webhookSecret`);
-  if (!webhookSecret) log.info("webhooks are off: no plugins.source-github.webhookSecret");
+  for (const [key, why] of Object.entries(RETIRED_KEYS)) {
+    if (source[key] !== undefined) log.warn(`${at}.${key} is ignored: ${why}`);
+  }
   services = {
     log,
     events,
     sql,
     ...(await oidcServices()),
-    ...(webhookSecret ? { webhookSecret } : {}),
-    compare: compareApi(apiBaseUrl, token),
     resolveTarget: targetApi(apiBaseUrl, token),
   };
 } else {

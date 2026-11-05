@@ -166,7 +166,7 @@ spec:
   values:
     database: { existingSecret: stardust-db, key: url }
     extraEnvFrom:
-      - secretRef: { name: stardust-delivery } # tokens, webhook secret, first admin's password
+      - secretRef: { name: stardust-delivery } # tokens, first admin's password
     builds: { enabled: true, namespace: stardust-builds }
     config:
       version: 1
@@ -176,7 +176,7 @@ spec:
         bootstrapAdmin: { username: admin, password: { env: ADMIN_PASSWORD } }
       database: { url: { env: DATABASE_URL } }
       plugins:
-        source-github: { token: { env: SOURCE_TOKEN }, webhookSecret: { env: WEBHOOK_SECRET } }
+        source-github: { token: { env: SOURCE_TOKEN } }
         builder-buildkit:
           namespace: stardust-builds
           registry: registry.example.com/my-projects
@@ -215,21 +215,21 @@ kubectl -n stardust get helmrelease stardust     # Ready=True
 
 ## 5. A first delivery
 
-Sign in as `admin`, register a project with `PUT /api/v1/projects/<id>`
-(its repository, a pipeline with `on.push.branches`, and a component with the
-deploy directory), and add a webhook in the source repository that sends
-pushes to `https://<server>/webhooks/github/<id>` with the webhook secret.
+Sign in as `admin` and register a project with `PUT /api/v1/projects/<id>`
+(its repository, a pipeline, and a component with the deploy directory).
 
-Have the GitOps controller apply the deploy repository too, then push a
-commit. The run builds the image, commits the digest to the deploy repository,
-and the controller rolls it out.
+Have the GitOps controller apply the deploy repository too, push a commit, and
+ask for a run: "Pull and deliver" on the project's page, or
+`POST /api/v1/projects/<id>/runs` (see [configuration.md](../configuration.md#runs)).
+The run builds the image, commits the digest to the deploy repository, and
+the controller rolls it out. stardust takes no webhooks, so a push alone
+builds nothing.
 
 ## Things that went wrong while writing this
 
 - **The chart failed to install through Flux in 0.1.0.** Flux appends the
   artifact digest to the chart version (`0.1.0+e6f18c5ec407`), and the chart
   label carried the `+`, which is not valid in a label. Fixed in 0.1.1.
-- **Gitea as the source host:** Gitea 28 sends webhooks to private addresses
-  only when they are in `[security] ALLOWED_HOST_LIST`, and with
-  `EGRESS_MODE = strict` it refused a listed private address too. Use the
-  default lax mode with a CIDR for the service range.
+- **Gitea as the source host:** Gitea's API answers `branches/<name>` but not
+  GitHub's `commits/heads/<name>`, so resolving a branch falls back to the
+  former when the latter is not found.

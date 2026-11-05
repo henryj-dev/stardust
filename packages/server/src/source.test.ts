@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { pullTarget } from "./app.ts";
-import { compareApi, TargetError, targetApi } from "./source.ts";
+import { TargetError, targetApi } from "./source.ts";
 
 const HEAD = "f".repeat(40);
 const TAG = "c".repeat(40);
@@ -70,14 +70,34 @@ it("tells a missing ref (the operator's mistake) from a failing host", async () 
   await assert.rejects(targetApi("https://api.test", undefined, odd)("acme/app", { tag: "v1" }), { notFound: false });
 });
 
-it("sends the token when there is one, for both the compare and the target API", async () => {
-  const { seen, fetchFn } = host({ "acme/app/compare/x...y": () => Response.json({ files: [] }) });
-  await targetApi("https://api.test", "t0k", fetchFn)("acme/app", { tag: "v1" });
-  await compareApi("https://api.test", "t0k", fetchFn)("acme/app", "x", "y");
-  await compareApi("https://api.test", undefined, fetchFn)("acme/app", "x", "y");
-  assert.deepEqual(
-    seen.map((s) => s.auth),
-    ["Bearer t0k", "Bearer t0k", null],
+it("sends the token when there is one, and asks anonymously otherwise", async () => {
+  const withToken = host();
+  await targetApi("https://api.test", "t0k", withToken.fetchFn)("acme/app", { tag: "v1" });
+  const anonymous = host();
+  await targetApi("https://api.test", undefined, anonymous.fetchFn)("acme/app", { tag: "v1" });
+  assert.ok(withToken.seen.length > 0 && anonymous.seen.length > 0);
+  assert.ok(withToken.seen.every((s) => s.auth === "Bearer t0k"));
+  assert.ok(anonymous.seen.every((s) => s.auth === null));
+});
+
+it("resolves a branch on a host without `commits/heads/` (Gitea) through `branches/`", async () => {
+  const gitea = host({
+    "acme/app/commits/heads/main": () => new Response("", { status: 404 }),
+    "acme/app/branches/main": () => Response.json({ name: "main", commit: { id: HEAD } }),
+    "acme/app/commits/heads/gone": () => new Response("", { status: 404 }),
+    "acme/app/branches/gone": () => new Response("", { status: 404 }),
+  });
+  const resolve = targetApi("https://api.test", "t0k", gitea.fetchFn);
+  assert.deepEqual(await resolve("acme/app", {}), { ref: "refs/heads/main", sha: HEAD });
+  await assert.rejects(resolve("acme/app", { branch: "gone" }), { notFound: true });
+  // A failing host is not retried as another shape: the second request is never made.
+  const down = host({ "acme/app/commits/heads/main": () => new Response("", { status: 503 }) });
+  await assert.rejects(targetApi("https://api.test", undefined, down.fetchFn)("acme/app", { branch: "main" }), {
+    notFound: false,
+  });
+  assert.equal(
+    down.seen.some((s) => s.path.startsWith("acme/app/branches/")),
+    false,
   );
 });
 
