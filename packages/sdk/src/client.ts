@@ -33,14 +33,36 @@ export interface RunView {
   jobs: JobView[];
 }
 
+/** How a component is built (W, C or N) and where its manifests live in the deploy repository. */
+export interface ProjectComponent {
+  name: string;
+  pipeline: "W" | "C" | "N";
+  /** Directory inside the source repository used as the build context. */
+  context?: string;
+  /** Not for pipeline N, which builds without a Dockerfile of its own. */
+  dockerfile?: string;
+  /** Pipeline N only: the port the app listens on. */
+  port?: number;
+  /** Pipeline N only: environment during the build. Not for secrets. */
+  buildEnv?: Record<string, string>;
+  deployDir: string;
+}
+
 export interface ProjectView {
   id: string;
   name: string;
   githubRepo: string | null;
   pipelineDef: unknown;
-  components: Array<{ name: string; pipeline: string; context?: string; dockerfile?: string; deployDir: string }>;
+  components: ProjectComponent[];
   metadata: Record<string, unknown>;
 }
+
+/**
+ * The whole project as `putProject` stores it. The server replaces every
+ * field: one left out is reset (`pipelineDef` to null, `metadata` to `{}`),
+ * so an edit sends back what it does not change.
+ */
+export type ProjectInput = Omit<ProjectView, "id">;
 
 /** A run without its jobs. */
 export type RunSummary = Omit<RunView, "jobs">;
@@ -100,6 +122,11 @@ export interface Client {
   projects(): Promise<ProjectListItem[]>;
   /** One project; an ApiError with status 404 when it does not exist or cannot be read. */
   project(id: string): Promise<ProjectView>;
+  /**
+   * Creates or replaces a project (administrators only). An ApiError carries
+   * the server's reason: 400 with what is invalid, 403 for anyone else.
+   */
+  putProject(id: string, project: ProjectInput): Promise<ProjectView>;
   /** The raw server-sent event stream of a project's runs. */
   events(projectId: string, signal?: AbortSignal): Promise<Response>;
 }
@@ -178,6 +205,19 @@ export function createClient(options: ClientOptions): Client {
     },
     async project(id) {
       return (await (await get(`/api/v1/projects/${encodeURIComponent(id)}`)).json()) as ProjectView;
+    },
+    async putProject(id, project) {
+      const path = `/api/v1/projects/${encodeURIComponent(id)}`;
+      const res = await doFetch(`${base}${path}`, {
+        method: "PUT",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify(project),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `PUT ${path} failed: ${res.status}`);
+      }
+      return (await res.json()) as ProjectView;
     },
     async runs(projectId) {
       const body = (await (await get(`/api/v1/projects/${encodeURIComponent(projectId)}/runs`)).json()) as {

@@ -31,6 +31,9 @@ $effect(() => {
 
 <main>
   <h1>{data.projectId}</h1>
+  {#if data.user?.isAdmin}
+    <p><a href={`/projects/${encodeURIComponent(data.projectId)}/settings`} data-settings>Settings</a></p>
+  {/if}
   <p data-live={live}>{live ? "Live" : "Connecting…"}</p>
   <form method="POST" action="?/pull" data-pull>
     <select name="kind" aria-label="What to pull">

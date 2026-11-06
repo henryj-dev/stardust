@@ -2,6 +2,8 @@ export type {
   Client,
   ClientOptions,
   JobView,
+  ProjectComponent,
+  ProjectInput,
   ProjectListItem,
   ProjectView,
   PullTarget,
