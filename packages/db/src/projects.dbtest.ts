@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, it } from "node:test";
-import { getProject, listRuns, type Project, putProject } from "./projects.ts";
+import { getProject, latestRuns, listRuns, type Project, putProject } from "./projects.ts";
 import { claimJob, finishJob } from "./queue.ts";
 import { startRun } from "./runs.ts";
 import { createTestDb, type TestDb } from "./testing.ts";
@@ -89,4 +89,28 @@ it("lists runs with their jobs and the details a job left behind", async () => {
   assert.deepEqual(run?.jobs, [
     { name: "api", status: "success", attempt: 1, detail: { digest: `sha256:${"b".repeat(64)}`, buildJob: "build-1" } },
   ]);
+});
+
+it("finds each project's newest run in one query, and leaves out projects without one", async () => {
+  await putProject(db.sql, { ...project, id: "quiet", name: "Quiet" });
+  const start = (sha: string) =>
+    startRun(db.sql, {
+      projectId: "demo",
+      event: "manual",
+      trigger: "manual",
+      ref: "refs/heads/main",
+      sha,
+      def: project.pipelineDef,
+      changedPaths: null,
+      requestedBy: "admin",
+    });
+  await start("c".repeat(40));
+  const newest = await start("d".repeat(40));
+  const last = await latestRuns(db.sql, ["demo", "quiet", "missing"]);
+  assert.deepEqual([...last.keys()], ["demo"]);
+  assert.equal(last.get("demo")?.id, newest);
+  assert.equal(last.get("demo")?.sha, "d".repeat(40));
+  assert.equal(last.get("demo")?.requestedBy, "admin");
+  assert.equal("jobs" in (last.get("demo") ?? {}), false);
+  assert.equal((await latestRuns(db.sql, [])).size, 0);
 });

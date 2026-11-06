@@ -100,8 +100,11 @@ case "$target" in
   web)
     docker run -d --name "$name" -p 127.0.0.1:13000:3000 "$image" >/dev/null
     wait_http 13000 / || fail web-root "GET / did not answer"
-    curl -fsS http://127.0.0.1:13000/ | grep -q "<title>stardust</title>" || fail web-root "page has no title"
-    echo "ok   [web-root]"
+    # Signed out, the home page sends the browser to sign in; the sign-in page renders on its own.
+    root="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' http://127.0.0.1:13000/)"
+    case "$root" in 303\ */login\?next=*) ;; *) fail web-root "GET / signed out answered '$root', not a redirect to /login" ;; esac
+    curl -fsS http://127.0.0.1:13000/login | grep -q "stardust</title>" || fail web-root "sign-in page has no title"
+    echo "ok   [web-root] / -> /login"
     docker stop --time 10 "$name" >/dev/null
     code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
     [ "$code" = "0" ] || fail web-sigterm "expected exit 0 after SIGTERM, got $code"

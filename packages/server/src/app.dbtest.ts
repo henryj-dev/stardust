@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { after, before, describe, it } from "node:test";
-import { createUser, ensureBootstrapAdmin, signIn } from "@stardust/db";
+import { createUser, ensureBootstrapAdmin, putProject, signIn, startRun } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
 import { createApp } from "./app.ts";
 import { type PullTarget, TargetError } from "./source.ts";
@@ -212,6 +212,34 @@ describe("API tokens", () => {
 });
 
 describe("reading projects and users", () => {
+  it("lists each project with its newest run, without jobs, or null when it has none", async () => {
+    const base = { githubRepo: "acme/listed", pipelineDef: null, metadata: {} };
+    const components = [{ name: "api", pipeline: "C" as const, deployDir: "deploy/listed/api" }];
+    await putProject(db.sql, { ...base, id: "listed", name: "Listed", components });
+    await putProject(db.sql, { ...base, id: "listed-idle", name: "Idle", components });
+    const run = (sha: string) =>
+      startRun(db.sql, {
+        projectId: "listed",
+        event: "manual",
+        trigger: "manual",
+        ref: "refs/heads/main",
+        sha,
+        def: { jobs: { api: { pipeline: "C", component: "api" } } },
+        changedPaths: null,
+        requestedBy: "admin",
+      });
+    await run("1".repeat(40));
+    const newest = await run("2".repeat(40));
+    const body = (await (await app.request("/api/v1/projects", { headers: admin })).json()) as {
+      projects: { id: string; lastRun: { id: string; sha: string; jobs?: unknown } | null }[];
+    };
+    const listed = body.projects.find((p) => p.id === "listed");
+    assert.equal(listed?.lastRun?.id, newest);
+    assert.equal(listed?.lastRun?.sha, "2".repeat(40));
+    assert.equal(listed?.lastRun?.jobs, undefined);
+    assert.equal(body.projects.find((p) => p.id === "listed-idle")?.lastRun, null);
+  });
+
   it("administrators list every project; others only their memberships; a project reads back as it was put", async () => {
     const all = (await (await app.request("/api/v1/projects", { headers: admin })).json()) as {
       projects: { id: string }[];
