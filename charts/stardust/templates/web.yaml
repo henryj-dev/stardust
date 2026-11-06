@@ -38,10 +38,11 @@ spec:
           ports:
             - name: http
               containerPort: {{ $port }}
+          # /healthz answers 200 without a session; / redirects signed-out requests to sign in.
           readinessProbe:
-            httpGet: { path: /, port: http }
+            httpGet: { path: /healthz, port: http }
           livenessProbe:
-            httpGet: { path: /, port: http }
+            httpGet: { path: /healthz, port: http }
             failureThreshold: 6
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
