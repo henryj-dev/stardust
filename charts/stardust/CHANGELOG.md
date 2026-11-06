@@ -1,5 +1,11 @@
 # stardust
 
+## 0.8.1
+
+### Patch Changes
+
+- [#17](https://github.com/henryj-dev/stardust/pull/17) [`e3cc849`](https://github.com/henryj-dev/stardust/commit/e3cc8497a995e6c2799fda7ff063e660b75a98c9) Thanks [@mack-erel](https://github.com/mack-erel)! - The dashboard answers `GET /healthz` (and `HEAD`) with `200 ok`, without a session or a call to the API. Since 0.8.0 a signed-out `/` redirects to sign in, which proxies and load balancers checking for a 2xx read as down; point their health checks at `/healthz`. The chart's web probes use it too.
+
 ## 0.8.0
 
 ### Minor Changes
