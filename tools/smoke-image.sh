@@ -99,7 +99,12 @@ case "$target" in
     ;;
   web)
     docker run -d --name "$name" -p 127.0.0.1:13000:3000 "$image" >/dev/null
-    wait_http 13000 / || fail web-root "GET / did not answer"
+    wait_http 13000 /healthz || fail web-health "GET /healthz did not answer"
+    [ "$(curl -fsS http://127.0.0.1:13000/healthz)" = "ok" ] || fail web-health "unexpected /healthz body"
+    # A session cookie does not change the answer.
+    hc="$(curl -sS -o /dev/null -w '%{http_code}' -b 'stardust_session=bogus' http://127.0.0.1:13000/healthz)"
+    [ "$hc" = "200" ] || fail web-health "GET /healthz with a session cookie answered $hc"
+    echo "ok   [web-health] /healthz 200"
     # Signed out, the home page sends the browser to sign in; the sign-in page renders on its own.
     root="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' http://127.0.0.1:13000/)"
     case "$root" in 303\ */login\?next=*) ;; *) fail web-root "GET / signed out answered '$root', not a redirect to /login" ;; esac
