@@ -70,5 +70,4 @@ $effect(() => {
       </tbody>
     </table>
   {/if}
-  <form method="POST" action="/logout"><button type="submit">Sign out</button></form>
 </main>

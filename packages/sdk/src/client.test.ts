@@ -84,3 +84,19 @@ it("pulls with a target and carries the server's reason when it is refused", asy
   await assert.rejects(client.pull("demo", { tag: "nope" }), { status: 422, message: "tag nope was not found" });
   assert.deepEqual(seen[1]?.body, { tag: "nope" });
 });
+
+it("reads who the session belongs to; a rejected token is null, other failures throw", async () => {
+  const user = { id: "u1", username: "ada", displayName: "Ada", isAdmin: false };
+  let status = 200;
+  const client = createClient({
+    baseUrl: "http://api.test",
+    token: "t0k",
+    fetch: async () => (status === 200 ? Response.json({ user }) : new Response("", { status })),
+  });
+  assert.deepEqual(await client.session(), user);
+  assert.equal(await client.checkToken(), true);
+  status = 401;
+  assert.equal(await client.session(), null);
+  status = 503;
+  await assert.rejects(client.session(), /503/);
+});

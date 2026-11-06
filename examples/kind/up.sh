@@ -55,7 +55,7 @@ check() { # <service> <port> <path> <expected text>
   echo "ok   [$1]"
 }
 check stardust-server 8080 /healthz '"status":"ok"'
-check stardust-web 3000 / '<title>stardust</title>'
+check stardust-web 3000 /login 'stardust</title>'
 
 cat <<EOF
 

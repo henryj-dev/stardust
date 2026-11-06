@@ -145,6 +145,49 @@ export interface RunView {
   jobs: Array<{ name: string; status: string; attempt: number; detail: Record<string, unknown> }>;
 }
 
+/** A run without its jobs: enough to say how a project's latest delivery went. */
+export type RunSummary = Omit<RunView, "jobs">;
+
+/**
+ * The newest run of each project, in one query. Projects without a run are
+ * absent from the map.
+ */
+export async function latestRuns(sql: Sql, projectIds: readonly string[]): Promise<Map<string, RunSummary>> {
+  if (projectIds.length === 0) return new Map();
+  const rows = await sql<
+    {
+      project_id: string;
+      id: string;
+      event: string;
+      trigger: string;
+      ref: string;
+      sha: string;
+      status: string;
+      created_at: Date;
+      finished_at: Date | null;
+      requested_by: string | null;
+    }[]
+  >`SELECT DISTINCT ON (project_id) project_id, id, event, trigger, ref, sha, status, created_at, finished_at, requested_by
+    FROM runs WHERE project_id IN ${sql([...projectIds])}
+    ORDER BY project_id, created_at DESC, id DESC`;
+  return new Map(
+    rows.map((r) => [
+      r.project_id,
+      {
+        id: r.id,
+        event: r.event,
+        trigger: r.trigger,
+        ref: r.ref,
+        sha: r.sha,
+        status: r.status,
+        createdAt: r.created_at.toISOString(),
+        finishedAt: r.finished_at?.toISOString() ?? null,
+        requestedBy: r.requested_by,
+      },
+    ]),
+  );
+}
+
 export async function getRun(sql: Sql, runId: string): Promise<RunView | null> {
   const [row] = await sql<{ project_id: string }[]>`SELECT project_id FROM runs WHERE id = ${runId}`;
   if (!row) return null;

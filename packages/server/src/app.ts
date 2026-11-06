@@ -4,6 +4,7 @@ import {
   createApiToken,
   createUser,
   getProject,
+  latestRuns,
   listApiTokens,
   listProjects,
   listRuns,
@@ -333,10 +334,17 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     return c.json(await getProject(sql, project.id));
   });
 
-  // Projects the caller may read: all of them for administrators, else their memberships.
+  // Projects the caller may read: all of them for administrators, else their
+  // memberships. Each carries its newest run (`lastRun`, without jobs) so a list
+  // can show how every project's latest delivery went in one request.
   app.get("/api/v1/projects", async (c) => {
     const user = c.get("user");
-    return c.json({ projects: await listProjects(sql, user.isAdmin ? undefined : user.id) });
+    const projects = await listProjects(sql, user.isAdmin ? undefined : user.id);
+    const last = await latestRuns(
+      sql,
+      projects.map((p) => p.id),
+    );
+    return c.json({ projects: projects.map((p) => ({ ...p, lastRun: last.get(p.id) ?? null })) });
   });
 
   app.get("/api/v1/projects/:id", async (c) => {

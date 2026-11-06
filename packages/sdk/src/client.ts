@@ -42,6 +42,14 @@ export interface ProjectView {
   metadata: Record<string, unknown>;
 }
 
+/** A run without its jobs. */
+export type RunSummary = Omit<RunView, "jobs">;
+
+/** A project as the list returns it: with its newest run, or null when it has none. */
+export interface ProjectListItem extends ProjectView {
+  lastRun: RunSummary | null;
+}
+
 /** What to pull: the default branch when empty, or one branch, tag or commit. */
 export type PullTarget = { branch: string } | { tag: string } | { sha: string } | Record<string, never>;
 
@@ -80,6 +88,8 @@ export interface Client {
   oidcCallback(query: string, state: string): Promise<LoginResult>;
   /** True when the token is accepted. */
   checkToken(): Promise<boolean>;
+  /** Who the token belongs to, or null when it is not accepted (401). */
+  session(): Promise<SessionUser | null>;
   runs(projectId: string): Promise<RunView[]>;
   /**
    * Starts a manual run: builds and delivers the commit the target resolves to.
@@ -87,7 +97,7 @@ export interface Client {
    */
   pull(projectId: string, target?: PullTarget): Promise<{ runId: string; ref: string; sha: string }>;
   /** Projects the caller may read. */
-  projects(): Promise<ProjectView[]>;
+  projects(): Promise<ProjectListItem[]>;
   /** One project; an ApiError with status 404 when it does not exist or cannot be read. */
   project(id: string): Promise<ProjectView>;
   /** The raw server-sent event stream of a project's runs. */
@@ -102,6 +112,14 @@ export function createClient(options: ClientOptions): Client {
     const res = await doFetch(`${base}${path}`, { ...init, headers: { ...headers(), ...(init.headers ?? {}) } });
     if (!res.ok) throw new ApiError(res.status, `${init.method ?? "GET"} ${path} failed: ${res.status}`);
     return res;
+  };
+  const session = async (): Promise<SessionUser | null> => {
+    try {
+      return ((await (await get("/api/v1/session")).json()) as { user: SessionUser }).user;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) return null;
+      throw err;
+    }
   };
 
   return {
@@ -152,16 +170,11 @@ export function createClient(options: ClientOptions): Client {
       await get("/api/v1/auth/logout", { method: "POST" });
     },
     async checkToken() {
-      try {
-        await get("/api/v1/session");
-        return true;
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 401) return false;
-        throw err;
-      }
+      return (await session()) !== null;
     },
+    session,
     async projects() {
-      return ((await (await get("/api/v1/projects")).json()) as { projects: ProjectView[] }).projects;
+      return ((await (await get("/api/v1/projects")).json()) as { projects: ProjectListItem[] }).projects;
     },
     async project(id) {
       return (await (await get(`/api/v1/projects/${encodeURIComponent(id)}`)).json()) as ProjectView;
