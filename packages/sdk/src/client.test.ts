@@ -100,3 +100,39 @@ it("reads who the session belongs to; a rejected token is null, other failures t
   status = 503;
   await assert.rejects(client.session(), /503/);
 });
+
+it("puts a whole project and carries the server's reason when it is refused", async () => {
+  const seen: Array<{ url: string; method: string | undefined; auth: string | null; body: unknown }> = [];
+  const project = {
+    name: "demo",
+    githubRepo: "acme/demo",
+    pipelineDef: { jobs: [] },
+    components: [{ name: "web", pipeline: "N" as const, port: 3000, deployDir: "apps/demo" }],
+    metadata: { team: "a" },
+  };
+  const client = createClient({
+    baseUrl: "http://api.test",
+    token: "t0k",
+    fetch: async (input, init) => {
+      seen.push({
+        url: String(input),
+        method: init?.method,
+        auth: new Headers(init?.headers).get("authorization"),
+        body: JSON.parse(String(init?.body)),
+      });
+      if (seen.length === 1) return Response.json({ id: "demo", ...project });
+      return Response.json({ error: "invalid project: components[0].pipeline must be W, C or N" }, { status: 400 });
+    },
+  });
+  assert.deepEqual(await client.putProject("demo", project), { id: "demo", ...project });
+  assert.deepEqual(seen[0], {
+    url: "http://api.test/api/v1/projects/demo",
+    method: "PUT",
+    auth: "Bearer t0k",
+    body: project,
+  });
+  await assert.rejects(client.putProject("demo", project), {
+    status: 400,
+    message: "invalid project: components[0].pipeline must be W, C or N",
+  });
+});

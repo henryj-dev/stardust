@@ -8,12 +8,15 @@ let { data } = $props();
 
 <main>
   <h1>Projects</h1>
+  {#if data.user?.isAdmin}
+    <p><a href="/admin/projects/new" data-new-project>New project</a></p>
+  {/if}
   {#if data.projects.length === 0}
     <p>No projects you can see yet.</p>
   {:else}
     <table>
       <thead>
-        <tr><th>Project</th><th>Repository</th><th>Last run</th><th>Ref</th><th>Commit</th><th>Status</th></tr>
+        <tr><th>Project</th><th>Repository</th><th>Last run</th><th>Ref</th><th>Commit</th><th>Status</th>{#if data.user?.isAdmin}<th></th>{/if}</tr>
       </thead>
       <tbody>
         {#each data.projects as project (project.id)}
@@ -30,6 +33,9 @@ let { data } = $props();
               <td data-status={project.lastRun.status}>{project.lastRun.status}</td>
             {:else}
               <td colspan="4">No runs yet.</td>
+            {/if}
+            {#if data.user?.isAdmin}
+              <td><a href={`/projects/${encodeURIComponent(project.id)}/settings`} data-edit-project>Edit</a></td>
             {/if}
           </tr>
         {/each}
