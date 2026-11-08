@@ -37,7 +37,7 @@ import {
   type RepoIO,
   stampPodTemplate,
 } from "@stardust/plugin-gitops-git";
-import { isMap, parse, parseAllDocuments, parseDocument } from "yaml";
+import { Document, isMap, parse, parseAllDocuments, parseDocument } from "yaml";
 
 /** SOPS, as the editor needs it: decrypt a document, and encrypt one unless it decrypts to the same. */
 export interface EnvCodec {
@@ -122,8 +122,25 @@ export function layersOf(project: Project): string[] {
   return [SHARED_LAYER, ...project.components.map((c) => c.name)];
 }
 
+// One operation at a time per repository: the git command line keeps one
+// local clone, and two fetches into it at once fail on its lock.
+const queues = new WeakMap<RepoIO, Promise<unknown>>();
+function serially<T>(repo: RepoIO, run: () => Promise<T>): Promise<T> {
+  const previous = queues.get(repo) ?? Promise.resolve();
+  const next = previous.then(run, run);
+  queues.set(
+    repo,
+    next.catch(() => {}),
+  );
+  return next;
+}
+
 /** Every editable layer of a project, with plain values and secret names. */
-export async function readEnv(editor: EnvEditor, project: Project): Promise<{ head: string; layers: EnvLayerView[] }> {
+export function readEnv(editor: EnvEditor, project: Project): Promise<{ head: string; layers: EnvLayerView[] }> {
+  return serially(editor.repo, () => readLayers(editor, project));
+}
+
+async function readLayers(editor: EnvEditor, project: Project): Promise<{ head: string; layers: EnvLayerView[] }> {
   const head = await editor.repo.headSha();
   const layers: EnvLayerView[] = [];
   for (const layer of layersOf(project)) {
@@ -194,7 +211,9 @@ export function checkChange(change: unknown): EnvChange {
 /** A plain layer file, keeping its comments and order; new keys go at the end. */
 function writePlain(current: string | null, values: Record<string, string>): string | null {
   if (Object.keys(values).length === 0) return null;
-  const doc = parseDocument(current ?? "{}");
+  // A new file starts as a block mapping; an empty `{}` would stay in flow style.
+  if (current === null) return new Document(values).toString();
+  const doc = parseDocument(current);
   if (!isMap(doc.contents)) throw new Error("the plain env layer is not a mapping");
   for (const item of [...doc.contents.items]) {
     const key = String((item.key as { value?: unknown })?.value ?? item.key);
@@ -259,14 +278,25 @@ function usesEnv(workload: unknown, configMap: string, secret: string): boolean 
  * env of every component that reads the layer, the kustomization lists, and
  * the pod template stamps.
  */
-export async function changeEnv(
+export function changeEnv(
   editor: EnvEditor,
   project: Project,
   layer: string,
   change: EnvChange,
   by: string,
 ): Promise<EnvChangeResult> {
-  if (!layersOf(project).includes(layer)) throw new EnvInputError(`"${layer}" is not a layer of this project`);
+  if (!layersOf(project).includes(layer))
+    return Promise.reject(new EnvInputError(`"${layer}" is not a layer of this project`));
+  return serially(editor.repo, () => applyChange(editor, project, layer, change, by));
+}
+
+async function applyChange(
+  editor: EnvEditor,
+  project: Project,
+  layer: string,
+  change: EnvChange,
+  by: string,
+): Promise<EnvChangeResult> {
   const components = layer === SHARED_LAYER ? project.components : project.components.filter((c) => c.name === layer);
   let outcome: Omit<EnvChangeResult, "status" | "commit"> | null = null;
 

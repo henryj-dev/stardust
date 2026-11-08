@@ -81,7 +81,7 @@ describe("env editing", () => {
     assert.equal(repo.commitCount(), 1);
     const files = repo.files();
 
-    assert.deepEqual(parse(files["deploy/env/shop/api/runtime.yaml"] as string), { PORT: "8080" });
+    assert.equal(files["deploy/env/shop/api/runtime.yaml"], `PORT: "8080"\n`, "a new layer file is a block mapping");
     assert.ok(files["deploy/env/shop/api/runtime.secret.enc.yaml"]?.includes("DB_PASSWORD"));
     const configMap = parse(files["deploy/apps/shop/api/env.configmap.yaml"] as string);
     // The shared layer comes along; the component's own value is there.
@@ -255,6 +255,22 @@ describe("env editing", () => {
       changeEnv(editor, project, "web", { expectedRevision: await revisionOf(editor, "web"), set: { A: "1" } }, "a"),
       /namespace/,
     );
+  });
+
+  it("runs one operation at a time against the repository", async () => {
+    const { repo, editor } = setup();
+    let active = 0;
+    let most = 0;
+    const head = repo.headSha.bind(repo);
+    repo.headSha = async () => {
+      active++;
+      most = Math.max(most, active);
+      await new Promise((r) => setTimeout(r, 5));
+      active--;
+      return head();
+    };
+    await Promise.all([readEnv(editor, project), readEnv(editor, project), readEnv(editor, project)]);
+    assert.equal(most, 1);
   });
 
   it("the commit message names keys, never values", () => {
