@@ -126,7 +126,10 @@ async function envServices(): Promise<Pick<Services, "env">> {
     recipients: sops.recipients,
     ...(sops.sopsBinary ? { bin: sops.sopsBinary } : {}),
   };
-  log.info("editing env enabled", { repo: repoFromUrl(gitops.url as string) ?? "(not GitHub)" });
+  log.info("editing env enabled", {
+    repo: repoFromUrl(gitops.url as string) ?? "(not GitHub)",
+    envRoot: (gitops.envRoot as string | undefined) ?? "deploy/env",
+  });
   return {
     env: {
       repo: new GitCliRepo({
@@ -139,6 +142,7 @@ async function envServices(): Promise<Pick<Services, "env">> {
         decrypt: (document) => decrypt(document, options),
         encryptIfChanged: (current, plain) => encryptIfChanged(current, plain, options),
       },
+      ...(gitops.envRoot ? { root: gitops.envRoot as string } : {}),
       // Derived from the age identity: secret, stable, and nothing more to configure.
       revisionKey: createHash("sha256").update("stardust env revision\0").update(identity).digest("hex"),
     },

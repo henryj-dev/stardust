@@ -273,6 +273,29 @@ describe("env editing", () => {
     assert.equal(most, 1);
   });
 
+  it("with a root, reads and writes the layers under it and never the default root's global layer", async () => {
+    const { repo, editor } = setup({
+      "clusters/b/env/shop/_shared/runtime.yaml": "LOG_LEVEL: debug\n",
+      // Another installation's global layer: this editor must not mix it in.
+      "deploy/env/_global/runtime.yaml": "FROM_OTHER_INSTALL: yes\n",
+    });
+    const rooted: EnvEditor = { ...editor, root: "clusters/b/env" };
+    const view = await readEnv(rooted, project);
+    assert.deepEqual(view.layers.find((l) => l.layer === SHARED_LAYER)?.plain, { LOG_LEVEL: "debug" });
+    await changeEnv(
+      rooted,
+      project,
+      "api",
+      { expectedRevision: await revisionOf(rooted, "api"), set: { PORT: "8080" } },
+      "alice",
+    );
+    const files = repo.files();
+    assert.equal(files["clusters/b/env/shop/api/runtime.yaml"], `PORT: "8080"\n`);
+    assert.equal(files["deploy/env/shop/api/runtime.yaml"], undefined);
+    const configMap = parse(files["deploy/apps/shop/api/env.configmap.yaml"] as string);
+    assert.deepEqual(configMap.data, { LOG_LEVEL: "debug", PORT: "8080" });
+  });
+
   it("the commit message names keys, never values", () => {
     const message = commitMessage(
       "shop",
