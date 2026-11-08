@@ -69,17 +69,40 @@ if grep -q "automountServiceAccountToken: true" <<<"$worker" && grep -q "service
 else
   bad builds-worker-token "the worker does not run with its own token"
 fi
-if [ "$(grep -c '^      automountServiceAccountToken: false' <<<"$out")" = "2" ]; then
-  pass builds-others-no-token
+if [ "$(grep -c '^      automountServiceAccountToken: false' <<<"$out")" = "1" ]; then
+  pass builds-web-no-token
 else
-  bad builds-others-no-token "server and web must stay without a token"
+  bad builds-web-no-token "the web pod must stay without a token"
 fi
-role="$(awk '/^kind: Role$/{r=1} /^---/{r=0} r' <<<"$out")"
+server="$(awk '/^# Source: stardust\/templates\/server.yaml/{w=1} /^---/{w=0} w' <<<"$out")"
+if grep -q "automountServiceAccountToken: true" <<<"$server" && grep -q "serviceAccountName: t-stardust-server" <<<"$server"; then
+  pass builds-server-logs-token
+else
+  bad builds-server-logs-token "the server does not run with its own token for build logs"
+fi
+role="$(awk '/^kind: Role$/{r=1} /^---/{r=0} r' <<<"$out" | awk '/name: t-stardust-builds$/{r=1} /name: t-stardust-build-logs$/{r=0} r')"
 if grep -q "namespace: ci-builds" <<<"$role" && ! grep -qE 'secrets|"\*"|\*' <<<"$role" \
   && [ "$(grep -c 'resources:' <<<"$role")" = "3" ]; then
   pass builds-role-scoped
 else
   bad builds-role-scoped "the Role is not limited to jobs, pods and pods/log in the builds namespace"
+fi
+# The server's Role only reads: pods and pod logs, get and list, in the builds namespace.
+logs_role="$(awk '/^# Source: stardust\/templates\/builds-rbac.yaml/{s=1} s' <<<"$out" \
+  | awk '/^kind: Role$/{r=1} /^---/{r=0} r' | awk '/name: t-stardust-build-logs$/{r=1} r')"
+logs_binding="$(awk '/^kind: RoleBinding$/{r=1} /^---/{r=0} r' <<<"$out" | awk '/name: t-stardust-build-logs$/{r=1} r')"
+if grep -q "namespace: ci-builds" <<<"$logs_role" && [ "$(grep -c 'resources:' <<<"$logs_role")" = "2" ] \
+  && ! grep -qE 'create|delete|update|patch|watch|secrets|jobs|\*' <<<"$logs_role" \
+  && grep -q "name: t-stardust-server" <<<"$logs_binding"; then
+  pass builds-server-role-read-only
+else
+  bad builds-server-role-read-only "the server's Role is not limited to reading pods and pod logs"
+fi
+off="$(render --set builds.enabled=true --set builds.logs=false)"
+if [ "$(grep -c '^      automountServiceAccountToken: false' <<<"$off")" = "2" ] && ! grep -q "t-stardust-build-logs" <<<"$off"; then
+  pass builds-logs-off-no-server-token
+else
+  bad builds-logs-off-no-server-token "with builds.logs=false the server must stay without a token or Role"
 fi
 if render --set builds.enabled=true | docker run --rm -i "$KUBECONFORM" -strict -summary -kubernetes-version 1.30.0 - >/dev/null 2>&1; then
   pass builds-kubeconform

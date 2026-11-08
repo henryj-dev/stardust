@@ -26,6 +26,7 @@ import {
   type UserChange,
   updateUser,
 } from "@stardust/db";
+import type { BuildLogReader } from "@stardust/plugin-builder-buildkit";
 import { type AccessRules, decideAccess, type Identity, type Oidc } from "@stardust/plugin-identity-oidc";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -43,6 +44,8 @@ export interface Services {
   resolveTarget: (repo: string, target: PullTarget) => Promise<ResolvedTarget>;
   /** Live run updates. Without it the events endpoint is not served. */
   events?: RunEvents;
+  /** Build logs from the cluster. Without it the log endpoint says logs are not enabled. */
+  buildLogs?: BuildLogReader;
   /** Sign-in through an OpenID provider. Without it only passwords work. */
   oidc?: {
     /** Resolved lazily: the provider may be unreachable when the server starts. */
@@ -412,6 +415,94 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     return c.json({ runs: await listRuns(sql, c.req.param("id")) });
   });
 
+  // One run of a project, with its jobs. A run of another project is unknown here.
+  const findRun = async (projectId: string, runId: string) =>
+    UUID.test(runId) ? ((await listRuns(sql, projectId, 1, runId))[0] ?? null) : null;
+
+  app.get("/api/v1/projects/:id/runs/:runId", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:read", id);
+    if (denied) return denied;
+    if (!(await getProject(sql, id))) return c.json({ error: "unknown project" }, 404);
+    const run = await findRun(id, c.req.param("runId"));
+    return run ? c.json(run) : c.json({ error: "unknown run" }, 404);
+  });
+
+  // A job's build log, as plain text, read from the build pod while the
+  // cluster keeps it. `?follow=true` keeps the response open while the build
+  // prints. 409: the build has not started printing yet, ask again shortly.
+  // 410: the pod is gone, and stardust keeps no copy of the log.
+  app.get("/api/v1/projects/:id/runs/:runId/jobs/:job/log", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:read", id);
+    if (denied) return denied;
+    if (!(await getProject(sql, id))) return c.json({ error: "unknown project" }, 404);
+    const run = await findRun(id, c.req.param("runId"));
+    if (!run) return c.json({ error: "unknown run" }, 404);
+    const job = run.jobs.find((j) => j.name === c.req.param("job"));
+    if (!job) return c.json({ error: "unknown job" }, 404);
+    const reader = services.buildLogs;
+    if (!reader) return c.json({ error: "build logs are not enabled on this server" }, 404);
+
+    // Ends the cluster request when the client goes away.
+    const upstream = new AbortController();
+    const stop = () => upstream.abort();
+    const clientSignal = c.req.raw.signal;
+    clientSignal.addEventListener("abort", stop, { once: true });
+    const release = () => clientSignal.removeEventListener("abort", stop);
+    let found: Awaited<ReturnType<BuildLogReader>>;
+    try {
+      found = await reader({
+        runId: run.id,
+        jobName: job.name,
+        follow: c.req.query("follow") === "true",
+        signal: upstream.signal,
+      });
+    } catch (err) {
+      release();
+      log.warn("reading a build log failed", {
+        project: id,
+        run: run.id,
+        job: job.name,
+        error: (err as Error).message,
+      });
+      return c.json({ error: "the build log could not be read from the cluster" }, 502);
+    }
+    if (found.state !== "open") {
+      release();
+      const finished = job.status !== "queued" && job.status !== "running";
+      if (found.state === "none" && finished)
+        return c.json({ error: "this build's log is no longer available: the cluster has cleaned up the build" }, 410);
+      return c.json({ error: "the build has not started printing yet" }, 409);
+    }
+    const body = found.body;
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          for await (const chunk of body) controller.enqueue(chunk);
+        } catch {
+          // The client left, or the cluster ended the stream: end the response either way.
+        } finally {
+          release();
+          try {
+            controller.close();
+          } catch {
+            // Already cancelled.
+          }
+        }
+      },
+      cancel: stop,
+    });
+    return new Response(stream, {
+      headers: {
+        // Text, never HTML: the log is shown as it was printed.
+        "content-type": "text/plain; charset=utf-8",
+        "x-content-type-options": "nosniff",
+        "cache-control": "no-store",
+      },
+    });
+  });
+
   // Server-sent events: a `runs-snapshot` first, then a `runs-delta` per changed
   // run, and a comment heartbeat every few seconds.
   app.get("/api/v1/projects/:id/events", async (c) => {
@@ -454,6 +545,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
 // characters git refuses or a URL would need escaping for.
 const REF_NAME = /^(?![-/])(?!.*\.\.)(?!.*\/\/)(?!.*[/.]$)[A-Za-z0-9._/-]{1,200}$/;
 const COMMIT = /^[0-9a-f]{40}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** The target of a manual run from its request body, or why the body is wrong. */
 export function pullTarget(body: Record<string, unknown>): PullTarget | string {

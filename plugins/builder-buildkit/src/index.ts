@@ -73,5 +73,7 @@ export const plugin = definePlugin({
 });
 export type { BuildOutcome, RunBuildOptions } from "./executor.ts";
 export { runBuild } from "./executor.ts";
-export type { KubeClient, KubeResponse } from "./kube.ts";
+export type { KubeClient, KubeResponse, KubeStreamClient, KubeStreamResponse } from "./kube.ts";
 export { inClusterClient } from "./kube.ts";
+export type { BuildLog, BuildLogOptions, BuildLogQuery, BuildLogReader } from "./logs.ts";
+export { buildLogReader } from "./logs.ts";

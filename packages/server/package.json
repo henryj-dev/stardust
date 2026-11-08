@@ -11,6 +11,7 @@
     "@stardust/config": "workspace:*",
     "@stardust/core": "workspace:*",
     "@stardust/db": "workspace:*",
+    "@stardust/plugin-builder-buildkit": "workspace:*",
     "@stardust/plugin-identity-oidc": "workspace:*",
     "@stardust/plugin-source-github": "workspace:*",
     "hono": "^4.13.14"

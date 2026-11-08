@@ -227,6 +227,9 @@ importers:
       '@stardust/db':
         specifier: workspace:*
         version: link:../db
+      '@stardust/plugin-builder-buildkit':
+        specifier: workspace:*
+        version: link:../../plugins/builder-buildkit
       '@stardust/plugin-identity-oidc':
         specifier: workspace:*
         version: link:../../plugins/identity-oidc

@@ -1,7 +1,9 @@
+import { existsSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/config";
 import { createPluginRegistry, type Logger } from "@stardust/core";
 import { connect, ensureBootstrapAdmin, migrate } from "@stardust/db";
+import { plugin as builderBuildkit, buildLogReader, inClusterClient } from "@stardust/plugin-builder-buildkit";
 import { createOidc, plugin as identityOidc, type Oidc } from "@stardust/plugin-identity-oidc";
 import { RETIRED_KEYS, plugin as sourceGithub } from "@stardust/plugin-source-github";
 import { createApp, type Services } from "./app.ts";
@@ -21,10 +23,10 @@ let config: StardustConfig;
 let services: Services | undefined;
 try {
   config = await loadConfig(configPath);
-  // The server reads only the source plugin's section; the registry still
-  // validates every enabled section so a typo stops start-up here too.
-  const mine = new Set(["source-github", "identity-oidc"]);
-  createPluginRegistry([sourceGithub, identityOidc]).resolve(
+  // The server reads only these sections (the builder's for its namespace, to
+  // show build logs); the registry validates them so a typo stops start-up here too.
+  const mine = new Set(["source-github", "identity-oidc", "builder-buildkit"]);
+  createPluginRegistry([sourceGithub, identityOidc, builderBuildkit]).resolve(
     Object.fromEntries(Object.entries(config.plugins).filter(([name]) => mine.has(name))),
   );
 } catch (err) {
@@ -61,10 +63,26 @@ if (source) {
     events,
     sql,
     ...(await oidcServices()),
+    ...buildLogServices(),
     resolveTarget: targetApi(apiBaseUrl, token),
   };
 } else {
   console.warn("source-github is not configured: only /healthz is served");
+}
+
+/**
+ * Build logs, read from the build pods: only with builds configured and a
+ * service account token mounted (the chart gives the server a read-only one).
+ */
+function buildLogServices(): Pick<Services, "buildLogs"> {
+  const section = config.plugins["builder-buildkit"] as { namespace?: string } | undefined;
+  if (!section?.namespace) return {};
+  if (!process.env.KUBERNETES_SERVICE_HOST || !existsSync("/var/run/secrets/kubernetes.io/serviceaccount/token")) {
+    log.info("build logs are off: no Kubernetes service account is mounted");
+    return {};
+  }
+  log.info("build logs enabled", { namespace: section.namespace });
+  return { buildLogs: buildLogReader(inClusterClient(), section.namespace) };
 }
 
 /** OpenID sign-in, when configured. Discovery runs at first use and is retried after a failure. */

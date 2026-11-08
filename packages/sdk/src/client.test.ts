@@ -136,3 +136,30 @@ it("puts a whole project and carries the server's reason when it is refused", as
     message: "invalid project: components[0].pipeline must be W, C or N",
   });
 });
+
+it("reads one run, and relays a build log's response whatever its status", async () => {
+  const seen: Array<{ url: string; auth: string | null; signal: boolean }> = [];
+  const client = createClient({
+    baseUrl: "http://api.test",
+    token: "t0k",
+    fetch: async (input, init) => {
+      const url = String(input);
+      seen.push({ url, auth: new Headers(init?.headers).get("authorization"), signal: init?.signal != null });
+      if (url.endsWith("/log?follow=true")) return new Response("line 1\n", { status: 200 });
+      if (url.endsWith("/log")) return Response.json({ error: "gone" }, { status: 410 });
+      if (url.endsWith("/runs/r%2F1")) return Response.json({ error: "unknown run" }, { status: 404 });
+      return Response.json({ id: "r1", jobs: [] });
+    },
+  });
+  assert.deepEqual(await client.run("demo", "r1"), { id: "r1", jobs: [] });
+  await assert.rejects(client.run("demo", "r/1"), { status: 404 });
+  const live = await client.buildLog("demo", "r1", "web", { follow: true, signal: new AbortController().signal });
+  assert.equal(await live.text(), "line 1\n");
+  assert.equal((await client.buildLog("demo", "r1", "web")).status, 410);
+  assert.deepEqual(seen[0], { url: "http://api.test/api/v1/projects/demo/runs/r1", auth: "Bearer t0k", signal: false });
+  assert.deepEqual(seen[2], {
+    url: "http://api.test/api/v1/projects/demo/runs/r1/jobs/web/log?follow=true",
+    auth: "Bearer t0k",
+    signal: true,
+  });
+});

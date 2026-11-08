@@ -62,6 +62,10 @@ builds:
   enabled: false
   namespace: stardust-builds
   createNamespace: false
+  # Show build logs in the dashboard: the server gets its own service account
+  # with a token and a read-only Role (pods and pod logs) in the builds
+  # namespace. false keeps the server without a token; runs then show no log.
+  logs: true
 
 serviceAccount:
   create: true

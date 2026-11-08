@@ -25,7 +25,10 @@ let { data } = $props();
             <td>{project.githubRepo ?? "—"}</td>
             {#if project.lastRun}
               <td>
-                {new Date(project.lastRun.createdAt).toLocaleString()}
+                <a
+                  href={`/projects/${encodeURIComponent(project.id)}/runs/${encodeURIComponent(project.lastRun.id)}`}
+                  data-run-link>{new Date(project.lastRun.createdAt).toLocaleString()}</a
+                >
                 {#if project.lastRun.requestedBy}<br /><small>pulled by {project.lastRun.requestedBy}</small>{/if}
               </td>
               <td>{project.lastRun.ref}</td>

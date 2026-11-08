@@ -189,6 +189,9 @@
         },
         "createNamespace": {
           "type": "boolean"
+        },
+        "logs": {
+          "type": "boolean"
         }
       }
     },
