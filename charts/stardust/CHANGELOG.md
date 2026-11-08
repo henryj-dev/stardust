@@ -1,5 +1,13 @@
 # stardust
 
+## 0.11.0
+
+### Minor Changes
+
+- [#23](https://github.com/henryj-dev/stardust/pull/23) [`8887173`](https://github.com/henryj-dev/stardust/commit/888717308cff8afb6831e7e31e711afccf5a85ec) Thanks [@mack-erel](https://github.com/mack-erel)! - An audit log records who did what: sign-ins and failed sign-ins, sign-outs, users, password resets, API tokens, projects, members and runs. Administrators read it at **Audit log** (`GET /api/v1/audit`), a project's maintainers read their project's events; events name things and never hold a password, token or secret. `audit.retentionDays` (365 by default) sets how long events are kept.
+
+- [#24](https://github.com/henryj-dev/stardust/pull/24) [`865be8d`](https://github.com/henryj-dev/stardust/commit/865be8de616b7aa20de0871c3f5f3f8393bf27e3) Thanks [@mack-erel](https://github.com/mack-erel)! - Maintainers edit a project's env and secrets in the dashboard (**Environment** on the project page, `GET`/`PATCH /api/v1/projects/<id>/env`). Each change is one compare-and-swap commit to the deploy repository: the env layer, the rendered ConfigMap and SOPS-encrypted Secret of every component that reads it, and a pod-template stamp so the workloads roll out; a layer changed since it was read is refused. Secret values are write-only. It is off until the server is given `gitops-git`, `secrets-sops-age` and the age identity (`envEditing.ageKeySecret` in the chart); the server image now has git and sops.
+
 ## 0.10.0
 
 ### Minor Changes
