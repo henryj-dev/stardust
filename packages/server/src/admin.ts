@@ -10,7 +10,7 @@
  * sessions end.
  */
 import { loadConfig } from "@stardust/config";
-import { connect, migrate, resetPassword } from "@stardust/db";
+import { connect, migrate, recordAudit, resetPassword } from "@stardust/db";
 
 const [command, username] = process.argv.slice(2);
 if (command !== "reset-password" || !username) {
@@ -32,6 +32,11 @@ try {
     console.error(`no user "${username}"`);
     process.exitCode = 1;
   } else {
+    await recordAudit(sql, {
+      actor: { kind: "system", userId: null, name: "admin-cli" },
+      action: "user.password.reset",
+      target: username,
+    });
     console.log(`password of "${username}" reset; their sessions have ended`);
   }
 } catch (err) {

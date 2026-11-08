@@ -217,6 +217,14 @@ export async function listApiTokens(sql: Sql, userId: string): Promise<ApiToken[
 }
 
 /** Deletes one of the user's own tokens; false when there is no such token of theirs. */
+/** The API token a bearer value is, for the audit log; null for a session or an unknown value. */
+export async function apiTokenFor(sql: Sql, token: string): Promise<{ id: string; name: string } | null> {
+  if (!token.startsWith(API_TOKEN_PREFIX)) return null;
+  const [row] = await sql<{ id: string; name: string }[]>`
+    SELECT id, name FROM api_tokens WHERE token_hash = ${tokenHash(token)}`;
+  return row ?? null;
+}
+
 export async function revokeApiToken(sql: Sql, userId: string, id: string): Promise<boolean> {
   if (!/^[0-9a-f-]{36}$/.test(id)) return false;
   const rows = await sql`DELETE FROM api_tokens WHERE id = ${id} AND user_id = ${userId} RETURNING id`;

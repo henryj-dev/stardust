@@ -5,6 +5,16 @@ import { isHealthCheck } from "$lib/server/health";
 export const handle: Handle = async ({ event, resolve }) => {
   // Health checks must not depend on the API or a session.
   if (isHealthCheck(event.url.pathname)) return resolve(event);
+  // For the API's audit log. The address is the one SvelteKit sees: behind a
+  // proxy, set ADDRESS_HEADER (and XFF_DEPTH) so it is the browser's.
+  const userAgent = event.request.headers.get("user-agent")?.slice(0, 500);
+  let forwardedFor: string | undefined;
+  try {
+    forwardedFor = event.getClientAddress();
+  } catch {
+    // Not known in this environment.
+  }
+  event.locals.forward = { ...(forwardedFor ? { forwardedFor } : {}), ...(userAgent ? { userAgent } : {}) };
   const token = event.cookies.get(SESSION_COOKIE);
   if (token) {
     // Ask once per request who the token belongs to. A token the API rejects

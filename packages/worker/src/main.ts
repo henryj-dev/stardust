@@ -5,6 +5,7 @@ import { connect, migrate } from "@stardust/db";
 import { plugin as builderPlugin, inClusterClient } from "@stardust/plugin-builder-buildkit";
 import { GitCliRepo, plugin as gitopsPlugin, installationTokens, repoFromUrl } from "@stardust/plugin-gitops-git";
 import { buildHandler } from "./build-handler.ts";
+import { startHousekeeping } from "./housekeeping.ts";
 import { type JobHandler, runWorker } from "./loop.ts";
 
 const configPath = process.env.STARDUST_CONFIG ?? "stardust.yaml";
@@ -88,5 +89,6 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 
 const workerId = `${hostname()}:${process.pid}`;
 console.log(`stardust worker started (${workerId})`);
+startHousekeeping({ sql, log, auditRetentionDays: config.audit.retentionDays, signal: stop.signal });
 await runWorker({ sql, workerId, handler, log, signal: stop.signal });
 await sql.end({ timeout: 5 });

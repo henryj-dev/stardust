@@ -1,11 +1,16 @@
 import { type Action, can, type Logger, PipelineDefError, pipelineDefFromComponents } from "@stardust/core";
 import {
+  type AuditActor,
+  type AuditInput,
+  type AuditQuery,
+  apiTokenFor,
   authenticate,
   createApiToken,
   createUser,
   getProject,
   latestRuns,
   listApiTokens,
+  listAudit,
   listProjects,
   listRuns,
   listUsers,
@@ -13,6 +18,7 @@ import {
   ProjectError,
   projectRole,
   putProject,
+  recordAudit,
   revokeApiToken,
   type Sql,
   savePendingLogin,
@@ -74,6 +80,15 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   const { sql } = services;
   const log = services.log ?? silent;
 
+  // Adds an audit event; also for requests that have no session yet (signing in).
+  const auditAnonymous = async (c: Context, event: AuditInput) => {
+    try {
+      await recordAudit(sql, { ...clientOf(c), ...event });
+    } catch (err) {
+      log.error("writing an audit event failed", { action: event.action, error: (err as Error).message });
+    }
+  };
+
   // API bodies are small.
   app.use(
     "/api/v1/*",
@@ -92,11 +107,21 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
         username: result.knownUser ? body.username : "(not a user)",
         reason: result.reason,
       });
+      await auditAnonymous(c, {
+        action: "auth.login.failed",
+        actor: { kind: "anonymous", userId: null, name: result.knownUser ? body.username : null },
+        detail: { via: "password", reason: result.reason },
+      });
       return result.reason === "locked"
         ? c.json({ error: "too many failed attempts; try again later" }, 429)
         : c.json({ error: "invalid username or password" }, 401);
     }
     log.info("signed in", { username: result.user.username });
+    await auditAnonymous(c, {
+      action: "auth.login",
+      actor: { kind: "user", userId: result.user.id, name: result.user.username },
+      detail: { via: "password" },
+    });
     return c.json({ token: result.token, user: result.user });
   });
 
@@ -138,6 +163,12 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     const access = decideAccess(identity, oidc.rules);
     if (!access.allowed) {
       log.warn("OpenID sign-in refused by group", { issuer: identity.issuer, subject: identity.subject });
+      await auditAnonymous(c, {
+        action: "auth.login.failed",
+        actor: { kind: "anonymous", userId: null, name: null },
+        target: identity.subject,
+        detail: { via: "oidc", reason: "group", issuer: identity.issuer },
+      });
       return c.json({ error: "your account is not allowed to use stardust" }, 403);
     }
     const result = await signInWithIdentity(sql, identity, {
@@ -146,6 +177,12 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     });
     if (!result.ok) {
       log.warn("OpenID sign-in refused", { subject: identity.subject, reason: result.reason });
+      await auditAnonymous(c, {
+        action: "auth.login.failed",
+        actor: { kind: "anonymous", userId: null, name: null },
+        target: identity.subject,
+        detail: { via: "oidc", reason: result.reason, issuer: identity.issuer },
+      });
       const message = {
         "no-account": "there is no stardust account for you; ask an administrator",
         disabled: "your account is disabled",
@@ -155,6 +192,11 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       return c.json({ error: message }, 403);
     }
     log.info("signed in", { username: result.user.username, via: "oidc", created: result.created });
+    await auditAnonymous(c, {
+      action: "auth.login",
+      actor: { kind: "user", userId: result.user.id, name: result.user.username },
+      detail: { via: "oidc", created: result.created },
+    });
     return c.json({ token: result.token, user: result.user });
   });
 
@@ -185,10 +227,28 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     return c.json({ error: "forbidden" }, 403);
   };
 
+  /** Who is asking, as the audit log names them. */
+  const actorOf = async (c: Context<Env>): Promise<AuditActor> => {
+    const user = c.get("user");
+    const token = await apiTokenFor(sql, c.get("token"));
+    return token
+      ? { kind: "token", userId: user.id, name: user.username, tokenId: token.id }
+      : { kind: "user", userId: user.id, name: user.username };
+  };
+
+  /**
+   * Adds an audit event for a signed-in caller. The change it records has
+   * already happened, so a failure here is logged loudly, not returned.
+   */
+  const audit = async (c: Context<Env>, event: Omit<AuditInput, "actor"> & { actor?: AuditActor }) => {
+    await auditAnonymous(c, { ...event, actor: event.actor ?? (await actorOf(c)) });
+  };
+
   app.get("/api/v1/session", (c) => c.json({ user: c.get("user") }));
 
   app.post("/api/v1/auth/logout", async (c) => {
     await signOut(sql, c.get("token"));
+    await audit(c, { action: "auth.logout" });
     return c.json({ ok: true });
   });
 
@@ -206,6 +266,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     try {
       const created = await createApiToken(sql, c.get("user").id, name, days as number | null);
       log.info("API token created", { username: c.get("user").username, name });
+      await audit(c, { action: "token.create", target: created.id, detail: { name, expiresInDays: days } });
       return c.json(created, 201);
     } catch (err) {
       if ((err as { code?: string }).code === "23505") return c.json({ error: `a token named "${name}" exists` }, 409);
@@ -217,6 +278,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (!(await revokeApiToken(sql, c.get("user").id, c.req.param("tokenId")))) {
       return c.json({ error: "unknown token" }, 404);
     }
+    await audit(c, { action: "token.revoke", target: c.req.param("tokenId") });
     return c.json({ ok: true });
   });
 
@@ -242,6 +304,11 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
         ...(typeof body.password === "string" ? { password: body.password } : {}),
         ...(oidc ? { oidc } : {}),
         isAdmin: body.isAdmin === true,
+      });
+      await audit(c, {
+        action: "user.create",
+        target: user.username,
+        detail: { isAdmin: user.isAdmin, withPassword: typeof body.password === "string", oidc: Boolean(oidc) },
       });
       return c.json({ user }, 201);
     } catch (err) {
@@ -293,6 +360,15 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       by: c.get("user").username,
       fields: Object.keys(change),
     });
+    await audit(c, {
+      action: "user.update",
+      target: c.req.param("username"),
+      detail: {
+        fields: Object.keys(change),
+        ...(change.isAdmin !== undefined ? { isAdmin: change.isAdmin } : {}),
+        ...(change.disabled !== undefined ? { disabled: change.disabled } : {}),
+      },
+    });
     return c.json({ ok: true });
   });
 
@@ -308,6 +384,12 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     const [user] = await sql<{ id: string }[]>`SELECT id FROM users WHERE username = ${c.req.param("username")}`;
     if (!user) return c.json({ error: "unknown user" }, 404);
     await setProjectRole(sql, c.req.param("id"), user.id, role);
+    await audit(c, {
+      action: "project.member.set",
+      projectId: c.req.param("id"),
+      target: c.req.param("username"),
+      detail: { role },
+    });
     return c.json({ ok: true });
   });
 
@@ -328,12 +410,23 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       components: body.components ?? [],
       metadata: body.metadata ?? {},
     };
+    const existed = (await getProject(sql, project.id)) !== null;
     try {
       await putProject(sql, project);
     } catch (err) {
       if (err instanceof ProjectError || err instanceof PipelineDefError) return c.json({ error: err.message }, 400);
       throw err;
     }
+    await audit(c, {
+      action: existed ? "project.update" : "project.create",
+      projectId: project.id,
+      target: project.id,
+      detail: {
+        githubRepo: project.githubRepo,
+        components: project.components.map((x) => x.name),
+        pipelineDef: project.pipelineDef !== null,
+      },
+    });
     return c.json(await getProject(sql, project.id));
   });
 
@@ -355,6 +448,28 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (denied) return denied;
     const project = await getProject(sql, c.req.param("id"));
     return project ? c.json(project) : c.json({ error: "unknown project" }, 404);
+  });
+
+  // The audit log. Administrators read all of it; a project's maintainers
+  // read that project's events (viewers do not: it says who changed what).
+  app.get("/api/v1/audit", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const query = auditQuery(c.req.query());
+    if (typeof query === "string") return c.json({ error: query }, 400);
+    return c.json(await listAudit(sql, query));
+  });
+
+  app.get("/api/v1/projects/:id/audit", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:write", id);
+    if (denied) return denied;
+    if (!(await getProject(sql, id))) return c.json({ error: "unknown project" }, 404);
+    const params = c.req.query();
+    if (params.project !== undefined) return c.json({ error: 'unknown parameter "project"' }, 400);
+    const query = auditQuery(params);
+    if (typeof query === "string") return c.json({ error: query }, 400);
+    return c.json(await listAudit(sql, { ...query, projectId: id }));
   });
 
   app.get("/api/v1/users", async (c) => {
@@ -404,6 +519,12 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       ref: resolved.ref,
       sha: resolved.sha,
       by: user.username,
+    });
+    await audit(c, {
+      action: "run.start",
+      projectId: project.id,
+      target: runId,
+      detail: { ref: resolved.ref, sha: resolved.sha },
     });
     return c.json({ runId, ref: resolved.ref, sha: resolved.sha }, 201);
   });
@@ -539,6 +660,57 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   });
 
   return app;
+}
+
+/**
+ * Where a request came from, for the audit log: the peer address the server
+ * saw, and what the client says (the dashboard passes on the browser's).
+ */
+function clientOf(c: Context): Pick<AuditInput, "ip" | "forwardedFor" | "userAgent"> {
+  const incoming = (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming;
+  return {
+    ip: incoming?.socket?.remoteAddress ?? null,
+    forwardedFor: c.req.header("x-forwarded-for") ?? null,
+    userAgent: c.req.header("user-agent") ?? null,
+  };
+}
+
+const AUDIT_FILTER = /^[a-z0-9][a-z0-9._-]{0,99}$/;
+
+/** An audit query from URL parameters, or why they are wrong. */
+export function auditQuery(params: Record<string, string>): AuditQuery | string {
+  const known = ["actor", "action", "project", "since", "until", "before", "limit"];
+  const unknown = Object.keys(params).find((k) => !known.includes(k));
+  if (unknown) return `unknown parameter "${unknown}"`;
+  const q: AuditQuery = {};
+  if (params.actor !== undefined) {
+    if (params.actor.length === 0 || params.actor.length > 200) return "actor must be a name";
+    q.actor = params.actor;
+  }
+  if (params.action !== undefined) {
+    if (!AUDIT_FILTER.test(params.action)) return "action must be an action name or a dotted prefix of one";
+    q.action = params.action.replace(/\.$/, "");
+  }
+  if (params.project !== undefined) {
+    if (!AUDIT_FILTER.test(params.project)) return "project must be a project id";
+    q.projectId = params.project;
+  }
+  for (const key of ["since", "until"] as const) {
+    const v = params[key];
+    if (v === undefined) continue;
+    if (Number.isNaN(Date.parse(v))) return `${key} must be a date and time`;
+    q[key] = new Date(v).toISOString();
+  }
+  if (params.before !== undefined) {
+    if (!/^[1-9][0-9]{0,18}$/.test(params.before)) return "before must be the cursor from a previous page";
+    q.before = params.before;
+  }
+  if (params.limit !== undefined) {
+    const n = Number(params.limit);
+    if (!Number.isInteger(n) || n < 1 || n > 200) return "limit must be a whole number from 1 to 200";
+    q.limit = n;
+  }
+  return q;
 }
 
 // A git ref name as people type it: no leading dash or slash, no "..", no

@@ -23,6 +23,9 @@ server:
 database:
   url: { env: DATABASE_URL }
 
+audit:
+  retentionDays: 365 # optional; see "Audit log"
+
 plugins:
   # Each key enables one plugin.
   source-github: { ... }
@@ -73,6 +76,35 @@ plugins:
 
   The password is read from standard input, so it does not appear in the
   process list or shell history. The user's sessions end.
+
+## Audit log
+
+stardust records who did what: sign-ins (and failed ones), sign-outs, users
+created and changed, password resets, API tokens made and revoked, projects
+created and changed, membership changes, and runs started. An event names the
+actor (the user, and the API token when one was used), the action
+(`project.update`), the project and target, and a detail that names things —
+fields, components, keys — and never holds a password, token or secret value.
+
+```yaml
+audit:
+  retentionDays: 365 # the worker removes older events every hour; 0 keeps them all
+```
+
+- Administrators read the whole log in the dashboard (**Audit log** in the
+  header) or with `GET /api/v1/audit?actor=&action=&project=&since=&until=&limit=`.
+  `action` may be a dotted prefix (`project` matches `project.member.set`).
+  Results are newest first; pass the response's `next` as `before` for the
+  next page.
+- A project's maintainers read that project's events at
+  `/projects/<id>/audit` (`GET /api/v1/projects/<id>/audit`). Viewers do not:
+  the log says who changed what.
+- A failed sign-in names the username only when that user exists, since
+  people type passwords into the username field.
+- Each event keeps the address the server saw, and the address and user agent
+  the dashboard passes on for the browser. They are not verified. Behind a
+  reverse proxy, set the dashboard's `ADDRESS_HEADER` (and `XFF_DEPTH`) so it
+  passes on the browser's address rather than the proxy's.
 
 ## Plugins
 
