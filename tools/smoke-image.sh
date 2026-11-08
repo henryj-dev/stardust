@@ -59,6 +59,10 @@ DB_URL="postgres://postgres:smoke@$pg:5432/postgres"
 
 case "$target" in
   server)
+    # Editing env needs git and sops in the image.
+    docker run --rm --entrypoint git "$image" --version >/dev/null 2>&1 || fail server-git "git is not in the image"
+    docker run --rm --entrypoint sops "$image" --version --disable-version-check >/dev/null 2>&1 || fail server-sops "sops is not in the image"
+    echo "ok   [server-tools]"
     # Layer 1: invalid configuration is refused inside the image.
     out="$(docker run --rm -v "$config:/etc/stardust/stardust.yaml:ro" "$image" 2>&1 || true)"
     if ! grep -q "database.url: environment variable DATABASE_URL is not set" <<<"$out"; then

@@ -21,8 +21,24 @@ FROM base AS web-build
 COPY . .
 RUN pnpm install --frozen-lockfile && pnpm --filter @stardust/web run build
 
+# Editing env writes to the deploy repository (git) and encrypts with SOPS.
+# sops is a pinned release, checked against its published checksum.
 FROM ${NODE_IMAGE} AS server
 ARG VERSION=dev
+ARG TARGETARCH
+ARG SOPS_VERSION=3.13.3
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends git ca-certificates curl \
+ && case "${TARGETARCH:-amd64}" in \
+      amd64) sum=e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b ;; \
+      arm64) sum=53b0abacd38ef1b12a66d6c100956691b9cefce018d91f81e73ddf7438b94d77 ;; \
+      *) echo "no sops checksum for ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /usr/local/bin/sops "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.${TARGETARCH:-amd64}" \
+ && echo "${sum}  /usr/local/bin/sops" | sha256sum -c - \
+ && chmod 0755 /usr/local/bin/sops \
+ && apt-get purge --yes curl && apt-get autoremove --yes \
+ && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production \
     STARDUST_VERSION=${VERSION} \
     STARDUST_CONFIG=/etc/stardust/stardust.yaml

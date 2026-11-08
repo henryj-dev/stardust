@@ -49,6 +49,38 @@ export interface AuditFilter {
   limit?: number;
 }
 
+/** One env layer: `_shared` (every component) or a component's own. */
+export interface EnvLayerView {
+  layer: string;
+  /** Send back as `expectedRevision` when changing this layer. */
+  revision: string;
+  plain: Record<string, string>;
+  /** Names only: secret values are never sent back. */
+  secrets: string[];
+}
+
+export interface EnvView {
+  layers: EnvLayerView[];
+  /** Whether the caller may change the env (a maintainer or an administrator). */
+  canEdit: boolean;
+}
+
+export interface EnvChangeInput {
+  expectedRevision: string;
+  set?: Record<string, string>;
+  unset?: string[];
+  setSecrets?: Record<string, string>;
+  unsetSecrets?: string[];
+}
+
+export interface EnvChangeResult {
+  status: "committed" | "no_change";
+  commit: string | null;
+  revision: string;
+  /** Per component the change reached: the env revision, and the workloads stamped to roll out (empty when none uses the env). */
+  components: Array<{ name: string; envRevision: string; consumers: string[] }>;
+}
+
 export interface AuditPage {
   events: AuditEventView[];
   /** Pass as `before` for the next page; null on the last. */
@@ -189,6 +221,13 @@ export interface Client {
   putProject(id: string, project: ProjectInput): Promise<ProjectView>;
   /** The raw server-sent event stream of a project's runs. */
   events(projectId: string, signal?: AbortSignal): Promise<Response>;
+  /** A project's env layers; an ApiError 404 says when editing env is not enabled on the server. */
+  env(projectId: string): Promise<EnvView>;
+  /**
+   * Changes one layer in one commit. An ApiError carries the reason: 400 bad
+   * input, 409 the layer changed since it was read, 403/404 no access.
+   */
+  changeEnv(projectId: string, layer: string, change: EnvChangeInput): Promise<EnvChangeResult>;
   /** The whole audit log, newest first (administrators). An ApiError carries the reason for a bad filter. */
   audit(filter?: AuditFilter): Promise<AuditPage>;
   /** One project's audit log (its maintainers and administrators). */
@@ -338,6 +377,22 @@ export function createClient(options: ClientOptions): Client {
         headers: { accept: "text/event-stream" },
         ...(signal ? { signal } : {}),
       });
+    },
+    env(projectId) {
+      return read<EnvView>(`/api/v1/projects/${encodeURIComponent(projectId)}/env`);
+    },
+    async changeEnv(projectId, layer, change) {
+      const path = `/api/v1/projects/${encodeURIComponent(projectId)}/env/${encodeURIComponent(layer)}`;
+      const res = await doFetch(`${base}${path}`, {
+        method: "PATCH",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify(change),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `PATCH ${path} failed: ${res.status}`);
+      }
+      return (await res.json()) as EnvChangeResult;
     },
     audit(filter = {}) {
       return read<AuditPage>(`/api/v1/audit${queryOf({ ...filter })}`);

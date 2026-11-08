@@ -37,6 +37,7 @@ import { type AccessRules, decideAccess, type Identity, type Oidc } from "@stard
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
+import { changeEnv, checkChange, EnvConflict, type EnvEditor, EnvInputError, readEnv } from "./env.ts";
 import type { RunEvents } from "./events.ts";
 import { type PullTarget, type ResolvedTarget, TargetError } from "./source.ts";
 
@@ -52,6 +53,8 @@ export interface Services {
   events?: RunEvents;
   /** Build logs from the cluster. Without it the log endpoint says logs are not enabled. */
   buildLogs?: BuildLogReader;
+  /** Editing env and secrets in the deploy repository. Without it the env endpoints say it is off. */
+  env?: EnvEditor;
   /** Sign-in through an OpenID provider. Without it only passwords work. */
   oidc?: {
     /** Resolved lazily: the provider may be unreachable when the server starts. */
@@ -470,6 +473,70 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     const query = auditQuery(params);
     if (typeof query === "string") return c.json({ error: query }, 400);
     return c.json(await listAudit(sql, { ...query, projectId: id }));
+  });
+
+  // A project's environment. Readers see plain values and the names of
+  // secrets; secret values are write-only. Maintainers change one layer at a
+  // time, against the revision they read.
+  app.get("/api/v1/projects/:id/env", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:read", id);
+    if (denied) return denied;
+    const project = await getProject(sql, id);
+    if (!project) return c.json({ error: "unknown project" }, 404);
+    if (!services.env) return c.json({ error: "editing env is not enabled on this server" }, 404);
+    try {
+      const { layers } = await readEnv(services.env, project);
+      const role = await projectRole(sql, c.get("user").id, id);
+      return c.json({ layers, canEdit: can(c.get("user"), "project:write", role) });
+    } catch (err) {
+      log.warn("reading env failed", { project: id, error: (err as Error).message });
+      return c.json({ error: "the deploy repository could not be read" }, 502);
+    }
+  });
+
+  app.patch("/api/v1/projects/:id/env/:layer", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:write", id);
+    if (denied) return denied;
+    const project = await getProject(sql, id);
+    if (!project) return c.json({ error: "unknown project" }, 404);
+    if (!services.env) return c.json({ error: "editing env is not enabled on this server" }, 404);
+    const layer = c.req.param("layer");
+    let change: ReturnType<typeof checkChange>;
+    try {
+      change = checkChange(await c.req.json().catch(() => null));
+    } catch (err) {
+      if (err instanceof EnvInputError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
+    const by = c.get("user").username;
+    try {
+      const result = await changeEnv(services.env, project, layer, change, by);
+      const keys = (o?: Record<string, string>) => Object.keys(o ?? {});
+      if (result.status === "committed") {
+        log.info("env changed", { project: id, layer, commit: result.commit, by });
+        await audit(c, {
+          action: "env.change",
+          projectId: id,
+          target: layer,
+          detail: {
+            set: keys(change.set),
+            unset: change.unset ?? [],
+            secretsSet: keys(change.setSecrets),
+            secretsUnset: change.unsetSecrets ?? [],
+            commit: result.commit,
+          },
+        });
+      }
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof EnvInputError) return c.json({ error: err.message }, 400);
+      if (err instanceof EnvConflict) return c.json({ error: err.message }, 409);
+      // The message may quote git or sops; it is logged, not returned.
+      log.error("changing env failed", { project: id, layer, error: (err as Error).message });
+      return c.json({ error: "the deploy repository could not be changed" }, 502);
+    }
   });
 
   app.get("/api/v1/users", async (c) => {

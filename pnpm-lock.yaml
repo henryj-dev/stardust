@@ -230,15 +230,24 @@ importers:
       '@stardust/plugin-builder-buildkit':
         specifier: workspace:*
         version: link:../../plugins/builder-buildkit
+      '@stardust/plugin-gitops-git':
+        specifier: workspace:*
+        version: link:../../plugins/gitops-git
       '@stardust/plugin-identity-oidc':
         specifier: workspace:*
         version: link:../../plugins/identity-oidc
+      '@stardust/plugin-secrets-sops-age':
+        specifier: workspace:*
+        version: link:../../plugins/secrets-sops-age
       '@stardust/plugin-source-github':
         specifier: workspace:*
         version: link:../../plugins/source-github
       hono:
         specifier: ^4.13.14
         version: 4.13.14
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   packages/web:
     dependencies:

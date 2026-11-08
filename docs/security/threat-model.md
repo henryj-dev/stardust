@@ -73,10 +73,31 @@ pull request.
   stays for runs recorded before that.
 - Image bumps are commits made with compare-and-swap on the expected head
   (`--force-with-lease`), so a concurrent change is never overwritten.
-- Env changes (not yet exposed through the API) are meant to reach pods by
-  stamping the pod template in Git, not by restarting on the cluster, which
-  the controller would revert. Editing secrets through the API will get its
-  own review before it ships.
+- Env changes reach pods by stamping the pod template in Git, not by
+  restarting on the cluster, which the controller would revert.
+
+### Users → env and secrets (server → deploy repository)
+
+- Off unless the server is given `gitops-git`, `secrets-sops-age` and the age
+  identity. **With it on, the server holds deploy-repository write access and
+  the age identity**, which decrypts every secret in the deploy repository:
+  compromising the server then means reading every secret and deploying.
+  The identity is needed by whichever process writes: re-rendering a
+  component's Secret takes the plain values of every layer it merges, and
+  SOPS cannot add a value to a document without its data key. Doing it in the
+  server keeps a change synchronous (its conflict check answers the request)
+  and keeps secret values out of the database; doing it in the worker would
+  mean carrying them through the job queue.
+- Secret values are write-only: no response, page, log line, audit event or
+  commit message holds one (`packages/server/src/env.ts`; tests scan each for
+  a canary value, against a fake and against real SOPS). A read lists secret
+  names from the encrypted files without decrypting them.
+- Plain text only travels through pipes to `sops`; nothing is written to disk.
+- Names must be environment variable names, so a name cannot break out of
+  the rendered YAML; values are written as JSON strings.
+- Maintainers change a layer, viewers read plain values and secret names.
+  Every change is one compare-and-swap commit against the layer as read, and
+  is recorded in the audit log by name.
 
 ### Users → API
 
@@ -153,6 +174,13 @@ Found in the pre-publication review (2026-10-27) and not fixed yet:
 - **Builds share one push credential per builds namespace.** A malicious commit
   that gets built can push other images that credential can reach. Use one
   registry repository per project, and a credential limited to it.
+- **A maintainer can read secrets indirectly**: they can change the env of a
+  workload they deliver, and a build they ask for runs code that can print its
+  own environment. Grant maintainer only to people who may see the project's
+  secrets.
+- **Env editing does not report whether a change is running yet**, only the
+  commit and which workloads it stamped; and the global layer
+  (`deploy/env/_global`) and build-time env are read but not edited here.
 - **The audit log is in the same database** it audits. Someone with the
   database's superuser can change or remove events (out of scope above), and
   a burst of failed sign-ins adds rows until the retention removes them.

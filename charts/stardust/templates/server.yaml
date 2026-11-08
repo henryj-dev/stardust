@@ -49,12 +49,24 @@ spec:
           volumeMounts:
             - { name: config, mountPath: /etc/stardust, readOnly: true }
             - { name: tmp, mountPath: /tmp }
+            {{- if .Values.envEditing.ageKeySecret }}
+            - { name: age-identity, mountPath: /run/secrets/age, readOnly: true }
+            {{- end }}
       volumes:
         - name: config
           configMap:
             name: {{ include "stardust.fullname" . }}-config
         - name: tmp
           emptyDir: {}
+        {{- with .Values.envEditing.ageKeySecret }}
+        {{- /* Decrypts the env layers the server edits. Only the server mounts it. */}}
+        - name: age-identity
+          secret:
+            secretName: {{ . }}
+            defaultMode: 0440
+            items:
+              - { key: {{ $.Values.envEditing.ageKeySecretKey }}, path: keys.txt }
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

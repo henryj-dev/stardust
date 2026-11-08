@@ -200,6 +200,20 @@
       "items": {
         "type": "object"
       }
+    },
+    "envEditing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ageKeySecret": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$"
+        },
+        "ageKeySecretKey": {
+          "type": "string",
+          "pattern": "^[-._a-zA-Z0-9]+$"
+        }
+      }
     }
   }
 }

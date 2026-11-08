@@ -8,7 +8,9 @@ import { after, before, describe, it } from "node:test";
 import { createUser, ensureBootstrapAdmin, putProject, signIn, startRun } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
 import type { BuildLog, BuildLogReader } from "@stardust/plugin-builder-buildkit";
+import { MemoryRepo } from "@stardust/plugin-gitops-git/testing";
 import { createApp } from "./app.ts";
+import { fakeCodec } from "./env-testing.ts";
 import { type PullTarget, TargetError } from "./source.ts";
 
 const PASSWORD = "correct horse battery";
@@ -355,7 +357,8 @@ describe("every API route is guarded", () => {
       .replace(":username", "outsider")
       .replace(":tokenId", "00000000-0000-0000-0000-000000000000")
       .replace(":runId", "00000000-0000-0000-0000-000000000000")
-      .replace(":job", "api");
+      .replace(":job", "api")
+      .replace(":layer", "_shared");
 
   it("the list is not empty and holds the routes we know of", () => {
     const all = routes();
@@ -731,6 +734,135 @@ describe("audit log", () => {
     assert.equal((await app.request("/api/v1/projects/audited/audit", { headers: viewer })).status, 403);
     assert.equal((await app.request("/api/v1/projects/audited/audit", { headers: outsider })).status, 404);
     assert.equal((await app.request("/api/v1/audit", { headers: keeper })).status, 403);
+  });
+});
+
+describe("env and secrets", () => {
+  const SECRET = "canary-env-secret-Lp4w";
+  const logged: string[] = [];
+  const capture = (message: string, fields?: Record<string, unknown>) => {
+    logged.push(`${message} ${JSON.stringify(fields ?? {})}`);
+  };
+  const repo = new MemoryRepo({
+    "deploy/apps/envshop/api/deployment.yaml":
+      "apiVersion: apps/v1\nkind: Deployment\nmetadata: { name: api, namespace: envshop }\nspec:\n  template:\n    spec:\n      containers:\n        - name: api\n          envFrom: [{ secretRef: { name: api-env-secret } }]\n",
+    "deploy/apps/envshop/api/kustomization.yaml": "resources:\n- deployment.yaml\n",
+  });
+  let envApp: ReturnType<typeof createApp>;
+  let keeper: Record<string, string>;
+  let viewer: Record<string, string>;
+  let outsider: Record<string, string>;
+
+  before(async () => {
+    envApp = createApp(
+      { version: "test" },
+      {
+        sql: db.sql,
+        resolveTarget,
+        env: { repo, codec: fakeCodec(), revisionKey: "k", cas: { sleep: async () => {} } },
+        log: { debug: capture, info: capture, warn: capture, error: capture },
+      },
+    );
+    await putProject(db.sql, {
+      id: "envshop",
+      name: "envshop",
+      githubRepo: "acme/envshop",
+      pipelineDef: null,
+      metadata: {},
+      components: [{ name: "api", pipeline: "C", deployDir: "deploy/apps/envshop/api" }],
+    });
+    for (const [username, role] of [
+      ["env-keeper", "maintainer"],
+      ["env-viewer", "viewer"],
+    ] as const) {
+      await createUser(db.sql, { username, password: PASSWORD });
+      await envApp.request(`/api/v1/projects/envshop/members/${username}`, {
+        method: "PUT",
+        headers: admin,
+        body: JSON.stringify({ role }),
+      });
+    }
+    keeper = { authorization: `Bearer ${await sessionFor("env-keeper")}`, "content-type": "application/json" };
+    viewer = { authorization: `Bearer ${await sessionFor("env-viewer")}`, "content-type": "application/json" };
+    outsider = { authorization: `Bearer ${await sessionFor("outsider")}`, "content-type": "application/json" };
+  });
+
+  const read = async (headers: Record<string, string>) => envApp.request("/api/v1/projects/envshop/env", { headers });
+  const layer = async (name: string) => {
+    const body = (await (await read(keeper)).json()) as { layers: Array<{ layer: string; revision: string }> };
+    return body.layers.find((l) => l.layer === name)?.revision as string;
+  };
+  const patch = (name: string, body: unknown, headers: Record<string, string>) =>
+    envApp.request(`/api/v1/projects/envshop/env/${name}`, { method: "PATCH", headers, body: JSON.stringify(body) });
+
+  it("maintainers set a secret; the response, the audit log, the logs and the commit carry its name, never its value", async () => {
+    const res = await patch(
+      "api",
+      { expectedRevision: await layer("api"), set: { PORT: "8080" }, setSecrets: { DB_PASSWORD: SECRET } },
+      keeper,
+    );
+    assert.equal(res.status, 200);
+    const text = await res.text();
+    const body = JSON.parse(text) as { status: string; commit: string; components: Array<{ consumers: string[] }> };
+    assert.equal(body.status, "committed");
+    assert.deepEqual(body.components[0]?.consumers, ["Deployment/api"]);
+
+    const [event] = await db.sql<{ actor_name: string; target: string; detail: Record<string, unknown> }[]>`
+      SELECT actor_name, target, detail FROM audit_events WHERE action = 'env.change' ORDER BY id DESC LIMIT 1`;
+    assert.deepEqual(
+      [event?.actor_name, event?.target, event?.detail],
+      [
+        "env-keeper",
+        "api",
+        { set: ["PORT"], unset: [], secretsSet: ["DB_PASSWORD"], secretsUnset: [], commit: body.commit },
+      ],
+    );
+
+    const everything = [
+      text,
+      await (await read(keeper)).text(),
+      await (await read(viewer)).text(),
+      logged.join("\n"),
+      repo.log.join("\n"),
+      JSON.stringify((await db.sql`SELECT * FROM audit_events`).map((r) => r)),
+      ...Object.entries(repo.files()).map(([p, t]) => `${p}\n${t}`),
+    ].join("\n");
+    assert.ok(!everything.includes(SECRET), "the secret value leaked");
+  });
+
+  it("viewers read plain values and secret names but cannot change them; outsiders learn nothing", async () => {
+    const res = await read(viewer);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      canEdit: boolean;
+      layers: Array<{ layer: string; plain: object; secrets: string[] }>;
+    };
+    assert.equal(body.canEdit, false);
+    const api = body.layers.find((l) => l.layer === "api");
+    assert.deepEqual([api?.plain, api?.secrets], [{ PORT: "8080" }, ["DB_PASSWORD"]]);
+    assert.equal(((await (await read(keeper)).json()) as { canEdit: boolean }).canEdit, true);
+
+    assert.equal((await patch("api", { expectedRevision: await layer("api"), set: { A: "1" } }, viewer)).status, 403);
+    assert.equal((await read(outsider)).status, 404);
+    assert.equal((await patch("api", { expectedRevision: await layer("api"), set: { A: "1" } }, outsider)).status, 404);
+  });
+
+  it("a stale revision is 409; bad input and unknown layers are 400 with the reason", async () => {
+    const stale = await layer("api");
+    assert.equal((await patch("api", { expectedRevision: stale, set: { A: "1" } }, keeper)).status, 200);
+    const conflict = await patch("api", { expectedRevision: stale, set: { A: "2" } }, keeper);
+    assert.equal(conflict.status, 409);
+    assert.match(((await conflict.json()) as { error: string }).error, /changed since you read it/);
+
+    const bad = await patch("api", { expectedRevision: await layer("api"), set: { "not-a-name": "1" } }, keeper);
+    assert.equal(bad.status, 400);
+    assert.equal((await patch("nope", { expectedRevision: await layer("api"), set: { A: "1" } }, keeper)).status, 400);
+  });
+
+  it("without an editor configured, the env endpoints say editing is off", async () => {
+    const res = await app.request("/api/v1/projects/envshop/env", { headers: admin });
+    assert.equal(res.status, 404);
+    assert.match(((await res.json()) as { error: string }).error, /not enabled/);
   });
 });
 

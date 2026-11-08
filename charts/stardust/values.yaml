@@ -67,6 +67,16 @@ builds:
   # namespace. false keeps the server without a token; runs then show no log.
   logs: true
 
+# Editing env and secrets in the dashboard. The server then writes to the
+# deploy repository (config.plugins.gitops-git; its credentials must reach the
+# server, e.g. through extraEnvFrom) and encrypts with SOPS
+# (config.plugins.secrets-sops-age). Name the Secret holding the age identity:
+# it is mounted read-only in the server alone, at /run/secrets/age/keys.txt —
+# set secrets-sops-age.ageKeyFile to that path. Empty: editing env is off.
+envEditing:
+  ageKeySecret: ""
+  ageKeySecretKey: keys.txt
+
 serviceAccount:
   create: true
   name: ""

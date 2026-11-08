@@ -168,6 +168,61 @@ to `contents: write`, whatever else the installation grants. A token lasts an
 hour and is renewed five minutes before it expires. Install the App on the
 deploy repository only, with "Contents: Read and write".
 
+### `secrets-sops-age`
+
+Encrypts secrets in the deploy repository with [SOPS](https://getsops.io)
+and age. With it and `gitops-git` both configured, and the identity mounted,
+the server lets maintainers edit env and secrets (see "Environment and
+secrets").
+
+- `ageKeyFile` (required): path of the age identity file. The chart mounts
+  it at `/run/secrets/age/keys.txt`.
+- `recipients` (required): age public keys new secrets are encrypted for.
+  Include the identity itself.
+- `sopsBinary` (optional): path of `sops`. The server image has it on `PATH`.
+
+## Environment and secrets
+
+A project's runtime environment lives in env layers in the deploy repository,
+in the layout stardust has always read:
+
+```
+deploy/env/<project>/_shared/runtime.yaml               plain values, every component
+deploy/env/<project>/_shared/runtime.secret.enc.yaml    SOPS-encrypted values, every component
+deploy/env/<project>/<component>/runtime.*              one component's own
+deploy/env/_global/runtime.*                            every project (read, not edited here)
+```
+
+From the layers stardust renders, in each component's `deployDir`,
+`env.configmap.yaml` (ConfigMap `<component>-env`) and `env.secret.enc.yaml`
+(Secret `<component>-env-secret`, encrypted), and lists both in the
+directory's `kustomization.yaml`. Use them from the workload with `envFrom`.
+
+- **Reading** (`/projects/<id>/env`, `GET /api/v1/projects/<id>/env`) is for
+  anyone who can read the project: plain values, and the **names** of
+  secrets. A secret's value is never shown or returned again once saved.
+- **Changing** is for the project's maintainers and administrators, one layer
+  at a time (`PATCH /api/v1/projects/<id>/env/<layer>` with `set`, `unset`,
+  `setSecrets`, `unsetSecrets` and the `expectedRevision` read). Each change is
+  one commit: the layer, the rendered ConfigMap and Secret of every component
+  that reads the layer, and the env revision in those workloads' pod template,
+  so the GitOps controller rolls them out when it applies the commit. A layer
+  that changed since it was read is refused (409), never overwritten.
+  Setting values that are already there commits nothing.
+- Names are environment variable names; a value is at most 32 KiB; one name is
+  plain or secret within a layer, and setting it as one removes the other.
+- Each change is in the audit log as `env.change`, with the names it touched.
+
+To turn it on, give the server what it writes with:
+
+1. `plugins.gitops-git` and its credentials (the server reads them like the
+   worker: with the chart's `extraEnvFrom`, both get the same environment).
+2. `plugins.secrets-sops-age` with `ageKeyFile: /run/secrets/age/keys.txt`
+   and the recipients.
+3. The age identity in a Secret, named in the chart's
+   `envEditing.ageKeySecret` (key `keys.txt` by default). Only the server
+   mounts it.
+
 ## Projects
 
 A project is registered through the API, by an administrator (with a session
