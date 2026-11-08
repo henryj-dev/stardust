@@ -86,8 +86,18 @@ it("lists runs with their jobs and the details a job left behind", async () => {
   const [run] = await listRuns(db.sql, "demo");
   assert.equal(run?.id, runId);
   assert.equal(run?.status, "success");
+  const [job0] = run?.jobs ?? [];
+  assert.ok(job0?.startedAt && job0.finishedAt, "the job's times are recorded");
+  assert.ok(job0.startedAt <= job0.finishedAt);
   assert.deepEqual(run?.jobs, [
-    { name: "api", status: "success", attempt: 1, detail: { digest: `sha256:${"b".repeat(64)}`, buildJob: "build-1" } },
+    {
+      name: "api",
+      status: "success",
+      attempt: 1,
+      startedAt: job0.startedAt,
+      finishedAt: job0.finishedAt,
+      detail: { digest: `sha256:${"b".repeat(64)}`, buildJob: "build-1" },
+    },
   ]);
 });
 

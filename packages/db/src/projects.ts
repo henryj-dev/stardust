@@ -142,7 +142,15 @@ export interface RunView {
   finishedAt: string | null;
   /** Who asked for the run; null for runs from before webhooks were removed. */
   requestedBy: string | null;
-  jobs: Array<{ name: string; status: string; attempt: number; detail: Record<string, unknown> }>;
+  jobs: Array<{
+    name: string;
+    status: string;
+    attempt: number;
+    /** When the current attempt started and finished; null until it has. */
+    startedAt: string | null;
+    finishedAt: string | null;
+    detail: Record<string, unknown>;
+  }>;
 }
 
 /** A run without its jobs: enough to say how a project's latest delivery went. */
@@ -212,9 +220,18 @@ export async function listRuns(sql: Sql, projectId: string, limit = 20, onlyRun?
     ORDER BY created_at DESC LIMIT ${limit}`;
   if (runs.length === 0) return [];
   const jobs = await sql<
-    { run_id: string; name: string; status: string; attempt: number; detail: Record<string, unknown> }[]
+    {
+      run_id: string;
+      name: string;
+      status: string;
+      attempt: number;
+      started_at: Date | null;
+      finished_at: Date | null;
+      detail: Record<string, unknown>;
+    }[]
   >`
-    SELECT run_id, name, status, attempt, detail FROM jobs WHERE run_id IN ${sql(runs.map((r) => r.id))}
+    SELECT run_id, name, status, attempt, started_at, finished_at, detail FROM jobs
+    WHERE run_id IN ${sql(runs.map((r) => r.id))}
     ORDER BY created_at, name`;
   return runs.map((r) => ({
     id: r.id,
@@ -228,6 +245,13 @@ export async function listRuns(sql: Sql, projectId: string, limit = 20, onlyRun?
     requestedBy: r.requested_by,
     jobs: jobs
       .filter((j) => j.run_id === r.id)
-      .map((j) => ({ name: j.name, status: j.status, attempt: j.attempt, detail: j.detail })),
+      .map((j) => ({
+        name: j.name,
+        status: j.status,
+        attempt: j.attempt,
+        startedAt: j.started_at?.toISOString() ?? null,
+        finishedAt: j.finished_at?.toISOString() ?? null,
+        detail: j.detail,
+      })),
   }));
 }

@@ -50,4 +50,46 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "stardust.fullname" . }}-worker
     namespace: {{ .Release.Namespace }}
+{{- if .Values.builds.logs }}
+---
+# The server shows build logs in the dashboard: it reads pods and their logs
+# in the builds namespace, and nothing else — it cannot create or delete.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "stardust.fullname" . }}-server
+  labels:
+    {{- include "stardust.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "stardust.fullname" . }}-build-logs
+  namespace: {{ .Values.builds.namespace }}
+  labels:
+    {{- include "stardust.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "stardust.fullname" . }}-build-logs
+  namespace: {{ .Values.builds.namespace }}
+  labels:
+    {{- include "stardust.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "stardust.fullname" . }}-build-logs
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "stardust.fullname" . }}-server
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- end }}

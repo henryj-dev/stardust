@@ -18,7 +18,12 @@ spec:
       annotations:
         checksum/config: {{ toYaml .Values.config | sha256sum }}
     spec:
+      {{- if and .Values.builds.enabled .Values.builds.logs }}
+      {{- /* Reads build logs only: its own account, bound to a read-only Role in the builds namespace. */}}
+      {{- include "stardust.podCommon" (list . (printf "%s-server" (include "stardust.fullname" .)) true) | nindent 6 }}
+      {{- else }}
       {{- include "stardust.podCommon" (list . (include "stardust.serviceAccountName" .) false) | nindent 6 }}
+      {{- end }}
       containers:
         - name: server
           image: {{ include "stardust.image" (list . "server") }}

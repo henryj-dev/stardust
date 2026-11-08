@@ -7,6 +7,7 @@ import { createHmac } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { createUser, ensureBootstrapAdmin, putProject, signIn, startRun } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
+import type { BuildLog, BuildLogReader } from "@stardust/plugin-builder-buildkit";
 import { createApp } from "./app.ts";
 import { type PullTarget, TargetError } from "./source.ts";
 
@@ -352,7 +353,9 @@ describe("every API route is guarded", () => {
     path
       .replace(":id", "demo")
       .replace(":username", "outsider")
-      .replace(":tokenId", "00000000-0000-0000-0000-000000000000");
+      .replace(":tokenId", "00000000-0000-0000-0000-000000000000")
+      .replace(":runId", "00000000-0000-0000-0000-000000000000")
+      .replace(":job", "api");
 
   it("the list is not empty and holds the routes we know of", () => {
     const all = routes();
@@ -495,3 +498,127 @@ describe("no webhooks", () => {
     );
   });
 });
+
+describe("one run and its build logs", () => {
+  // A cluster stand-in: per job name, what the build pod holds.
+  const pods = new Map<string, BuildLog | "throw">();
+  const signals: AbortSignal[] = [];
+  const buildLogs: BuildLogReader = async ({ jobName, signal }) => {
+    signals.push(signal);
+    const found = pods.get(jobName) ?? { state: "none" };
+    if (found === "throw") throw new Error("connect ECONNREFUSED");
+    return found;
+  };
+  let logsApp: ReturnType<typeof createApp>;
+  let runId: string;
+  const logOf = (run: string, job = "api", headers: Record<string, string> = admin) =>
+    logsApp.request(`/api/v1/projects/logs/runs/${run}/jobs/${job}/log?follow=true`, { headers });
+  const setJob = (status: string) => db.sql`UPDATE jobs SET status = ${status} WHERE run_id = ${runId}`;
+
+  before(async () => {
+    logsApp = createApp({ version: "test" }, { sql: db.sql, resolveTarget, buildLogs });
+    const put = await logsApp.request("/api/v1/projects/logs", {
+      method: "PUT",
+      headers: admin,
+      body: JSON.stringify({
+        githubRepo: "acme/logs",
+        components: [{ name: "api", pipeline: "C", deployDir: "deploy/logs/api" }],
+      }),
+    });
+    assert.equal(put.status, 200);
+    const pulled = await logsApp.request("/api/v1/projects/logs/runs", { method: "POST", headers: admin, body: "{}" });
+    runId = ((await pulled.json()) as { runId: string }).runId;
+  });
+
+  it("reads one run with its jobs' times; a run of another project or a malformed id is unknown", async () => {
+    const res = await logsApp.request(`/api/v1/projects/logs/runs/${runId}`, { headers: admin });
+    assert.equal(res.status, 200);
+    const run = (await res.json()) as { id: string; requestedBy: string; jobs: Array<Record<string, unknown>> };
+    assert.equal(run.id, runId);
+    assert.equal(run.requestedBy, "admin");
+    assert.deepEqual(run.jobs, [
+      { name: "api", status: "queued", attempt: 0, startedAt: null, finishedAt: null, detail: {} },
+    ]);
+    assert.equal((await logsApp.request(`/api/v1/projects/demo/runs/${runId}`, { headers: admin })).status, 404);
+    assert.equal((await logsApp.request("/api/v1/projects/logs/runs/not-a-uuid", { headers: admin })).status, 404);
+  });
+
+  it("needs read access like the run list: a viewer reads, an outsider learns nothing", async () => {
+    await logsApp.request("/api/v1/projects/logs/members/viewer", {
+      method: "PUT",
+      headers: admin,
+      body: JSON.stringify({ role: "viewer" }),
+    });
+    const viewer = { authorization: `Bearer ${await sessionFor("viewer")}` };
+    const outsider = { authorization: `Bearer ${await sessionFor("outsider")}` };
+    assert.equal((await logsApp.request(`/api/v1/projects/logs/runs/${runId}`, { headers: viewer })).status, 200);
+    assert.equal((await logsApp.request(`/api/v1/projects/logs/runs/${runId}`, { headers: outsider })).status, 404);
+    pods.set("api", { state: "open", pod: "p", body: lines("x\n") });
+    assert.equal((await logOf(runId, "api", viewer)).status, 200);
+    assert.equal((await logOf(runId, "api", outsider)).status, 404);
+  });
+
+  it("streams the build pod's log as plain text", async () => {
+    pods.set("api", { state: "open", pod: "p", body: lines("#1 clone\n", "#2 build <b>ok</b>\n") });
+    const res = await logOf(runId);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(await res.text(), "#1 clone\n#2 build <b>ok</b>\n");
+  });
+
+  it("before the build prints it is 409; once the job is over and the pod gone, 410", async () => {
+    pods.set("api", { state: "waiting" });
+    assert.equal((await logOf(runId)).status, 409);
+    pods.set("api", { state: "none" });
+    await setJob("queued");
+    assert.equal((await logOf(runId)).status, 409);
+    await setJob("failed");
+    const gone = await logOf(runId);
+    assert.equal(gone.status, 410);
+    assert.match(((await gone.json()) as { error: string }).error, /no longer available/);
+  });
+
+  it("an unknown job is 404; a cluster that cannot be reached is 502 without its error", async () => {
+    assert.equal((await logOf(runId, "nope")).status, 404);
+    pods.set("api", "throw");
+    const res = await logOf(runId);
+    assert.equal(res.status, 502);
+    assert.doesNotMatch(await res.text(), /ECONNREFUSED/);
+  });
+
+  it("a client that stops reading ends the cluster request", async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    pods.set("api", {
+      state: "open",
+      pod: "p",
+      body: (async function* () {
+        yield new TextEncoder().encode("first\n");
+        await held;
+      })(),
+    });
+    signals.length = 0;
+    const res = await logOf(runId);
+    const reader = res.body?.getReader();
+    assert.ok(reader);
+    assert.equal(new TextDecoder().decode((await reader.read()).value), "first\n");
+    await reader.cancel();
+    assert.equal(signals[0]?.aborted, true);
+    release();
+  });
+
+  it("without a cluster, logs are not enabled", async () => {
+    const res = await app.request(`/api/v1/projects/logs/runs/${runId}/jobs/api/log`, { headers: admin });
+    assert.equal(res.status, 404);
+    assert.match(((await res.json()) as { error: string }).error, /not enabled/);
+  });
+});
+
+function lines(...chunks: string[]): AsyncIterable<Uint8Array> {
+  return (async function* () {
+    for (const c of chunks) yield new TextEncoder().encode(c);
+  })();
+}

@@ -59,7 +59,11 @@ $effect(() => {
       <tbody>
         {#each runs as run (run.id)}
           <tr data-run={run.id} data-status={run.status}>
-            <td>{new Date(run.createdAt).toLocaleString()}</td>
+            <td>
+              <a href={`/projects/${encodeURIComponent(data.projectId)}/runs/${encodeURIComponent(run.id)}`} data-run-link
+                >{new Date(run.createdAt).toLocaleString()}</a
+              >
+            </td>
             <td>{run.ref}{#if run.requestedBy}<br /><small>pulled by {run.requestedBy}</small>{/if}</td>
             <td><code>{run.sha.slice(0, 7)}</code></td>
             <td>{run.status}</td>

@@ -16,6 +16,10 @@ export interface JobView {
   name: string;
   status: string;
   attempt: number;
+  /** When the current attempt started and finished; null until it has. */
+  startedAt: string | null;
+  finishedAt: string | null;
+  /** What the job recorded: `reason` when it failed, `digest`, `buildJob`, `deployCommit`. */
   detail: Record<string, unknown>;
 }
 
@@ -113,6 +117,19 @@ export interface Client {
   /** Who the token belongs to, or null when it is not accepted (401). */
   session(): Promise<SessionUser | null>;
   runs(projectId: string): Promise<RunView[]>;
+  /** One run with its jobs; an ApiError with status 404 when the project or the run is unknown. */
+  run(projectId: string, runId: string): Promise<RunView>;
+  /**
+   * A job's build log as the raw response, whatever its status, so a caller
+   * can relay it: 200 plain text (kept open with `follow` while the build
+   * prints), 409 not started yet, 410 cleaned up, 404 unknown or logs off.
+   */
+  buildLog(
+    projectId: string,
+    runId: string,
+    job: string,
+    options?: { follow?: boolean; signal?: AbortSignal },
+  ): Promise<Response>;
   /**
    * Starts a manual run: builds and delivers the commit the target resolves to.
    * An ApiError carries the server's reason (400 bad target, 422 no such ref, 403/404 no access).
@@ -224,6 +241,18 @@ export function createClient(options: ClientOptions): Client {
         runs: RunView[];
       };
       return body.runs;
+    },
+    async run(projectId, runId) {
+      return (await (
+        await get(`/api/v1/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`)
+      ).json()) as RunView;
+    },
+    buildLog(projectId, runId, job, options = {}) {
+      const path = `/api/v1/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/jobs/${encodeURIComponent(job)}/log${options.follow ? "?follow=true" : ""}`;
+      return doFetch(`${base}${path}`, {
+        headers: headers(),
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
     },
     async pull(projectId, target = {}) {
       const path = `/api/v1/projects/${encodeURIComponent(projectId)}/runs`;
