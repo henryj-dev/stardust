@@ -35,7 +35,10 @@ $effect(() => {
     <p><a href={`/projects/${encodeURIComponent(data.projectId)}/settings`} data-settings>Settings</a></p>
   {/if}
   <!-- For maintainers and administrators; the page says so to anyone else. -->
-  <p><a href={`/projects/${encodeURIComponent(data.projectId)}/audit`} data-audit-link>Audit log</a></p>
+  <p>
+    <a href={`/projects/${encodeURIComponent(data.projectId)}/env`} data-env-link>Environment</a> ·
+    <a href={`/projects/${encodeURIComponent(data.projectId)}/audit`} data-audit-link>Audit log</a>
+  </p>
   <p data-live={live}>{live ? "Live" : "Connecting…"}</p>
   <form method="POST" action="?/pull" data-pull>
     <select name="kind" aria-label="What to pull">

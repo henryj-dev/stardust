@@ -1,10 +1,13 @@
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/config";
 import { createPluginRegistry, type Logger } from "@stardust/core";
 import { connect, ensureBootstrapAdmin, migrate } from "@stardust/db";
 import { plugin as builderBuildkit, buildLogReader, inClusterClient } from "@stardust/plugin-builder-buildkit";
+import { GitCliRepo, plugin as gitopsGit, installationTokens, repoFromUrl } from "@stardust/plugin-gitops-git";
 import { createOidc, plugin as identityOidc, type Oidc } from "@stardust/plugin-identity-oidc";
+import { decrypt, encryptIfChanged, plugin as secretsSopsAge } from "@stardust/plugin-secrets-sops-age";
 import { RETIRED_KEYS, plugin as sourceGithub } from "@stardust/plugin-source-github";
 import { createApp, type Services } from "./app.ts";
 import { RunEvents } from "./events.ts";
@@ -25,8 +28,9 @@ try {
   config = await loadConfig(configPath);
   // The server reads only these sections (the builder's for its namespace, to
   // show build logs); the registry validates them so a typo stops start-up here too.
-  const mine = new Set(["source-github", "identity-oidc", "builder-buildkit"]);
-  createPluginRegistry([sourceGithub, identityOidc, builderBuildkit]).resolve(
+  // (and, to edit env, the deploy repository's and SOPS's).
+  const mine = new Set(["source-github", "identity-oidc", "builder-buildkit", "gitops-git", "secrets-sops-age"]);
+  createPluginRegistry([sourceGithub, identityOidc, builderBuildkit, gitopsGit, secretsSopsAge]).resolve(
     Object.fromEntries(Object.entries(config.plugins).filter(([name]) => mine.has(name))),
   );
 } catch (err) {
@@ -64,6 +68,7 @@ if (source) {
     sql,
     ...(await oidcServices()),
     ...buildLogServices(),
+    ...(await envServices()),
     resolveTarget: targetApi(apiBaseUrl, token),
   };
 } else {
@@ -83,6 +88,61 @@ function buildLogServices(): Pick<Services, "buildLogs"> {
   }
   log.info("build logs enabled", { namespace: section.namespace });
   return { buildLogs: buildLogReader(inClusterClient(), section.namespace) };
+}
+
+/**
+ * Editing env and secrets: with a deploy repository (gitops-git) and SOPS
+ * (secrets-sops-age) configured, and the age identity mounted. The server
+ * then writes to the deploy repository and decrypts the env layers it edits.
+ */
+async function envServices(): Promise<Pick<Services, "env">> {
+  const gitops = config.plugins["gitops-git"] as Record<string, unknown> | undefined;
+  const sops = config.plugins["secrets-sops-age"] as
+    | { ageKeyFile: string; recipients: string[]; sopsBinary?: string }
+    | undefined;
+  if (!gitops || !sops) {
+    log.info("editing env is off: gitops-git and secrets-sops-age are not both configured");
+    return {};
+  }
+  let identity: Buffer;
+  try {
+    identity = readFileSync(sops.ageKeyFile);
+  } catch {
+    log.warn("editing env is off: the age identity is not mounted", { ageKeyFile: sops.ageKeyFile });
+    return {};
+  }
+  const token = gitops.token ? await resolveSecretRef(gitops.token, "plugins.gitops-git.token") : undefined;
+  const app = gitops.githubApp as { appId: number; privateKey: unknown; apiBaseUrl?: string } | undefined;
+  const appTokens = app
+    ? installationTokens({
+        appId: app.appId,
+        privateKey: await resolveSecretRef(app.privateKey, "plugins.gitops-git.githubApp.privateKey"),
+        repo: repoFromUrl(gitops.url as string) as string,
+        ...(app.apiBaseUrl ? { apiBaseUrl: app.apiBaseUrl } : {}),
+      })
+    : undefined;
+  const options = {
+    ageKeyFile: sops.ageKeyFile,
+    recipients: sops.recipients,
+    ...(sops.sopsBinary ? { bin: sops.sopsBinary } : {}),
+  };
+  log.info("editing env enabled", { repo: repoFromUrl(gitops.url as string) ?? "(not GitHub)" });
+  return {
+    env: {
+      repo: new GitCliRepo({
+        url: gitops.url as string,
+        branch: gitops.branch as string,
+        ...(appTokens ? { token: appTokens } : token ? { token } : {}),
+        ...(gitops.username ? { username: gitops.username as string } : {}),
+      }),
+      codec: {
+        decrypt: (document) => decrypt(document, options),
+        encryptIfChanged: (current, plain) => encryptIfChanged(current, plain, options),
+      },
+      // Derived from the age identity: secret, stable, and nothing more to configure.
+      revisionKey: createHash("sha256").update("stardust env revision\0").update(identity).digest("hex"),
+    },
+  };
 }
 
 /** OpenID sign-in, when configured. Discovery runs at first use and is retried after a failure. */

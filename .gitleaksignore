@@ -1,0 +1,7 @@
+# Findings gitleaks may skip, one fingerprint each (commit:file:rule:line).
+# Only test canaries that are already in pushed history belong here; a real
+# secret is revoked, never ignored.
+#
+# A made-up value a database test fed in to check it never leaks; the test
+# now generates it at run time.
+16b2c038254dc3c77fa457f94fb32544a1437322:packages/server/src/app.dbtest.ts:generic-api-key:741

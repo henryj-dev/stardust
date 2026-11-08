@@ -111,6 +111,23 @@ else
 fi
 if ! grep -q "kind: Role" <<<"$(render)"; then pass builds-off-no-role; else bad builds-off-no-role "a Role exists with builds disabled"; fi
 
+# Editing env: the age identity is mounted in the server alone, read-only, and only when named.
+out="$(render --set envEditing.ageKeySecret=stardust-age)"
+section() { awk -v f="# Source: stardust/templates/$1.yaml" '$0==f{w=1;next} /^# Source: /{w=0} w' <<<"$out"; }
+if grep -q "secretName: stardust-age" <<<"$(section server)" \
+  && grep -q "mountPath: /run/secrets/age, readOnly: true" <<<"$(section server)" \
+  && ! grep -q "age-identity" <<<"$(section worker)$(section web)"; then
+  pass env-age-identity-server-only
+else
+  bad env-age-identity-server-only "the age identity is not mounted in the server alone"
+fi
+if ! grep -q "age-identity" <<<"$(render)"; then pass env-editing-off-no-identity; else bad env-editing-off-no-identity "an age identity is mounted without envEditing.ageKeySecret"; fi
+if render --set envEditing.ageKeySecret=stardust-age | docker run --rm -i "$KUBECONFORM" -strict -summary -kubernetes-version 1.30.0 - >/dev/null 2>&1; then
+  pass env-editing-kubeconform
+else
+  bad env-editing-kubeconform "manifests with env editing do not validate"
+fi
+
 # Flux appends the OCI digest to the chart version as build metadata
 # ("0.1.0+e6f18c5ec407"). Every label value must still be a valid label: the
 # API server refuses the whole install otherwise (found installing v0.1.0 with
