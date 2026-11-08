@@ -3,7 +3,7 @@
  * admin API, and runs, which start only when someone asks for one.
  */
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { createUser, ensureBootstrapAdmin, putProject, signIn, startRun } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
@@ -738,7 +738,8 @@ describe("audit log", () => {
 });
 
 describe("env and secrets", () => {
-  const SECRET = "canary-env-secret-Lp4w";
+  // Made at run time: a literal here looks like a leaked key to the secret scan.
+  const SECRET = `canary-${randomBytes(6).toString("hex")}`;
   const logged: string[] = [];
   const capture = (message: string, fields?: Record<string, unknown>) => {
     logged.push(`${message} ${JSON.stringify(fields ?? {})}`);
