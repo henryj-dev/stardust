@@ -1,10 +1,14 @@
 /**
  * The environment cascade, read from the deploy repository's env layers:
  *
- *   deploy/env/_global/<scope>.yaml                 global, plain values
- *   deploy/env/_global/<scope>.secret.enc.yaml      global, SOPS-encrypted Secret
- *   deploy/env/<project>/_shared/<scope>.*          the project's shared layer
- *   deploy/env/<project>/<component>/<scope>.*      one component
+ *   <root>/_global/<scope>.yaml                 global, plain values
+ *   <root>/_global/<scope>.secret.enc.yaml      global, SOPS-encrypted Secret
+ *   <root>/<project>/_shared/<scope>.*          the project's shared layer
+ *   <root>/<project>/<component>/<scope>.*      one component
+ *
+ * `<root>` is `deploy/env` unless set (DEFAULT_ENV_ROOT). One deploy
+ * repository can hold the layers of several installations, each under its
+ * own root, so that one never reads another's global layer.
  *
  * Later layers override earlier ones; within a layer an encrypted value wins
  * over a plain one with the same key. The layout is kept from the
@@ -16,6 +20,13 @@ import { parse } from "yaml";
 export type EnvScope = "build" | "runtime";
 export const ENV_SCOPES: readonly EnvScope[] = ["build", "runtime"];
 export const MASKED = "[encrypted]";
+export const DEFAULT_ENV_ROOT = "deploy/env";
+
+/** A repository-relative directory: no leading or trailing slash, no `.` or `..` segments. */
+export function isEnvRoot(root: unknown): root is string {
+  if (typeof root !== "string" || root === "" || root.length > 256) return false;
+  return root.split("/").every((segment) => /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(segment) && segment !== "..");
+}
 
 export interface MergedEnv {
   scope: EnvScope;
@@ -37,6 +48,8 @@ export interface MergeEnvInput {
   component: string;
   /** Read encrypted keys without decrypting their values. */
   masked?: boolean;
+  /** Where the layers live in the repository. Default DEFAULT_ENV_ROOT. */
+  root?: string;
 }
 
 function toStringMap(value: unknown): Record<string, string> {
@@ -45,7 +58,7 @@ function toStringMap(value: unknown): Record<string, string> {
 }
 
 async function readLayer(input: MergeEnvInput, layer: string, scope: EnvScope) {
-  const base = `deploy/env/${layer}/${scope}`;
+  const base = `${input.root ?? DEFAULT_ENV_ROOT}/${layer}/${scope}`;
   const plainText = await input.read(`${base}.yaml`);
   const plain = plainText === null ? {} : toStringMap(parse(plainText));
   const encText = await input.read(`${base}.secret.enc.yaml`);
@@ -64,6 +77,7 @@ async function readLayer(input: MergeEnvInput, layer: string, scope: EnvScope) {
 }
 
 export async function mergeEnv(input: MergeEnvInput): Promise<MergedEnv[]> {
+  if (input.root !== undefined && !isEnvRoot(input.root)) throw new Error(`not a repository directory: ${input.root}`);
   const project = input.project.toLowerCase();
   const layers: Array<{ key: string; source: MergedEnv["source"]; component: string }> = [
     { key: "_global", source: "global", component: "" },

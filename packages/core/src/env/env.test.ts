@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parse } from "yaml";
-import { MASKED, mergeEnv } from "./merge.ts";
+import { isEnvRoot, MASKED, mergeEnv } from "./merge.ts";
 import { envRevision, renderEnv } from "./render.ts";
 
 const sopsDoc = (keys: Record<string, string>) =>
@@ -63,6 +63,49 @@ describe("mergeEnv", () => {
     const merged = await mergeEnv({ read, decrypt, project: "demo", component: "api" });
     assert.equal(byKey(merged, "build").NODE_ENV?.value, "production");
     assert.ok(!merged.some((e) => e.key === "LEAKED"));
+  });
+});
+
+describe("env root", () => {
+  // Another installation's layers under its own root, next to the default ones.
+  const other: Record<string, string> = {
+    ...files,
+    "clusters/b/env/_global/runtime.yaml": "LOG_LEVEL: debug\n",
+    "clusters/b/env/demo/api/runtime.yaml": "PORT: 7070\n",
+  };
+  const readOther = async (path: string) => other[path] ?? null;
+
+  it("reads every layer, the global one included, under the root it is given and nothing outside it", async () => {
+    const seen: string[] = [];
+    const env = byKey(
+      await mergeEnv({
+        read: async (p) => {
+          seen.push(p);
+          return readOther(p);
+        },
+        decrypt,
+        project: "demo",
+        component: "api",
+        root: "clusters/b/env",
+      }),
+    );
+    assert.deepEqual(Object.keys(env).sort(), ["LOG_LEVEL", "PORT"]);
+    assert.equal(env.LOG_LEVEL?.value, "debug");
+    assert.equal(env.PORT?.value, "7070");
+    assert.ok(seen.length > 0 && seen.every((p) => p.startsWith("clusters/b/env/")), seen.join(" "));
+  });
+
+  it("defaults to deploy/env", async () => {
+    const env = byKey(await mergeEnv({ read: readOther, decrypt, project: "demo", component: "api" }));
+    assert.equal(env.LOG_LEVEL?.value, "info");
+  });
+
+  it("refuses a root that is not a plain repository directory", async () => {
+    for (const root of ["", "/abs", "a/../b", "..", "a//b", "a/", "./a", "a b"]) {
+      assert.equal(isEnvRoot(root), false, root);
+      await assert.rejects(mergeEnv({ read, decrypt, project: "demo", component: "api", root }), root);
+    }
+    for (const root of ["deploy/env", "clusters/b/env", "env", "a.b/c_d-e"]) assert.equal(isEnvRoot(root), true, root);
   });
 });
 

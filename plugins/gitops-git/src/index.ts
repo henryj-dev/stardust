@@ -1,4 +1,4 @@
-import { definePlugin } from "@stardust/core";
+import { definePlugin, isEnvRoot } from "@stardust/core";
 import { repoFromUrl } from "./github-app.ts";
 
 export type { BumpImage, BumpResult } from "./bump.ts";
@@ -28,6 +28,7 @@ export { isRetryable } from "./repo.ts";
  *     token: { env: DEPLOY_TOKEN }               # optional for local paths
  *     username: x-access-token                    # optional
  *     buildRevAnnotation: example.com/build-rev   # optional
+ *     envRoot: deploy/env                         # optional: where the env layers live
  *
  * Or, for a GitHub repository, as a GitHub App instead of a token:
  *
@@ -46,7 +47,7 @@ export const plugin = definePlugin({
     const s = section as Record<string, unknown>;
     const problems: string[] = [];
     for (const key of Object.keys(s)) {
-      if (!["url", "branch", "token", "username", "buildRevAnnotation", "githubApp"].includes(key))
+      if (!["url", "branch", "token", "username", "buildRevAnnotation", "githubApp", "envRoot"].includes(key))
         problems.push(`unknown key "${key}"`);
     }
     if (typeof s.url !== "string" || !/^(https?:\/\/|file:\/\/|\/)\S+$/.test(s.url)) {
@@ -55,6 +56,8 @@ export const plugin = definePlugin({
       problems.push("url must not contain credentials; use token");
     }
     if (typeof s.branch !== "string" || s.branch === "") problems.push("branch must be a non-empty string");
+    if (s.envRoot !== undefined && !isEnvRoot(s.envRoot))
+      problems.push("envRoot must be a directory in the repository, like deploy/env (no leading slash, no ..)");
     if (s.token !== undefined && !isRef(s.token))
       problems.push("token must be a reference: { env: NAME } or { file: PATH }");
     if (s.username !== undefined && typeof s.username !== "string") problems.push("username must be a string");

@@ -3,10 +3,12 @@
  * and the ConfigMap and Secret rendered from them next to each component's
  * manifests.
  *
- *   deploy/env/<project>/_shared/runtime.yaml               plain values, every component
- *   deploy/env/<project>/_shared/runtime.secret.enc.yaml    SOPS-encrypted values, every component
- *   deploy/env/<project>/<component>/runtime.*              one component
- *   <deployDir>/env.configmap.yaml, env.secret.enc.yaml    rendered (core renderEnv)
+ *   <root>/<project>/_shared/runtime.yaml               plain values, every component
+ *   <root>/<project>/_shared/runtime.secret.enc.yaml    SOPS-encrypted values, every component
+ *   <root>/<project>/<component>/runtime.*              one component
+ *   <deployDir>/env.configmap.yaml, env.secret.enc.yaml rendered (core renderEnv)
+ *
+ * `<root>` is `deploy/env` unless gitops-git's `envRoot` says otherwise.
  *
  * One change is one commit, made with compare-and-swap on the branch head:
  * the layer as the editor read it (its revision) must still be the layer at
@@ -20,6 +22,7 @@
  */
 import { createHash } from "node:crypto";
 import {
+  DEFAULT_ENV_ROOT,
   ENV_REVISION_ANNOTATION,
   envConfigMapName,
   envSecretName,
@@ -51,6 +54,8 @@ export interface EnvEditor {
   /** Keys the env revision fingerprint, so a revision says nothing about the values. */
   revisionKey: string;
   cas?: CasOptions;
+  /** Where the env layers live in the deploy repository. Default DEFAULT_ENV_ROOT. */
+  root?: string;
 }
 
 /** The layer every component of a project reads. Other layers are named after a component. */
@@ -94,9 +99,12 @@ export interface EnvChangeResult {
   }>;
 }
 
-const layerBase = (project: string, layer: string) => `deploy/env/${project.toLowerCase()}/${layer}/runtime`;
-const plainPath = (project: string, layer: string) => `${layerBase(project, layer)}.yaml`;
-const secretPath = (project: string, layer: string) => `${layerBase(project, layer)}.secret.enc.yaml`;
+const layerBase = (root: string | undefined, project: string, layer: string) =>
+  `${root ?? DEFAULT_ENV_ROOT}/${project.toLowerCase()}/${layer}/runtime`;
+const plainPath = (root: string | undefined, project: string, layer: string) =>
+  `${layerBase(root, project, layer)}.yaml`;
+const secretPath = (root: string | undefined, project: string, layer: string) =>
+  `${layerBase(root, project, layer)}.secret.enc.yaml`;
 const dirOf = (c: Component) => c.deployDir.replace(/\/+$/, "");
 
 function layerRevision(plainText: string | null, secretText: string | null): string {
@@ -144,8 +152,8 @@ async function readLayers(editor: EnvEditor, project: Project): Promise<{ head: 
   const head = await editor.repo.headSha();
   const layers: EnvLayerView[] = [];
   for (const layer of layersOf(project)) {
-    const plainText = (await editor.repo.readFile(plainPath(project.id, layer), head))?.content ?? null;
-    const secretText = (await editor.repo.readFile(secretPath(project.id, layer), head))?.content ?? null;
+    const plainText = (await editor.repo.readFile(plainPath(editor.root, project.id, layer), head))?.content ?? null;
+    const secretText = (await editor.repo.readFile(secretPath(editor.root, project.id, layer), head))?.content ?? null;
     layers.push({
       layer,
       revision: layerRevision(plainText, secretText),
@@ -303,8 +311,8 @@ async function applyChange(
   const result = await commitWithCas(
     editor.repo,
     async (_head, at) => {
-      const pPath = plainPath(project.id, layer);
-      const sPath = secretPath(project.id, layer);
+      const pPath = plainPath(editor.root, project.id, layer);
+      const sPath = secretPath(editor.root, project.id, layer);
       const plainText = (await at.read(pPath))?.content ?? null;
       const secretText = (await at.read(sPath))?.content ?? null;
       if (layerRevision(plainText, secretText) !== change.expectedRevision) {
@@ -347,6 +355,7 @@ async function applyChange(
           read,
           decrypt: (d) => editor.codec.decrypt(d),
           project: project.id,
+          ...(editor.root ? { root: editor.root } : {}),
           component: component.name,
         });
         const env = renderEnv({

@@ -37,3 +37,14 @@ it("accepts a GitHub App for a GitHub repository, and refuses it with a token, a
     'githubApp: unknown key "extra"',
   ]);
 });
+
+it("accepts an env root inside the repository and refuses one that is not", () => {
+  const base = { url: "https://github.com/acme/deploy.git", branch: "main", token: { env: "T" } };
+  assert.deepEqual(plugin.validateConfig({ ...base, envRoot: "clusters/a/env" }), []);
+  for (const envRoot of ["/abs", "a/../b", "", 3]) {
+    assert.ok(
+      plugin.validateConfig({ ...base, envRoot }).some((p) => p.startsWith("envRoot")),
+      String(envRoot),
+    );
+  }
+});

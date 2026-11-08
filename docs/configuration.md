@@ -161,6 +161,7 @@ so concurrent writers never overwrite each other.
 | `username`           | optional | User name sent with the token. Defaults to `x-access-token`.                                                                                                    |
 | `buildRevAnnotation` | optional | Annotation key (for example `example.com/build-rev`). Where a manifest already carries it, it is set to the job id so a rebuild of the same commit rolls out.   |
 | `githubApp`          | optional | Push as a GitHub App instead of with `token`: `appId`, `privateKey` (a reference) and optionally `apiBaseUrl`. Needs a `https://github.com/<owner>/<name>` url. |
+| `envRoot`            | optional | Directory of the env layers in the repository. Defaults to `deploy/env`. See "Environment and secrets".                                                         |
 
 With `githubApp`, stardust finds the App's installation on the deploy
 repository and asks for installation tokens narrowed to that repository and
@@ -192,6 +193,12 @@ deploy/env/<project>/_shared/runtime.secret.enc.yaml    SOPS-encrypted values, e
 deploy/env/<project>/<component>/runtime.*              one component's own
 deploy/env/_global/runtime.*                            every project (read, not edited here)
 ```
+
+`deploy/env` is the default; `gitops-git`'s `envRoot` moves all of it,
+`_global` included. When one deploy repository serves several installations,
+give each its own root (for example `clusters/<name>/env`): every
+installation then reads only its own global layer, and its age identity only
+ever needs to open the files under its root.
 
 From the layers stardust renders, in each component's `deployDir`,
 `env.configmap.yaml` (ConfigMap `<component>-env`) and `env.secret.enc.yaml`
