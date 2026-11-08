@@ -93,6 +93,25 @@ pull request.
 - Password recovery is a command inside the server container: access to the
   deployment is the authority, so there is no recovery endpoint to attack.
 
+### Audit log
+
+- Changes made through the API, sign-ins and failed sign-ins, and password
+  resets are recorded in `audit_events` (`packages/db/src/audit.ts`). The
+  application only inserts; a database trigger refuses UPDATE, and rows leave
+  only by age (`audit.retentionDays`, purged by the worker).
+- A detail names things and never carries a value: `recordAudit` refuses keys
+  such as `password`, `secret`, `token` or `value` at any depth, and a test
+  scans the whole table for a canary password and token after exercising every
+  recorded route.
+- A failed sign-in keeps the username only when the account exists, so a
+  password typed into the username field is not stored.
+- The log is read by administrators, and per project by its maintainers.
+- The client address and user agent are as told by the dashboard (or any
+  client); they help reading the log but prove nothing.
+- Writing the event happens after the change it records, outside its
+  transaction. If the write fails, the change stands and the failure is
+  logged as an error.
+
 ### OpenID provider → server
 
 - Code flow with PKCE (S256), nonce and a one-time state that expires in ten
@@ -134,7 +153,9 @@ Found in the pre-publication review (2026-10-27) and not fixed yet:
 - **Builds share one push credential per builds namespace.** A malicious commit
   that gets built can push other images that credential can reach. Use one
   registry repository per project, and a credential limited to it.
-- **No audit log yet** of who changed what in the API.
+- **The audit log is in the same database** it audits. Someone with the
+  database's superuser can change or remove events (out of scope above), and
+  a burst of failed sign-ins adds rows until the retention removes them.
 - **Sessions are not bound to a client** (IP or device). A stolen session
   cookie works until it expires (12 hours) or the user signs out.
 - **OpenID sign-out does not end the provider's session**, and the provider

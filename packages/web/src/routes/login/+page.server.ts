@@ -13,12 +13,12 @@ export const load: PageServerLoad = async ({ cookies, url }) => {
 };
 
 export const actions: Actions = {
-  password: async ({ request, cookies, url }) => {
+  password: async ({ request, cookies, url, locals }) => {
     const form = await request.formData();
     const username = String(form.get("username") ?? "").trim();
     const password = String(form.get("password") ?? "");
     if (!username || !password) return fail(400, { username, error: "Enter your username and password." });
-    const result = await apiClient().login(username, password);
+    const result = await apiClient(undefined, locals).login(username, password);
     if (!result.ok) {
       return fail(result.reason === "locked" ? 429 : 401, {
         username,
@@ -30,8 +30,8 @@ export const actions: Actions = {
     redirect(303, safeNext(url.searchParams.get("next")));
   },
 
-  oidc: async ({ cookies, url }) => {
-    const { url: providerUrl, state } = await apiClient().oidcStart();
+  oidc: async ({ cookies, url, locals }) => {
+    const { url: providerUrl, state } = await apiClient(undefined, locals).oidcStart();
     // Lax, not Strict: the provider sends the browser back with a cross-site
     // navigation, and a Strict cookie would not come along with it.
     cookies.set(OIDC_STATE_COOKIE, state, {

@@ -1,4 +1,7 @@
 export type {
+  AuditEventView,
+  AuditFilter,
+  AuditPage,
   Client,
   ClientOptions,
   JobView,

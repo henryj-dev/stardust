@@ -617,6 +617,123 @@ describe("one run and its build logs", () => {
   });
 });
 
+describe("audit log", () => {
+  // A value that must never reach the audit log: a password, a token.
+  const CANARY = "canary-Zq81-never-logged";
+  const json = (body: unknown, headers: Record<string, string> = {}, method = "POST") => ({
+    method,
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json", ...headers },
+  });
+  const eventsOf = async (query = "", headers: Record<string, string> = admin) =>
+    (await (await app.request(`/api/v1/audit${query}`, { headers })).json()) as {
+      events: Array<{
+        action: string;
+        actor: { kind: string; name: string | null; tokenId: string | null };
+        projectId: string | null;
+        target: string | null;
+        detail: Record<string, unknown>;
+        forwardedFor: string | null;
+        userAgent: string | null;
+      }>;
+      next: string | null;
+    };
+
+  it("records sign-ins, failures and sign-outs; a failure names only a user who exists", async () => {
+    await app.request(
+      "/api/v1/auth/login",
+      json(
+        { username: "admin", password: PASSWORD },
+        { "user-agent": "test-browser", "x-forwarded-for": "198.51.100.7" },
+      ),
+    );
+    await app.request("/api/v1/auth/login", json({ username: "admin", password: CANARY }));
+    await app.request("/api/v1/auth/login", json({ username: CANARY, password: PASSWORD }));
+    const { events } = await eventsOf("?action=auth.login");
+    const [unknownUser, wrongPassword, ok] = events;
+    assert.deepEqual([ok?.action, ok?.actor.name, ok?.detail.via], ["auth.login", "admin", "password"]);
+    assert.deepEqual([ok?.userAgent, ok?.forwardedFor], ["test-browser", "198.51.100.7"]);
+    assert.deepEqual(
+      [wrongPassword?.action, wrongPassword?.actor.name, wrongPassword?.detail.reason],
+      ["auth.login.failed", "admin", "invalid"],
+    );
+    // A name that is not a user may be a password typed in the wrong field.
+    assert.equal(unknownUser?.actor.name, null);
+    assert.equal(unknownUser?.actor.kind, "anonymous");
+  });
+
+  it("records users, tokens, projects, members and runs, with who did it", async () => {
+    await app.request("/api/v1/users", json({ username: "audited", password: `${CANARY}-pw` }, admin));
+    await app.request("/api/v1/users/audited", json({ disabled: true }, admin, "PATCH"));
+    const made = (await (await app.request("/api/v1/tokens", json({ name: "audit-ci" }, admin))).json()) as {
+      id: string;
+      token: string;
+    };
+    const tokenAuth = { authorization: `Bearer ${made.token}`, "content-type": "application/json" };
+    const project = { githubRepo: "acme/audited", components: [{ name: "api", pipeline: "C", deployDir: "d/api" }] };
+    await app.request("/api/v1/projects/audited", json(project, tokenAuth, "PUT"));
+    await app.request("/api/v1/projects/audited", json(project, admin, "PUT"));
+    await app.request("/api/v1/projects/audited/members/viewer", json({ role: "viewer" }, admin, "PUT"));
+    await app.request("/api/v1/projects/audited/runs", json({}, admin));
+    await app.request(`/api/v1/tokens/${made.id}`, { method: "DELETE", headers: admin });
+
+    const actions = (await eventsOf("?limit=8")).events.map((e) => e.action).reverse();
+    assert.deepEqual(actions, [
+      "user.create",
+      "user.update",
+      "token.create",
+      "project.create",
+      "project.update",
+      "project.member.set",
+      "run.start",
+      "token.revoke",
+    ]);
+    const created = (await eventsOf("?action=project.create")).events[0];
+    // Done with the API token: the event names the token as well as its user.
+    assert.deepEqual([created?.actor.kind, created?.actor.name, created?.actor.tokenId], ["token", "admin", made.id]);
+    assert.deepEqual(created?.detail, { githubRepo: "acme/audited", components: ["api"], pipelineDef: false });
+    const update = (await eventsOf("?action=user.update")).events[0];
+    assert.deepEqual(update?.detail, { fields: ["disabled"], disabled: true });
+
+    // No password or token value anywhere in the log.
+    const [dump] = await db.sql<{ all: string }[]>`
+      SELECT coalesce(string_agg(t::text, ' '), '') AS all FROM audit_events t`;
+    assert.ok(!dump?.all.includes(CANARY), "a canary value reached the audit log");
+    assert.ok(!dump?.all.includes(made.token));
+  });
+
+  it("filters and pages; bad parameters are refused with the reason", async () => {
+    const page = await eventsOf("?limit=2");
+    assert.equal(page.events.length, 2);
+    assert.ok(page.next);
+    const nextPage = await eventsOf(`?limit=2&before=${page.next}`);
+    assert.equal(nextPage.events.length, 2);
+    assert.equal((await eventsOf("?project=audited&action=run")).events[0]?.action, "run.start");
+    for (const bad of ["?limit=0", "?limit=x", "?before=abc", "?since=yesterday", "?action=A%20B", "?nope=1"]) {
+      assert.equal((await app.request(`/api/v1/audit${bad}`, { headers: admin })).status, 400, bad);
+    }
+  });
+
+  it("administrators read everything; a project's maintainers read its events; viewers and outsiders do not", async () => {
+    await createUser(db.sql, { username: "keeper", password: PASSWORD });
+    await app.request("/api/v1/projects/audited/members/keeper", json({ role: "maintainer" }, admin, "PUT"));
+    const keeper = { authorization: `Bearer ${await sessionFor("keeper")}` };
+    const viewer = { authorization: `Bearer ${await sessionFor("viewer")}` };
+    const outsider = { authorization: `Bearer ${await sessionFor("outsider")}` };
+
+    const mine = await app.request("/api/v1/projects/audited/audit", { headers: keeper });
+    assert.equal(mine.status, 200);
+    const { events } = (await mine.json()) as { events: Array<{ projectId: string }> };
+    assert.ok(events.length > 0);
+    assert.ok(events.every((e) => e.projectId === "audited"));
+    assert.equal((await app.request("/api/v1/projects/audited/audit?project=other", { headers: keeper })).status, 400);
+
+    assert.equal((await app.request("/api/v1/projects/audited/audit", { headers: viewer })).status, 403);
+    assert.equal((await app.request("/api/v1/projects/audited/audit", { headers: outsider })).status, 404);
+    assert.equal((await app.request("/api/v1/audit", { headers: keeper })).status, 403);
+  });
+});
+
 function lines(...chunks: string[]): AsyncIterable<Uint8Array> {
   return (async function* () {
     for (const c of chunks) yield new TextEncoder().encode(c);

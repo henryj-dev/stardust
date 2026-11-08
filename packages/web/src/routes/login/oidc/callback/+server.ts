@@ -2,10 +2,10 @@ import { redirect } from "@sveltejs/kit";
 import { apiClient, LOGIN_ERROR_COOKIE, OIDC_STATE_COOKIE, setSession } from "$lib/server/api";
 import type { RequestHandler } from "./$types";
 
-export const GET: RequestHandler = async ({ url, cookies }) => {
+export const GET: RequestHandler = async ({ url, cookies, locals }) => {
   const state = cookies.get(OIDC_STATE_COOKIE) ?? "";
   cookies.delete(OIDC_STATE_COOKIE, { path: "/login/oidc" });
-  const result = await apiClient().oidcCallback(url.searchParams.toString(), state);
+  const result = await apiClient(undefined, locals).oidcCallback(url.searchParams.toString(), state);
   if (!result.ok) {
     // Carried in a cookie, not the URL, so nobody can link to the sign-in page with text of their own.
     cookies.set(LOGIN_ERROR_COOKIE, result.message || "Sign-in failed.", {

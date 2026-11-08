@@ -19,15 +19,17 @@ export function setSession(cookies: Cookies, url: URL, token: string): void {
   });
 }
 
-export function apiClient(token?: string): Client {
+/** A client for the API; with `locals`, it passes on who the browser is, for the audit log. */
+export function apiClient(token?: string, locals?: App.Locals): Client {
   return createClient({
     baseUrl: STARDUST_API_URL,
     ...(token ? { token } : {}),
+    ...(locals?.forward ? { forward: locals.forward } : {}),
   });
 }
 
 /** The signed-in client, or a redirect to the sign-in page. */
 export function requireClient(locals: App.Locals, from: URL): Client {
   if (!locals.token) redirect(303, `/login?next=${encodeURIComponent(from.pathname)}`);
-  return apiClient(locals.token);
+  return apiClient(locals.token, locals);
 }

@@ -10,6 +10,49 @@ export interface ClientOptions {
   /** Admin bearer token, until user sign-in exists. */
   readonly token?: string;
   readonly fetch?: typeof fetch;
+  /**
+   * Passed on to the server for its audit log, when the client acts for
+   * someone else (the dashboard for a browser). The server does not verify them.
+   */
+  readonly forward?: { readonly forwardedFor?: string; readonly userAgent?: string };
+}
+
+/** One entry of the audit log: who did what. Details name things, never secret values. */
+export interface AuditEventView {
+  id: string;
+  at: string;
+  actor: {
+    kind: "user" | "token" | "system" | "anonymous";
+    userId: string | null;
+    name: string | null;
+    tokenId: string | null;
+  };
+  action: string;
+  projectId: string | null;
+  target: string | null;
+  detail: Record<string, unknown>;
+  ip: string | null;
+  forwardedFor: string | null;
+  userAgent: string | null;
+}
+
+export interface AuditFilter {
+  actor?: string;
+  /** An action or a dotted prefix of one (`project` matches `project.update`). */
+  action?: string;
+  /** Administrators' list only. */
+  project?: string;
+  since?: string;
+  until?: string;
+  /** The `next` cursor of the previous page. */
+  before?: string;
+  limit?: number;
+}
+
+export interface AuditPage {
+  events: AuditEventView[];
+  /** Pass as `before` for the next page; null on the last. */
+  next: string | null;
 }
 
 export interface JobView {
@@ -146,12 +189,35 @@ export interface Client {
   putProject(id: string, project: ProjectInput): Promise<ProjectView>;
   /** The raw server-sent event stream of a project's runs. */
   events(projectId: string, signal?: AbortSignal): Promise<Response>;
+  /** The whole audit log, newest first (administrators). An ApiError carries the reason for a bad filter. */
+  audit(filter?: AuditFilter): Promise<AuditPage>;
+  /** One project's audit log (its maintainers and administrators). */
+  projectAudit(projectId: string, filter?: Omit<AuditFilter, "project">): Promise<AuditPage>;
 }
 
 export function createClient(options: ClientOptions): Client {
   const doFetch = options.fetch ?? fetch;
   const base = options.baseUrl.replace(/\/+$/, "");
-  const headers = (): Record<string, string> => (options.token ? { authorization: `Bearer ${options.token}` } : {});
+  const headers = (): Record<string, string> => ({
+    ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+    ...(options.forward?.forwardedFor ? { "x-forwarded-for": options.forward.forwardedFor } : {}),
+    ...(options.forward?.userAgent ? { "user-agent": options.forward.userAgent } : {}),
+  });
+  /** GET that turns a refusal into an ApiError with the server's reason. */
+  const read = async <T>(path: string): Promise<T> => {
+    const res = await doFetch(`${base}${path}`, { headers: headers() });
+    if (!res.ok) {
+      const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+      throw new ApiError(res.status, error || `GET ${path} failed: ${res.status}`);
+    }
+    return (await res.json()) as T;
+  };
+  const queryOf = (filter: Record<string, string | number | undefined>) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(filter)) if (v !== undefined && v !== "") q.set(k, String(v));
+    const text = q.toString();
+    return text ? `?${text}` : "";
+  };
   const get = async (path: string, init: RequestInit = {}): Promise<Response> => {
     const res = await doFetch(`${base}${path}`, { ...init, headers: { ...headers(), ...(init.headers ?? {}) } });
     if (!res.ok) throw new ApiError(res.status, `${init.method ?? "GET"} ${path} failed: ${res.status}`);
@@ -272,6 +338,12 @@ export function createClient(options: ClientOptions): Client {
         headers: { accept: "text/event-stream" },
         ...(signal ? { signal } : {}),
       });
+    },
+    audit(filter = {}) {
+      return read<AuditPage>(`/api/v1/audit${queryOf({ ...filter })}`);
+    },
+    projectAudit(projectId, filter = {}) {
+      return read<AuditPage>(`/api/v1/projects/${encodeURIComponent(projectId)}/audit${queryOf({ ...filter })}`);
     },
   };
 }

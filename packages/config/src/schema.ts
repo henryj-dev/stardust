@@ -28,6 +28,12 @@ export const configSchema = z.strictObject({
   database: z.strictObject({
     url: secretRef,
   }),
+  /** The audit log. The worker removes events older than `retentionDays`; 0 keeps them all. */
+  audit: z
+    .strictObject({
+      retentionDays: z.number().int().min(0).max(36500).default(365),
+    })
+    .default({ retentionDays: 365 }),
   /**
    * Each key enables one plugin; the value is validated by that plugin. An
    * empty section (`source-github:` with nothing after it) is an empty mapping:
