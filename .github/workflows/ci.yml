@@ -142,6 +142,20 @@ jobs:
           koalaman/shellcheck:stable@sha256:bb596a0d169b85ddd81d8b6d3a2ff6d5baf5fca10b97f575ebc647c3dff62b3d
           -x tools/*.sh examples/kind/*.sh
 
+  agent:
+    name: agent (go)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # vet, test (the golden frames byte for byte), and formatting.
+      - run: >-
+          docker run --rm -v "$PWD/agent:/src" -w /src
+          golang:1.23@sha256:60deed95d3888cc5e4d9ff8a10c54e5edc008c6ae3fba6187be6fb592e19e8c0
+          sh -c 'go vet ./... && go test -count=1 ./... && test -z "$(gofmt -l .)"'
+
   node-build:
     name: node build
     runs-on: ubuntu-24.04
