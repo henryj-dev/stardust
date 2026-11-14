@@ -6,7 +6,7 @@
  */
 import type { GuardStore } from "../guard.ts";
 import type { SagaStore } from "../saga.ts";
-import type { Builder } from "./builder.ts";
+import type { Builder, ImageNaming } from "./builder.ts";
 import type { SecretCipher } from "./cipher.ts";
 import type { Database } from "./database.ts";
 import type { IdentityProvider } from "./identity.ts";
@@ -34,6 +34,8 @@ export interface Ports {
   deployRepo: DeployRepo;
   cipher: SecretCipher;
   builder: Builder;
+  /** Where builds are pushed; available without the Kubernetes API. */
+  images: ImageNaming;
   identity: IdentityProvider;
   /** Pod log sources by name, e.g. `kube` (live) and `loki` (history). */
   logs: Record<string, LogSource>;
@@ -54,6 +56,7 @@ export const PORT_NAMES: readonly PortName[] = [
   "deployRepo",
   "cipher",
   "builder",
+  "images",
   "identity",
   "logs",
   "store",

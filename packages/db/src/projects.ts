@@ -118,6 +118,12 @@ const toProject = (row: ProjectRow): Project => ({
   metadata: row.metadata,
 });
 
+/** Deletes a project with its runs, jobs and memberships. The audit log keeps its history. */
+export async function deleteProject(sql: Sql, id: string): Promise<boolean> {
+  const rows = await sql`DELETE FROM projects WHERE id = ${id} RETURNING id`;
+  return rows.length === 1;
+}
+
 export async function getProject(sql: Sql, id: string): Promise<Project | null> {
   const [row] = await sql<ProjectRow[]>`
     SELECT id, name, github_repo, pipeline_def, components, metadata FROM projects WHERE id = ${id}`;

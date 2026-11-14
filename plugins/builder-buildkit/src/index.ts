@@ -29,12 +29,15 @@ export const plugin = definePlugin({
     description: "Builds container images in Kubernetes Jobs with rootless BuildKit.",
   },
   provides: {
-    ports: ["builder"],
-    needs: ["kube"],
+    ports: ["builder", "images"],
     async create({ config, ports }) {
+      const registry = config.registry as string;
+      const images = { repository: (project: string, component: string) => `${registry}/${project}/${component}` };
+      // Building needs the Kubernetes API; naming images does not.
       const kube = ports.kube;
-      if (!kube) return {};
+      if (!kube) return { images };
       return {
+        images,
         builder: createBuilder({
           kube,
           namespace: config.namespace as string,

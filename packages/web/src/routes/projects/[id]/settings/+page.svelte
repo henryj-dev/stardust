@@ -11,5 +11,24 @@ let { data, form } = $props();
 <main>
   <h1>{data.fields.id}: settings</h1>
   <p><a href={`/projects/${encodeURIComponent(data.fields.id)}`}>Back to runs</a></p>
-  <ProjectForm fields={form?.fields ?? data.fields} errors={form?.errors ?? []} creating={false} />
+  <ProjectForm
+    fields={(form && "fields" in form ? form.fields : undefined) ?? data.fields}
+    errors={(form && "errors" in form ? form.errors : undefined) ?? []}
+    creating={false}
+    action="?/save"
+  />
+
+  <h2>Delete this project</h2>
+  <p>
+    Its runs and members are deleted; the audit log keeps its history. With the box ticked, its components'
+    manifests are also removed from the deploy repository, and the GitOps controller removes what they deployed.
+  </p>
+  <form method="POST" action="?/delete" data-delete-project>
+    <label>Type <code>{data.fields.id}</code> to confirm <input name="confirm" autocomplete="off" required /></label>
+    <label><input type="checkbox" name="withdraw" /> Also remove its manifests from the deploy repository</label>
+    <button type="submit">Delete</button>
+  </form>
+  {#if form && "deleteError" in form}
+    <p role="alert" data-delete-error>{form.deleteError}</p>
+  {/if}
 </main>

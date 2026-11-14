@@ -41,6 +41,7 @@ export type { Databases } from "./plugins.ts";
 export { claimScheduleRun, databasePort, finishScheduleRun, migratePlugin } from "./plugins.ts";
 export type { Component, Project, RunSummary, RunView } from "./projects.ts";
 export {
+  deleteProject,
   getProject,
   getRun,
   latestRuns,

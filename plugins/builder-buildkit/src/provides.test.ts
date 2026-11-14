@@ -15,8 +15,10 @@ const context = (config: Record<string, unknown>, ports: Partial<Ports> = {}): P
 
 const section = { namespace: "builds", registry: "registry.example.com", pushSecret: "push" };
 
-it("needs the Kubernetes API, and builds into <registry>/<project>/<component>", async () => {
-  assert.deepEqual(plugin.provides?.needs, ["kube"]);
+it("names images without the Kubernetes API, and builds only with it", async () => {
+  const bare = await plugin.provides?.create(context(section));
+  assert.equal(bare?.builder, undefined);
+  assert.equal(bare?.images?.repository("demo", "api"), "registry.example.com/demo/api");
   const created: unknown[] = [];
   const kube: KubeStreamClient = {
     async request(method, _path, body) {
