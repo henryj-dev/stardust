@@ -11,6 +11,7 @@ let { data, children } = $props();
         {#if data.capabilities.includes("domains.list")}<a href="/domains" data-nav-domains>Domains</a>{/if}
         {#if data.capabilities.includes("nodes.list")}<a href="/nodes" data-nav-nodes>Nodes</a>{/if}
         {#if data.capabilities.includes("databases.list")}<a href="/databases" data-nav-databases>Databases</a>{/if}
+        {#if data.capabilities.includes("instances.list")}<a href="/instances" data-nav-instances>Instances</a>{/if}
         <a href="/admin/audit" data-nav-audit>Audit log</a>
       {/if}
       <a href="/account" data-nav-account>Account</a>

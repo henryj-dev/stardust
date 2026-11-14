@@ -235,6 +235,9 @@ importers:
       '@stardust/plugin-identity-oidc':
         specifier: workspace:*
         version: link:../../plugins/identity-oidc
+      '@stardust/plugin-instances':
+        specifier: workspace:*
+        version: link:../../plugins/instances
       '@stardust/plugin-logs-kube':
         specifier: workspace:*
         version: link:../../plugins/logs-kube
@@ -334,6 +337,9 @@ importers:
       '@stardust/plugin-identity-oidc':
         specifier: workspace:*
         version: link:../../plugins/identity-oidc
+      '@stardust/plugin-instances':
+        specifier: workspace:*
+        version: link:../../plugins/instances
       '@stardust/plugin-nodes':
         specifier: workspace:*
         version: link:../../plugins/nodes
@@ -462,6 +468,12 @@ importers:
       openid-client:
         specifier: 6.8.8
         version: 6.8.8
+
+  plugins/instances:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
 
   plugins/logs-kube:
     dependencies:

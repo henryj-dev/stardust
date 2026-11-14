@@ -66,6 +66,8 @@ export interface Plugin {
   readonly provides?: PortProvider;
   /** Ports this plugin cannot work without. Start-up stops, naming them, when one is missing. */
   readonly requires?: readonly PortName[];
+  /** Ports it uses when they are configured (e.g. `dns` for records), and does without otherwise. */
+  readonly uses?: readonly PortName[];
   /** Permissions its routes check. Every route names one. */
   readonly permissions?: readonly Permission[];
   /** API routes, under `/api/v1/plugins/<name>`. Built once the ports exist. */
