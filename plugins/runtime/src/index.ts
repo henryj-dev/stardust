@@ -6,8 +6,10 @@
  *
  *   runtime: {}
  *
- * The server's service account needs read access to pods, events and the
- * workloads in the components' namespaces (the chart's `runtime.enabled`).
+ * The server's service account needs read access to pods, pod logs, events
+ * and the workloads in the components' namespaces (the chart's
+ * `runtime.namespaces`). Pod logs come from the `logs` port: logs-kube for
+ * live pods, logs-loki for pods that are gone.
  */
 import {
   type BoundRepo,
@@ -39,6 +41,8 @@ interface Needs {
   kube: NonNullable<Ports["kube"]>;
   deployRepo: NonNullable<Ports["deployRepo"]>;
   projects: NonNullable<Ports["projects"]>;
+  /** Optional: without a source of a kind, that kind of log answers 404. */
+  logs?: Ports["logs"];
 }
 
 /** The component's manifests at `at`, path → text. */
@@ -124,7 +128,58 @@ function routes(needs: Needs): Route[] {
     }
   };
 
+  /** The component's workloads with the namespace each runs in. */
+  const placed = async (deployDir: string) => {
+    const head = await repo.headSha();
+    const files = await manifests(
+      { read: (p) => repo.readFile(p, head), list: (p) => repo.listDir(p, head) },
+      deployDir,
+    );
+    const fallback = kustomizeNamespace(files, deployDir);
+    return findWorkloads(files).map((w) => ({ ...w, namespace: w.namespace ?? fallback }));
+  };
+
   return [
+    {
+      method: "GET",
+      path: "/projects/:project/components/:component/pods/:pod/log",
+      permission: "runtime:view",
+      async handle({ params, query, signal }) {
+        const c = await component(params);
+        if (!c) return notFound("component");
+        const pod = params.pod ?? "";
+        const kind = query.get("source") === "history" ? "history" : "live";
+        const source = Object.values(needs.logs ?? {}).find((s) => s.kind === kind);
+        if (!source) return { status: 404, body: { error: `no ${kind} log source is enabled (logs-kube, logs-loki)` } };
+        // Only this component's pods: a live pod must match a workload's selector;
+        // a gone one (history) must be named after one of its workloads.
+        let namespace: string | null = null;
+        for (const w of await placed(c.deployDir)) {
+          if (!w.namespace) continue;
+          if (
+            kind === "history"
+              ? pod.startsWith(`${w.name}-`)
+              : (await readWorkload(kube, w, w.namespace)).pods.some((p) => p.name === pod)
+          ) {
+            namespace = w.namespace;
+            break;
+          }
+        }
+        if (!namespace) return notFound("pod");
+        const tail = Number(query.get("tail") ?? "");
+        const container = query.get("container");
+        const result = await source.read({
+          namespace,
+          pod,
+          ...(container ? { container } : {}),
+          follow: kind === "live" && query.get("follow") === "true",
+          ...(Number.isInteger(tail) && tail > 0 ? { tailLines: tail } : {}),
+          signal,
+        });
+        if (result.state === "none") return { status: 410, body: { error: "this pod's log is not available" } };
+        return { status: 200, stream: result.body };
+      },
+    },
     {
       method: "GET",
       path: "/projects/:project/components/:component",
@@ -219,6 +274,6 @@ export const plugin = definePlugin({
     { id: "runtime:view", description: "See a component's workloads, pods and events", grantedTo: "project-readers" },
     { id: "runtime:operate", description: "Restart, scale and size a component", grantedTo: "project-writers" },
   ],
-  capabilities: ["runtime.view", "runtime.restart", "runtime.scale", "runtime.resources"],
+  capabilities: ["runtime.view", "runtime.logs", "runtime.restart", "runtime.scale", "runtime.resources"],
   routes: ({ ports }: FeatureContext) => routes(ports as Needs),
 });

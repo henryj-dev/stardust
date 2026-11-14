@@ -5,6 +5,8 @@
 import { createHash } from "node:crypto";
 import type { CommitResult, PendingCommit, RepoFile, RepoIO } from "./ports/repo.ts";
 
+export type { LogSeed } from "./ports/testing/logs.contract.ts";
+export { logSourceContract } from "./ports/testing/logs.contract.ts";
 export type { RepoFixture } from "./ports/testing/repo.contract.ts";
 export { repoContract } from "./ports/testing/repo.contract.ts";
 export { guardStoreContract, sagaStoreContract } from "./ports/testing/stores.contract.ts";

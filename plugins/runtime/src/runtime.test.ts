@@ -88,7 +88,22 @@ const kube: KubeStreamClient = {
   stream: () => Promise.reject(new Error("unused")),
 };
 
-function setup() {
+const asks: Array<{ kind: string; namespace: string; pod: string; follow: boolean }> = [];
+const source = (kind: "live" | "history") => ({
+  kind,
+  async read(r: { namespace: string; pod: string; follow: boolean }) {
+    asks.push({ kind, namespace: r.namespace, pod: r.pod, follow: r.follow });
+    if (r.pod === "api-old-1" && kind === "live") return { state: "none" as const };
+    return {
+      state: "open" as const,
+      body: (async function* () {
+        yield new TextEncoder().encode(`${kind} line\n`);
+      })(),
+    };
+  },
+});
+
+function setup(withLogs = true) {
   const repo = new MemoryRepo({
     [`${DIR}/deployment.yaml`]: DEPLOYMENT,
     [`${DIR}/kustomization.yaml`]: "namespace: demo\nresources:\n  - deployment.yaml\n",
@@ -97,16 +112,23 @@ function setup() {
     get: async (id: string) =>
       id === "demo" ? { id, name: "Demo", githubRepo: null, components: [{ name: "api", deployDir: DIR }] } : null,
   };
-  const [feature] = buildFeatures([plugin], { runtime: {} }, { kube, deployRepo: { repo }, projects }, quiet, "test");
+  const logs = withLogs ? { kube: source("live"), loki: source("history") } : undefined;
+  const [feature] = buildFeatures(
+    [plugin],
+    { runtime: {} },
+    { kube, deployRepo: { repo }, projects, ...(logs ? { logs } : {}) },
+    quiet,
+    "test",
+  );
   const route = (method: string, path: string) => {
     const found = feature?.routes.find((r) => r.method === method && r.path === path);
     if (!found) throw new Error(`no route ${method} ${path}`);
     return found as Route;
   };
-  const call = (r: Route, params: Record<string, string>, body: unknown = null) =>
+  const call = (r: Route, params: Record<string, string>, body: unknown = null, query = "") =>
     r.handle({
       params,
-      query: new URLSearchParams(),
+      query: new URLSearchParams(query),
       body,
       user: { id: "u", username: "u", isAdmin: true },
       signal: new AbortController().signal,
@@ -178,6 +200,36 @@ describe("runtime", () => {
     assert.deepEqual(sized.audit?.detail, { container: "api", limits: { memory: "256Mi" } });
     assert.equal((await call(size, at, { container: "api", limits: { memory: "lots" } })).status, 400);
     assert.equal(repo.commitCount(), 2);
+  });
+
+  it("streams a pod's log only for this component's pods, live or kept", async () => {
+    const { route, call } = setup();
+    const log = route("GET", "/projects/:project/components/:component/pods/:pod/log");
+    const read = async (pod: string, query = "") => {
+      const res = await call(log, { ...params, pod }, null, query);
+      if (!res.stream) return res.status;
+      let text = "";
+      for await (const chunk of res.stream) text += new TextDecoder().decode(chunk);
+      return text;
+    };
+    asks.length = 0;
+    assert.equal(await read("api-7d9-abc", "follow=true"), "live line\n");
+    assert.deepEqual(asks[0], { kind: "live", namespace: "demo", pod: "api-7d9-abc", follow: true });
+    assert.equal(await read("other-1"), 404, "a pod of another workload is refused before any log is read");
+    assert.equal(await read("api-gone-1", "source=history&follow=true"), "history line\n");
+    assert.equal(asks.at(-1)?.follow, false, "a kept log is not followed");
+    assert.equal(await read("web-1", "source=history"), 404);
+    assert.equal(asks.length, 2);
+  });
+
+  it("says which log source is missing", async () => {
+    const { route, call } = setup(false);
+    const res = await call(route("GET", "/projects/:project/components/:component/pods/:pod/log"), {
+      ...params,
+      pod: "api-7d9-abc",
+    });
+    assert.equal(res.status, 404);
+    assert.match((res.body as { error: string }).error, /no live log source is enabled/);
   });
 
   it("needs the Kubernetes API, the deploy repository and the projects", () => {

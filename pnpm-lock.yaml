@@ -201,6 +201,12 @@ importers:
       '@stardust/plugin-identity-oidc':
         specifier: workspace:*
         version: link:../../plugins/identity-oidc
+      '@stardust/plugin-logs-kube':
+        specifier: workspace:*
+        version: link:../../plugins/logs-kube
+      '@stardust/plugin-logs-loki':
+        specifier: workspace:*
+        version: link:../../plugins/logs-loki
       '@stardust/plugin-runtime':
         specifier: workspace:*
         version: link:../../plugins/runtime
@@ -351,6 +357,18 @@ importers:
       jose:
         specifier: 6.2.13
         version: 6.2.13
+
+  plugins/logs-kube:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  plugins/logs-loki:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
 
   plugins/runtime:
     dependencies:

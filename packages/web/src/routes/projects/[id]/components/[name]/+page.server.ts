@@ -31,7 +31,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       deliveries,
       runtime,
       runtimeError,
-      can: { restart: has("runtime.restart"), scale: has("runtime.scale") },
+      can: { restart: has("runtime.restart"), scale: has("runtime.scale"), logs: has("runtime.logs") },
     };
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) error(404, "No such component.");

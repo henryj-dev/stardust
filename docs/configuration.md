@@ -214,6 +214,27 @@ namespaces in the chart's `runtime.namespaces`: each gets a read-only Role
 (workloads, pods, pod logs, events). Viewers of a project see it; maintainers
 change it.
 
+### `logs-kube` and `logs-loki`
+
+Pod logs on a component's page, through the runtime plugin. `logs-kube` reads
+live pods from the Kubernetes API and follows them (it needs the runtime
+namespaces' read-only Role, which includes pod logs). `logs-loki` reads what
+Loki kept after a pod is gone:
+
+```yaml
+logs-kube: {}
+logs-loki:
+  url: https://loki.example.com
+  token: { env: LOKI_TOKEN } # optional
+  tenant: team-a # optional X-Scope-OrgID
+  lookbackHours: 168 # default a week
+  labels: { namespace: namespace, pod: pod, container: container } # your collector's label names
+```
+
+Only a component's own pods can be read: a live pod must match one of its
+workloads' selectors, and a kept one must be named after one of its
+workloads. Logs are sent as plain text and never stored by stardust.
+
 ## Environment and secrets
 
 A project's runtime environment lives in env layers in the deploy repository,
