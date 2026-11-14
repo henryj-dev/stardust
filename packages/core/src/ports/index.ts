@@ -8,6 +8,7 @@ import type { GuardStore } from "../guard.ts";
 import type { SagaStore } from "../saga.ts";
 import type { Builder, ImageNaming } from "./builder.ts";
 import type { SecretCipher } from "./cipher.ts";
+import type { ComputeProvider } from "./compute.ts";
 import type { Database } from "./database.ts";
 import type { DatabaseProvider } from "./databases.ts";
 import type { DeployTarget } from "./deploy-target.ts";
@@ -49,6 +50,8 @@ export interface Ports {
   dns: Record<string, DnsProvider>;
   /** Database engines by name, e.g. `statefulset`. */
   databases: Record<string, DatabaseProvider>;
+  /** Cloud instances by account name, e.g. `vultr`. */
+  compute: Record<string, ComputeProvider>;
   /** Releases outside Kubernetes, by pipeline letter, e.g. `W` (Cloudflare Workers). */
   deployTargets: Record<string, DeployTarget>;
   /** Secret env values on a project's layers, provided by the server. */
@@ -74,6 +77,7 @@ export const PORT_NAMES: readonly PortName[] = [
   "store",
   "dns",
   "databases",
+  "compute",
   "deployTargets",
   "projectEnv",
 ];
@@ -83,10 +87,17 @@ export const PORT_NAMES: readonly PortName[] = [
  * name (two DNS providers, say). Their value in `Ports` is a record keyed by
  * instance name.
  */
-export const MULTI_PORTS: ReadonlySet<PortName> = new Set<PortName>(["logs", "dns", "databases", "deployTargets"]);
+export const MULTI_PORTS: ReadonlySet<PortName> = new Set<PortName>([
+  "logs",
+  "dns",
+  "databases",
+  "deployTargets",
+  "compute",
+]);
 
 export * from "./builder.ts";
 export * from "./cipher.ts";
+export * from "./compute.ts";
 export * from "./database.ts";
 export * from "./databases.ts";
 export * from "./deploy-target.ts";

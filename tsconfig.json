@@ -17,6 +17,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["packages/*/src", "plugins/*/src", "tools"],
+  "include": ["packages/*/src", "plugins/*/src", "broker/*/src", "tools"],
   "exclude": ["packages/web", "tools/**/fixtures"]
 }

@@ -297,6 +297,34 @@ A parallax write is published by applying its view at the revision the write
 made (a write alone is a draft there); stardust then waits until that view
 serves it.
 
+### `cloud-vultr`
+
+Provides the `compute` port on Vultr: the catalog (regions, plans, images,
+SSH keys, private networks), instances, and the few changes stardust makes
+(create, resize, clear user data, reverse DNS, console, delete).
+
+A Vultr API key opens the whole account, and Vultr has no narrower keys, so
+run the broker (`broker/vultr`) with the key and give stardust only a token
+for the broker. The broker lets through the calls stardust makes and nothing
+else, limits what a `PATCH` may change, and refuses a delete without a
+ticket: signed with `deleteApprovalKey`, for that one instance, valid for
+minutes, accepted once.
+
+```yaml
+cloud-vultr:
+  account: vultr # optional: its name in the compute port
+  broker:
+    url: http://vultr-broker.stardust.svc:8080
+    token: { env: VULTR_BROKER_TOKEN }
+  deleteApprovalKey: { env: VULTR_DELETE_APPROVAL_KEY } # the broker's VULTR_DELETE_APPROVAL_TOKEN
+  apiKey: { env: VULTR_API_KEY } # optional: without a broker, or as a fallback
+```
+
+With both a broker and `apiKey`, a call falls back to the key only when the
+broker cannot be reached at all; any answer from the broker (a 403 above all)
+is final. Each fallback bypasses the allowlist and is logged as a warning:
+leave `apiKey` out to rule fallbacks out.
+
 ### `databases`
 
 PostgreSQL for your applications, through the deploy repository: administrators

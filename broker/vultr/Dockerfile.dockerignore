@@ -1,0 +1,8 @@
+# Used instead of the root .dockerignore when building broker/vultr/Dockerfile.
+# Only what the broker image needs; everything else stays out of the build context.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!broker/vultr
+broker/vultr/node_modules

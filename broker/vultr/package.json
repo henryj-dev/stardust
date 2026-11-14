@@ -1,0 +1,20 @@
+{
+  "name": "@stardust/vultr-broker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "hono": "^4.13.14",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "@stardust/plugin-cloud-vultr": "workspace:*"
+  }
+}
