@@ -107,7 +107,8 @@ before(() => {
   chmodSync(join(dir, "aws"), 0o755);
   must("network", "create", net);
   must("run", "-d", "--name", source, "--network", net, "-e", "POSTGRES_PASSWORD=src-pw", IMAGE);
-  for (let i = 0; i < 60 && docker("exec", source, "pg_isready", "-U", "postgres").status !== 0; i++)
+  // Over TCP: the image's first, initializing server listens on its socket only, then restarts.
+  for (let i = 0; i < 90 && docker("exec", source, "pg_isready", "-h", "127.0.0.1", "-U", "postgres").status !== 0; i++)
     spawnSync("sleep", ["1"]);
   const seed = [
     "CREATE DATABASE shop;",
@@ -115,10 +116,28 @@ before(() => {
     "CREATE TABLE orders (id int primary key, note text); INSERT INTO orders SELECT g, repeat('x', 200) FROM generate_series(1, 500) g;",
     "CREATE SCHEMA app; CREATE TABLE app.items (id int); INSERT INTO app.items SELECT generate_series(1, 42);",
   ].join("\n");
-  const r = spawnSync("docker", ["exec", "-i", source, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-q"], {
-    input: seed,
-    encoding: "utf8",
-  });
+  const r = spawnSync(
+    "docker",
+    [
+      "exec",
+      "-i",
+      "-e",
+      "PGPASSWORD=src-pw",
+      source,
+      "psql",
+      "-h",
+      "127.0.0.1",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-U",
+      "postgres",
+      "-q",
+    ],
+    {
+      input: seed,
+      encoding: "utf8",
+    },
+  );
   assert.equal(r.status, 0, r.stderr);
   // An age key pair, made with the same image's packaged age.
   must(
