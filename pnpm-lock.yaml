@@ -196,10 +196,6 @@ importers:
       postgres:
         specifier: ^3.4.9
         version: 3.4.9
-    devDependencies:
-      '@stardust/plugin-cloud-vultr':
-        specifier: workspace:*
-        version: link:../../plugins/cloud-vultr
 
   charts/stardust: {}
 
