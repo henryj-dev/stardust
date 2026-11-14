@@ -17,8 +17,11 @@ import {
   type DatabaseTarget,
   databaseSpecProblems,
   type KubeClient,
+  type RestoreCheck,
+  restoreCheckProblems,
 } from "@stardust/core";
 import { stringify } from "yaml";
+import { backupScript, restoreCheckScript } from "./scripts.ts";
 
 export interface StatefulSetOptions {
   kube: KubeClient;
@@ -215,9 +218,7 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
         `echo "[ok] ${role} owns ${database}"`,
       ].join("\n");
       const suffix = grant.revision ? `-${grant.revision}` : "";
-      const base = `${target.ref.name}-grant-${role.replace(/_/g, "-")}`
-        .slice(0, 63 - suffix.length)
-        .replace(/-+$/, "");
+      const base = `${target.name}-grant-${role.replace(/_/g, "-")}`.slice(0, 63 - suffix.length).replace(/-+$/, "");
       const name = `${base}${suffix}`;
       const job = {
         apiVersion: "batch/v1",
@@ -255,39 +256,7 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
       // One list drives the env, the dump calls and the expected count, so a
       // target cannot be half added and silently skipped.
       const envOf = (i: number) => `PW_${i}`;
-      const calls = plan.targets.map((t, i) => `dump_one ${t.ref.name} ${t.host} "$${envOf(i)}"`).join("\n");
-      const script = `set -eu
-# Packages from the distribution's signed repository only: no downloaded binaries.
-apk add --no-cache aws-cli age >/dev/null
-STAMP="$(date -u +%Y%m%d-%H%M%S)"
-S3="aws --endpoint-url $ENDPOINT s3api"
-UPLOADED=0
-dump_one() {
-  NAME="$1"; HOST="$2"; PW="$3"
-  F="/tmp/$NAME.sql.gz.age"
-  KEY="$PREFIX/$NAME/dumpall-$STAMP.sql.gz.age"
-  set -o pipefail
-  PGPASSWORD="$PW" pg_dumpall --clean --if-exists -h "$HOST" -U postgres | gzip -9 | age -r "$RECIPIENT" > "$F"
-  SIZE="$(stat -c%s "$F")"
-  # A pipe can quietly carry nothing: refuse a dump too small to hold a cluster.
-  [ "$SIZE" -gt 1000 ] || { echo "[fail] $NAME: the dump is only $SIZE bytes"; exit 1; }
-  $S3 put-object --bucket "$BUCKET" --key "$KEY" --body "$F" >/dev/null
-  # A write's success is not proof: read the stored size back.
-  REMOTE="$($S3 head-object --bucket "$BUCKET" --key "$KEY" --query ContentLength --output text)"
-  [ "$REMOTE" = "$SIZE" ] || { echo "[fail] $NAME: stored $REMOTE bytes of $SIZE"; exit 1; }
-  rm -f "$F"
-  UPLOADED=$((UPLOADED + 1))
-  echo "[ok] $NAME -> $KEY ($SIZE bytes)"
-}
-${calls}
-[ "$UPLOADED" -eq ${plan.targets.length} ] || { echo "[fail] $UPLOADED of ${plan.targets.length} dumps"; exit 1; }
-# Prune by comparing timestamps in the shell: a JMESPath string comparison would silently match nothing.
-CUT="$(date -u -d @"$(( $(date -u +%s) - RETENTION_HOURS * 3600 ))" +%Y%m%d%H%M%S)"
-$S3 list-objects-v2 --bucket "$BUCKET" --prefix "$PREFIX/" --query 'Contents[].Key' --output text | tr '\\t' '\\n' | while read -r K; do
-  T="$(echo "$K" | sed -n 's/.*dumpall-\\([0-9]\\{8\\}\\)-\\([0-9]\\{6\\}\\)\\.sql\\.gz\\.age$/\\1\\2/p')"
-  [ -n "$T" ] && [ "$T" -lt "$CUT" ] && $S3 delete-object --bucket "$BUCKET" --key "$K" >/dev/null && echo "[pruned] $K"
-done
-echo "[done] $UPLOADED dumps"`;
+      const script = backupScript(plan.targets.map((t, i) => ({ name: t.name, host: t.host, passwordEnv: envOf(i) })));
       const cron = {
         apiVersion: "batch/v1",
         kind: "CronJob",
@@ -334,6 +303,63 @@ echo "[done] $UPLOADED dumps"`;
         },
       };
       return { [`${plan.name}.yaml`]: doc(cron) };
+    },
+
+    renderRestoreCheck(check: RestoreCheck) {
+      const problems = restoreCheckProblems(check);
+      if (problems.length > 0) throw new Error(problems.join("; "));
+      const job = {
+        apiVersion: "batch/v1",
+        kind: "Job",
+        metadata: {
+          name: check.name,
+          namespace: check.namespace,
+          labels: { ...MANAGED, "stardust.dev/restore-check": check.source },
+        },
+        spec: {
+          // One try: a failed check is an answer, not something to retry.
+          backoffLimit: 0,
+          activeDeadlineSeconds: 3600,
+          template: {
+            metadata: { labels: { "app.kubernetes.io/name": "db-restore-check", ...MANAGED } },
+            spec: {
+              restartPolicy: "Never",
+              containers: [
+                {
+                  name: "restore-check",
+                  image: pgImage(newest()),
+                  env: [
+                    { name: "ENDPOINT", value: check.storage.endpoint },
+                    { name: "BUCKET", value: check.storage.bucket },
+                    { name: "PREFIX", value: check.storage.prefix },
+                    { name: "SOURCE", value: check.source },
+                    { name: "AWS_DEFAULT_REGION", value: "auto" },
+                    passwordEnv("AWS_ACCESS_KEY_ID", { name: check.storage.credentials, key: "access-key-id" }),
+                    passwordEnv("AWS_SECRET_ACCESS_KEY", { name: check.storage.credentials, key: "secret-access-key" }),
+                  ],
+                  command: ["/bin/sh", "-c", restoreCheckScript()],
+                  volumeMounts: [
+                    { name: "work", mountPath: "/work" },
+                    { name: "identity", mountPath: "/identity", readOnly: true },
+                  ],
+                },
+              ],
+              volumes: [
+                { name: "work", emptyDir: {} },
+                {
+                  name: "identity",
+                  secret: {
+                    secretName: check.identity.name,
+                    defaultMode: 0o400,
+                    items: [{ key: check.identity.key, path: "key" }],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      };
+      return { [`${check.name}.yaml`]: doc(job) };
     },
   };
 }

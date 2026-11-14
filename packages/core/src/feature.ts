@@ -77,6 +77,11 @@ export interface Route {
   permission: string;
   /** Audit action for changes, `<plugin>.<what>[.<more>]`. Required for every method but GET. */
   audit?: string;
+  /**
+   * For what cannot be undone: the caller must have signed in (or confirmed
+   * it is them) within the server's re-authentication window.
+   */
+  fresh?: boolean;
   handle(request: RouteRequest): Promise<RouteResponse>;
 }
 

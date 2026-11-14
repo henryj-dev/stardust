@@ -36,6 +36,22 @@ import { type BackupSettings, type ManagedInstance, planBackups, RootChange, sec
 
 export { type BackupSettings, type ManagedInstance, planBackups, RootChange } from "./layout.ts";
 
+const CHECKS_MIGRATION = `
+-- Restore checks: a Job per check, committed, followed until it finishes, then removed.
+CREATE TABLE databases_checks (
+  job          text PRIMARY KEY,
+  instance     text NOT NULL,
+  namespace    text NOT NULL,
+  files        jsonb NOT NULL,
+  status       text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'passed', 'failed')),
+  detail       text CHECK (length(detail) <= 500),
+  requested_by text,
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  finished_at  timestamptz
+);
+CREATE INDEX databases_checks_instance_idx ON databases_checks (instance, requested_at DESC);
+`;
+
 const MIGRATION = `
 -- Instances stardust manages, created by it or adopted.
 CREATE TABLE databases_instances (
@@ -70,7 +86,16 @@ CREATE TABLE databases_grants (
 interface Section {
   root?: string;
   backup?: BackupSettings;
+  /** Where restore checks run, and the age identity they decrypt with. */
+  restoreCheck?: { namespace: string; identity: { name: string; key: string } };
+  /** Whether instances may be deleted at all. */
+  allowDelete?: boolean;
 }
+
+/** How long a passed restore check lets an instance be deleted. */
+const CHECK_VALID_MS = 24 * 3_600_000;
+/** A check whose Job never appeared is given up after this. */
+const CHECK_APPEARS_MS = 2 * 3_600_000;
 
 interface InstanceRow {
   name: string;
@@ -266,6 +291,7 @@ export function databasesFeature(ctx: FeatureContext) {
     try {
       files = provider.renderAppGrant(
         {
+          name: instance.name,
           ref: { namespace: instance.namespace, name: instance.workload },
           host: instance.host,
           superuser: instance.superuser,
@@ -376,7 +402,151 @@ export function databasesFeature(ctx: FeatureContext) {
     return { commit: sha };
   }
 
-  return { all, create, adopt, grant, revoke, commit, root };
+  async function requestCheck(instanceName: string, by: string) {
+    const [row] = await db.query<InstanceRow>("SELECT * FROM databases_instances WHERE name = $1", [instanceName]);
+    if (!row) throw new Refused(404, "unknown database instance");
+    const provider = providers[row.provider];
+    if (!provider) throw new Refused(409, "this instance's engine is not configured");
+    const { backup, restoreCheck } = section;
+    if (!backup || !restoreCheck)
+      throw new Refused(409, "restore checks need backup and restoreCheck in the configuration");
+    const running = await db.query("SELECT 1 FROM databases_checks WHERE instance = $1 AND status = 'pending'", [
+      row.name,
+    ]);
+    if (running.length > 0) throw new Refused(409, "a check of this instance is running already");
+    const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+    const job = `${`restore-${row.name}`.slice(0, 43).replace(/-+$/, "")}-${stamp}-${randomBytes(2).toString("hex")}`;
+    let files: Record<string, string>;
+    try {
+      files = provider.renderRestoreCheck({
+        name: job,
+        namespace: restoreCheck.namespace,
+        storage: backup.storage,
+        source: row.name,
+        identity: restoreCheck.identity,
+      });
+    } catch (err) {
+      throw new Refused(400, (err as Error).message);
+    }
+    const sha = await commit(
+      `databases: check that ${row.name} restores`,
+      () => all(),
+      async (change) => {
+        const dir = change.path("checks");
+        for (const [file, content] of Object.entries(files)) {
+          change.write(`${dir}/${file}`, content);
+          await change.entry(dir, file, true);
+        }
+        await change.entry(change.path(), "checks", true);
+      },
+    );
+    await db.query(
+      "INSERT INTO databases_checks (job, instance, namespace, files, requested_by) VALUES ($1, $2, $3, $4::text::jsonb, $5)",
+      [job, row.name, restoreCheck.namespace, JSON.stringify(Object.keys(files)), by],
+    );
+    return { job, commit: sha };
+  }
+
+  /** Follows pending checks: records how each Job ended and removes its manifest. */
+  async function reconcileChecks(now = new Date()): Promise<number> {
+    const kube = ctx.ports.kube;
+    if (!kube) return 0;
+    const pending = await db.query<{ job: string; namespace: string; files: string[]; requested_at: Date }>(
+      "SELECT job, namespace, files, requested_at FROM databases_checks WHERE status = 'pending' ORDER BY requested_at",
+    );
+    let finished = 0;
+    for (const c of pending) {
+      const res = await kube.request("GET", `/apis/batch/v1/namespaces/${c.namespace}/jobs/${c.job}`);
+      let status: "passed" | "failed" | null = null;
+      let detail: string | null = null;
+      if (res.status === 200) {
+        const s = (JSON.parse(res.body) as { status?: { succeeded?: number; failed?: number } }).status ?? {};
+        if ((s.succeeded ?? 0) > 0) status = "passed";
+        else if ((s.failed ?? 0) > 0) {
+          status = "failed";
+          detail = "the dump did not restore to the fingerprint taken with it; see the Job's log";
+        }
+      } else if (res.status === 404 && now.getTime() - new Date(c.requested_at).getTime() > CHECK_APPEARS_MS) {
+        status = "failed";
+        detail = "the Job never appeared: is the GitOps controller applying the databases root?";
+      }
+      if (!status) continue;
+      await commit(
+        `databases: ${c.job} ${status}`,
+        () => all(),
+        async (change) => {
+          const dir = change.path("checks");
+          for (const file of c.files) {
+            change.write(`${dir}/${file}`, null);
+            await change.entry(dir, file, false);
+          }
+          if (listResources((await change.read(`${dir}/kustomization.yaml`)) ?? "").length === 0) {
+            change.write(`${dir}/kustomization.yaml`, null);
+            await change.entry(change.path(), "checks", false);
+          }
+        },
+      );
+      await db.query("UPDATE databases_checks SET status = $2, detail = $3, finished_at = now() WHERE job = $1", [
+        c.job,
+        status,
+        detail,
+      ]);
+      finished++;
+    }
+    return finished;
+  }
+
+  /**
+   * Deletes an instance, when deleting is turned on and nothing depends on
+   * it: no grants left, and for one stardust created, a passed restore check
+   * in the last day. Its manifests go; the volume claim and its data stay,
+   * for a person to delete once sure. An adopted instance is only forgotten.
+   */
+  async function remove(instanceName: string, body: Record<string, unknown>) {
+    if (!section.allowDelete) throw new Refused(403, "deleting databases is turned off (databases.allowDelete)");
+    if (body.confirm !== instanceName) throw new Refused(400, "repeat the instance's name in confirm");
+    const [row] = await db.query<InstanceRow>("SELECT * FROM databases_instances WHERE name = $1", [instanceName]);
+    if (!row) throw new Refused(404, "unknown database instance");
+    const grants = await db.query<{ role: string }>("SELECT role FROM databases_grants WHERE instance = $1", [
+      row.name,
+    ]);
+    if (grants.length > 0) throw new Refused(409, `revoke its grants first: ${grants.map((g) => g.role).join(", ")}`);
+    if (row.origin === "created") {
+      const [passed] = await db.query<{ finished_at: Date }>(
+        "SELECT finished_at FROM databases_checks WHERE instance = $1 AND status = 'passed' ORDER BY finished_at DESC LIMIT 1",
+        [row.name],
+      );
+      if (!passed || Date.now() - new Date(passed.finished_at).getTime() > CHECK_VALID_MS) {
+        throw new Refused(
+          409,
+          "check that its newest backup restores first: a passed check in the last 24 hours is needed",
+        );
+      }
+    }
+    return db.transaction(async (tx) => {
+      await tx.query("DELETE FROM databases_instances WHERE name = $1", [row.name]);
+      const sha = await commit(
+        `databases: delete ${row.name}`,
+        () => all(tx),
+        async (change, at) => {
+          const dir = change.path(row.name);
+          const inside = (await at.list(dir)).filter((f) => f !== "kustomization.yaml");
+          if (inside.length > 0 || (await at.read(`${dir}/kustomization.yaml`)) !== null) {
+            await change.removeDir(change.path(), row.name, inside);
+          }
+        },
+      );
+      return {
+        commit: sha,
+        kept:
+          row.origin === "created"
+            ? `the volume claim of ${row.namespace}/${row.workload} and its data stay: delete it by hand once sure`
+            : "an adopted instance is only forgotten: nothing of it was changed",
+      };
+    });
+  }
+
+  return { all, create, adopt, grant, revoke, commit, root, requestCheck, reconcileChecks, remove };
 }
 
 const wrap = async (
@@ -410,6 +580,15 @@ function routes(ctx: FeatureContext): Route[] {
           project_id: string;
           layer: string;
         }>("SELECT instance, role, database, project_id, layer FROM databases_grants ORDER BY instance, role");
+        const checks = await db.query<{
+          instance: string;
+          status: string;
+          detail: string | null;
+          requested_at: Date;
+          finished_at: Date | null;
+        }>(
+          "SELECT DISTINCT ON (instance) instance, status, detail, requested_at, finished_at FROM databases_checks ORDER BY instance, requested_at DESC",
+        );
         const instances = await Promise.all(
           rows.map(async (r) => {
             const state = await providers[r.provider]
@@ -425,6 +604,17 @@ function routes(ctx: FeatureContext): Route[] {
               version: state?.version ?? r.version,
               ready: state?.ready ?? false,
               present: state !== null && state !== undefined,
+              lastCheck: (() => {
+                const c = checks.find((x) => x.instance === r.name);
+                return c
+                  ? {
+                      status: c.status,
+                      detail: c.detail,
+                      requestedAt: new Date(c.requested_at).toISOString(),
+                      finishedAt: c.finished_at ? new Date(c.finished_at).toISOString() : null,
+                    }
+                  : null;
+              })(),
               grants: grants
                 .filter((g) => g.instance === r.name)
                 .map((g) => ({ role: g.role, database: g.database, project: g.project_id, layer: g.layer })),
@@ -457,6 +647,8 @@ function routes(ctx: FeatureContext): Route[] {
             engines: Object.entries(providers).map(([name, p]) => ({ name, ...p.capabilities })),
             backup: (ctx.config as Section).backup ? { schedule: (ctx.config as Section).backup?.schedule } : null,
             envEditing: Boolean(ctx.ports.projectEnv),
+            restoreChecks: Boolean((ctx.config as Section).backup && (ctx.config as Section).restoreCheck),
+            allowDelete: (ctx.config as Section).allowDelete === true,
           },
         };
       },
@@ -532,6 +724,29 @@ function routes(ctx: FeatureContext): Route[] {
           return { body: { commit: sha }, audit: { target: f.root, detail: { commit: sha } } };
         }),
     },
+    {
+      method: "POST",
+      path: "/databases/:name/restore-check",
+      permission: "databases:write",
+      audit: "databases.check",
+      handle: ({ params, user }) =>
+        wrap(async () => {
+          const r = await f.requestCheck(params.name ?? "", user.username);
+          return { body: r, audit: { target: params.name ?? "", detail: r } };
+        }, 201),
+    },
+    {
+      method: "POST",
+      path: "/databases/:name/delete",
+      permission: "databases:write",
+      audit: "databases.delete",
+      fresh: true,
+      handle: ({ params, body }) =>
+        wrap(async () => {
+          const r = await f.remove(params.name ?? "", obj(body));
+          return { body: r, audit: { target: params.name ?? "", detail: { commit: r.commit } } };
+        }),
+    },
   ];
 }
 
@@ -544,7 +759,18 @@ export const plugin = definePlugin({
     if (typeof section !== "object" || section === null) return ["must be a mapping"];
     const s = section as Record<string, unknown>;
     const problems: string[] = [];
-    for (const key of Object.keys(s)) if (!["root", "backup"].includes(key)) problems.push(`unknown key "${key}"`);
+    for (const key of Object.keys(s))
+      if (!["root", "backup", "restoreCheck", "allowDelete"].includes(key)) problems.push(`unknown key "${key}"`);
+    if (s.allowDelete !== undefined && typeof s.allowDelete !== "boolean")
+      problems.push("allowDelete must be true or false");
+    if (s.restoreCheck !== undefined) {
+      const r = s.restoreCheck as { namespace?: unknown; identity?: { name?: unknown; key?: unknown } };
+      if (!s.backup) problems.push("restoreCheck needs backup: it checks the backups");
+      if (!isKubeName(r.namespace)) problems.push("restoreCheck.namespace must be a namespace name");
+      if (!isKubeName(r.identity?.name) || typeof r.identity?.key !== "string") {
+        problems.push("restoreCheck.identity must be { name: <Secret>, key: <key> } holding the age identity");
+      }
+    }
     if (
       s.root !== undefined &&
       (typeof s.root !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._/-]*$/.test(s.root) || s.root.includes(".."))
@@ -566,7 +792,12 @@ export const plugin = definePlugin({
         recipient: String(b.recipient ?? ""),
         retentionHours: Number(b.retentionHours ?? 168),
         targets: [
-          { ref: { namespace: "probe", name: "probe" }, host: "probe", superuser: { name: "probe", key: "k" } },
+          {
+            name: "probe",
+            ref: { namespace: "probe", name: "probe" },
+            host: "probe",
+            superuser: { name: "probe", key: "k" },
+          },
         ],
       });
       for (const p of probe) problems.push(`backup: ${p}`);
@@ -579,6 +810,12 @@ export const plugin = definePlugin({
     { id: "databases:write", description: "Create, adopt and grant databases", grantedTo: "admins" },
   ],
   capabilities: ["databases.list"],
-  migrations: async () => [{ name: "0001_databases.sql", scope: "regional", sql: MIGRATION }],
+  migrations: async () => [
+    { name: "0001_databases.sql", scope: "regional", sql: MIGRATION },
+    { name: "0002_checks.sql", scope: "regional", sql: CHECKS_MIGRATION },
+  ],
+  schedules: [
+    { id: "checks", everyMs: 120_000, run: async (ctx) => void (await databasesFeature(ctx).reconcileChecks()) },
+  ],
   routes,
 });

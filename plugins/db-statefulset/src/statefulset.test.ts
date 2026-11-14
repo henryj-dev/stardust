@@ -94,6 +94,7 @@ describe("the rendered scripts", () => {
     return pod.containers[0]?.command[2] ?? "";
   };
   const target = {
+    name: "orders",
     ref: { namespace: "databases", name: "orders" },
     host: "orders.databases.svc",
     superuser: { name: "orders-superuser", key: "password" },
@@ -113,11 +114,25 @@ describe("the rendered scripts", () => {
         retentionHours: 168,
         targets: [
           target,
-          { ...target, ref: { namespace: "databases", name: "billing" }, host: "billing.databases.svc" },
+          {
+            ...target,
+            name: "billing",
+            ref: { namespace: "databases", name: "billing" },
+            host: "billing.databases.svc",
+          },
         ],
       }),
     );
-    for (const script of [grant, backup]) {
+    const check = scriptOf(
+      p.renderRestoreCheck({
+        name: "check",
+        namespace: "databases",
+        storage: { endpoint: "https://s3.example.com", bucket: "backups", credentials: "backup-s3", prefix: "pg" },
+        source: "orders",
+        identity: { name: "age", key: "identity" },
+      }),
+    );
+    for (const script of [grant, backup, check]) {
       const r = spawnSync("sh", ["-n", "-c", script], { encoding: "utf8" });
       assert.equal(r.status, 0, r.stderr);
     }

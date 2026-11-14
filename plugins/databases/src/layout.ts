@@ -50,7 +50,9 @@ export function secretDocument(name: string, namespace: string, data: Record<str
 }
 
 export const targetOf = (i: ManagedInstance): DatabaseTarget | null =>
-  i.superuser ? { ref: { namespace: i.namespace, name: i.workload }, host: i.host, superuser: i.superuser } : null;
+  i.superuser
+    ? { name: i.name, ref: { namespace: i.namespace, name: i.workload }, host: i.host, superuser: i.superuser }
+    : null;
 
 /**
  * A change under the root, written against what the repository holds now:
@@ -139,7 +141,7 @@ export async function planBackups(
       storage: settings?.storage ?? { endpoint: "", bucket: "", credentials: "", prefix: "" },
       recipient: settings?.recipient ?? "",
       retentionHours: settings?.retentionHours ?? 0,
-      targets: targets.sort((a, b) => a.ref.name.localeCompare(b.ref.name)),
+      targets: targets.sort((a, b) => a.name.localeCompare(b.name)),
     };
     const files = provider.renderBackup(plan);
     for (const [file, content] of Object.entries(files)) {

@@ -15,6 +15,12 @@ export interface Listing {
     ready: boolean;
     present: boolean;
     grants: Array<{ role: string; database: string; project: string; layer: string }>;
+    lastCheck: {
+      status: "pending" | "passed" | "failed";
+      detail: string | null;
+      requestedAt: string;
+      finishedAt: string | null;
+    } | null;
   }>;
   unmanaged: Array<{
     provider: string;
@@ -27,6 +33,8 @@ export interface Listing {
   engines: Array<{ name: string; versions: string[]; namespace: string }>;
   backup: { schedule: string } | null;
   envEditing: boolean;
+  restoreChecks: boolean;
+  allowDelete: boolean;
 }
 
 export const load: PageServerLoad = async ({ locals, url }) => {
@@ -82,6 +90,16 @@ export const actions: Actions = {
       role: text(f, "role"),
       database: text(f, "database") || undefined,
       envPrefix: text(f, "envPrefix") || undefined,
+    });
+  },
+  check: async ({ locals, request, url }) => {
+    const f = await request.formData();
+    return send(locals, url, "POST", `/databases/${encodeURIComponent(text(f, "instance"))}/restore-check`);
+  },
+  remove: async ({ locals, request, url }) => {
+    const f = await request.formData();
+    return send(locals, url, "POST", `/databases/${encodeURIComponent(text(f, "instance"))}/delete`, {
+      confirm: text(f, "confirm"),
     });
   },
   revoke: async ({ locals, request, url }) => {
