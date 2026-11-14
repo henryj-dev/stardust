@@ -13,6 +13,7 @@ import {
   permissionProblems,
   type Route,
   type Schedule,
+  type SocketRoute,
   scheduleProblems,
 } from "./feature.ts";
 import type { Logger } from "./logger.ts";
@@ -69,6 +70,8 @@ export interface Plugin {
   readonly permissions?: readonly Permission[];
   /** API routes, under `/api/v1/plugins/<name>`. Built once the ports exist. */
   routes?(context: FeatureContext): readonly Route[];
+  /** WebSockets for peers with their own credential (agents), under `/api/v1/plugins/<name>`. */
+  sockets?(context: FeatureContext): readonly SocketRoute[];
   /** Work run every so often by one worker at a time. */
   readonly schedules?: readonly Schedule[];
   /** Its own tables (named `<name>_*`), applied at start-up after stardust's. */

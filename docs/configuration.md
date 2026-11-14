@@ -311,6 +311,25 @@ domains:
   rdap: true # optional
 ```
 
+### `nodes`
+
+Hosts running the node agent. An administrator issues a token for a host on
+`/nodes` (shown once; issuing again revokes the earlier one), and the agent
+keeps a WebSocket open to
+`<server>/api/v1/plugins/nodes/infra/node-socket` with
+`Authorization: Bearer stnode_…`: set the agent's `url` to
+`<server>/api/v1/plugins/nodes`. A host is _online_ while it beats (every five
+seconds), _degraded_ for the 90 seconds a reconnect may take, then _missing_.
+Revoking a token disconnects the host at its next beat.
+
+```yaml
+nodes: {}
+```
+
+Only each host's latest metrics are kept, for the list. Send time series to
+a metrics system instead. The ingress in front of stardust must pass
+WebSocket upgrades; most controllers do so without extra configuration.
+
 ### `store-s3`
 
 Object storage on S3, R2 or MinIO (path-style requests, Signature V4). With

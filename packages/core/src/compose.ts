@@ -10,6 +10,7 @@ import {
   type Route,
   routeProblems,
   type Schedule,
+  type SocketRoute,
 } from "./feature.ts";
 import type { Logger } from "./logger.ts";
 import type { Plugin, PluginContext } from "./plugin.ts";
@@ -141,6 +142,7 @@ export interface Feature {
   plugin: string;
   permissions: readonly Permission[];
   routes: readonly Route[];
+  sockets: readonly SocketRoute[];
   schedules: readonly Schedule[];
   capabilities: readonly string[];
   migrations: () => Promise<readonly Migration[]>;
@@ -178,6 +180,7 @@ export function buildFeatures(
       plugin: name,
       permissions,
       routes,
+      sockets: plugin.sockets?.(context) ?? [],
       schedules: plugin.schedules ?? [],
       capabilities: plugin.capabilities ?? [],
       migrations: plugin.migrations

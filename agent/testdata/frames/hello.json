@@ -1,0 +1,11 @@
+{
+  "agent_version": "1.4.2",
+  "host_profile": {
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+    "cpu_flags": ["sse4_2", "popcnt", "avx", "avx2", "bmi2"],
+    "kernel": "6.12.0-55.9.1.el10_0.x86_64",
+    "machine_id": "9d2a1f0c4b8e4a1fa0c3b7e6d5f41234"
+  },
+  "protocol_version": 1,
+  "type": "hello"
+}
