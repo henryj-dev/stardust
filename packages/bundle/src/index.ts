@@ -8,6 +8,7 @@ import { plugin as auditCloudflare } from "@stardust/plugin-audit-cloudflare";
 import { plugin as builderBuildkit } from "@stardust/plugin-builder-buildkit";
 import { plugin as cloudAudit } from "@stardust/plugin-cloud-audit";
 import { plugin as cloudVultr } from "@stardust/plugin-cloud-vultr";
+import { plugin as costs } from "@stardust/plugin-costs";
 import { plugin as databases } from "@stardust/plugin-databases";
 import { plugin as dbStatefulset } from "@stardust/plugin-db-statefulset";
 import { plugin as dnsCloudflare } from "@stardust/plugin-dns-cloudflare";
@@ -30,6 +31,7 @@ export const bundledPlugins: readonly Plugin[] = [
   builderBuildkit,
   cloudAudit,
   cloudVultr,
+  costs,
   databases,
   dbStatefulset,
   dnsCloudflare,

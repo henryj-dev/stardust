@@ -388,6 +388,17 @@ instances:
     exact: [gateway.example.com]
 ```
 
+### `costs`
+
+Adds up what every billed source says it costs a month (a `cloud-vultr`
+account prices its instances at their plans) and shows it on the home page to
+administrators. A source that cannot answer is shown as unknown, never as
+zero.
+
+```yaml
+costs: {}
+```
+
 ### `databases`
 
 PostgreSQL for your applications, through the deploy repository: administrators

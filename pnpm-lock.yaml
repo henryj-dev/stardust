@@ -220,6 +220,9 @@ importers:
       '@stardust/plugin-cloud-vultr':
         specifier: workspace:*
         version: link:../../plugins/cloud-vultr
+      '@stardust/plugin-costs':
+        specifier: workspace:*
+        version: link:../../plugins/costs
       '@stardust/plugin-databases':
         specifier: workspace:*
         version: link:../../plugins/databases
@@ -431,6 +434,12 @@ importers:
         version: link:../../packages/core
 
   plugins/cloud-vultr:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  plugins/costs:
     dependencies:
       '@stardust/core':
         specifier: workspace:*

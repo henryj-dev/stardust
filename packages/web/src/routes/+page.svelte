@@ -7,6 +7,18 @@ let { data } = $props();
 </svelte:head>
 
 <main>
+  {#if data.costs?.sources.length}
+    <section data-costs>
+      <h2>This month</h2>
+      <ul>
+        {#each data.costs.sources as c (c.name)}
+          <li data-cost={c.name}>
+            {c.name}: {#if c.total !== null}{c.total.toFixed(2)} {c.currency}{:else}unknown <small>({c.error})</small>{/if}
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
   <h1>Projects</h1>
   {#if data.user?.isAdmin}
     <p><a href="/admin/projects/new" data-new-project>New project</a></p>

@@ -12,6 +12,7 @@
     "@stardust/plugin-builder-buildkit": "workspace:*",
     "@stardust/plugin-cloud-audit": "workspace:*",
     "@stardust/plugin-cloud-vultr": "workspace:*",
+    "@stardust/plugin-costs": "workspace:*",
     "@stardust/plugin-databases": "workspace:*",
     "@stardust/plugin-db-statefulset": "workspace:*",
     "@stardust/plugin-dns-cloudflare": "workspace:*",

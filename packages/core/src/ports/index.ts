@@ -10,6 +10,7 @@ import type { AuditLogSource } from "./audit-logs.ts";
 import type { Builder, ImageNaming } from "./builder.ts";
 import type { SecretCipher } from "./cipher.ts";
 import type { ComputeProvider } from "./compute.ts";
+import type { CostSource } from "./costs.ts";
 import type { Database } from "./database.ts";
 import type { DatabaseProvider } from "./databases.ts";
 import type { DeployTarget } from "./deploy-target.ts";
@@ -58,6 +59,8 @@ export interface Ports {
   instanceHooks: Record<string, InstanceHook>;
   /** Cloud providers' audit logs, by name, e.g. `cloudflare`. */
   auditLogs: Record<string, AuditLogSource>;
+  /** Monthly costs, by who bills them. */
+  costs: Record<string, CostSource>;
   /** Releases outside Kubernetes, by pipeline letter, e.g. `W` (Cloudflare Workers). */
   deployTargets: Record<string, DeployTarget>;
   /** Secret env values on a project's layers, provided by the server. */
@@ -86,6 +89,7 @@ export const PORT_NAMES: readonly PortName[] = [
   "compute",
   "instanceHooks",
   "auditLogs",
+  "costs",
   "deployTargets",
   "projectEnv",
 ];
@@ -103,12 +107,14 @@ export const MULTI_PORTS: ReadonlySet<PortName> = new Set<PortName>([
   "compute",
   "instanceHooks",
   "auditLogs",
+  "costs",
 ]);
 
 export * from "./audit-logs.ts";
 export * from "./builder.ts";
 export * from "./cipher.ts";
 export * from "./compute.ts";
+export * from "./costs.ts";
 export * from "./database.ts";
 export * from "./databases.ts";
 export * from "./deploy-target.ts";

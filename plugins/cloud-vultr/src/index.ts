@@ -14,11 +14,11 @@
  */
 import { definePlugin, isKubeName } from "@stardust/core";
 import { vultrClient } from "./client.ts";
-import { vultrCompute } from "./vultr.ts";
+import { computeCosts, vultrCompute } from "./vultr.ts";
 
 export { type ApprovalClaims, approvalClaims, signApproval } from "./approval.ts";
 export { decideFallback, type FallbackDecision, VultrHttpError, vultrClient } from "./client.ts";
-export { mapInstance, type VultrComputeOptions, vultrCompute } from "./vultr.ts";
+export { computeCosts, mapInstance, type VultrComputeOptions, vultrCompute } from "./vultr.ts";
 
 const isRef = (v: unknown) =>
   typeof v === "object" && v !== null && Object.keys(v).length === 1 && ("env" in v || "file" in v);
@@ -52,7 +52,7 @@ export const plugin = definePlugin({
     return problems;
   },
   provides: {
-    ports: ["compute"],
+    ports: ["compute", "costs"],
     async create({ config, resolveSecret, log }) {
       const c = config as {
         account?: string;
@@ -81,9 +81,9 @@ export const plugin = definePlugin({
       const deleteApprovalKey = c.deleteApprovalKey
         ? await resolveSecret(c.deleteApprovalKey, "plugins.cloud-vultr.deleteApprovalKey")
         : undefined;
-      return {
-        compute: { [c.account ?? "vultr"]: vultrCompute(client, deleteApprovalKey ? { deleteApprovalKey } : {}) },
-      };
+      const compute = vultrCompute(client, deleteApprovalKey ? { deleteApprovalKey } : {});
+      const account = c.account ?? "vultr";
+      return { compute: { [account]: compute }, costs: { [account]: computeCosts(compute) } };
     },
   },
 });
