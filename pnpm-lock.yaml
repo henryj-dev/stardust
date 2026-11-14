@@ -201,6 +201,9 @@ importers:
       '@stardust/plugin-dns-parallax':
         specifier: workspace:*
         version: link:../../plugins/dns-parallax
+      '@stardust/plugin-domains':
+        specifier: workspace:*
+        version: link:../../plugins/domains
       '@stardust/plugin-gitops-git':
         specifier: workspace:*
         version: link:../../plugins/gitops-git
@@ -285,6 +288,9 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
     devDependencies:
+      '@stardust/plugin-domains':
+        specifier: workspace:*
+        version: link:../../plugins/domains
       '@stardust/plugin-identity-oidc':
         specifier: workspace:*
         version: link:../../plugins/identity-oidc
@@ -355,6 +361,12 @@ importers:
         version: link:../../packages/core
 
   plugins/dns-parallax:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  plugins/domains:
     dependencies:
       '@stardust/core':
         specifier: workspace:*

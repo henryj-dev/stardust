@@ -297,6 +297,20 @@ A parallax write is published by applying its view at the revision the write
 made (a write alone is a draft there); stardust then waits until that view
 serves it.
 
+### `domains`
+
+Administrators see every zone the DNS providers hold on `/domains`: the
+registrar and expiry date from RDAP (soonest first, flagged under 30 days),
+and each zone's records, which they can set and remove through the zone's
+provider (audited as `domains.record.set` and `domains.record.delete`). Zones
+are read every six hours and RDAP data daily, or at once with "Refresh".
+
+```yaml
+domains:
+  providers: [cloudflare, parallax] # optional: the dns plugins to read; all by default
+  rdap: true # optional
+```
+
 ### `store-s3`
 
 Object storage on S3, R2 or MinIO (path-style requests, Signature V4). With

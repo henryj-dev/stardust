@@ -10,7 +10,56 @@ export type { LogSeed } from "./ports/testing/logs.contract.ts";
 export { logSourceContract } from "./ports/testing/logs.contract.ts";
 export { objectStoreContract } from "./ports/testing/store.contract.ts";
 
+import { type DnsProvider, type DnsRecord, dnsRecordProblems, normalizeDnsName } from "./ports/dns.ts";
 import type { ObjectStore } from "./ports/store.ts";
+
+/** DNS in memory, with views when given some; it keeps the same contract as the real adapters. */
+export class MemoryDns implements DnsProvider {
+  readonly capabilities: DnsProvider["capabilities"];
+  readonly zones: string[];
+  readonly records: Array<DnsRecord & { zone: string }> = [];
+  private next = 1;
+  constructor(zones: string[], views: string[] = []) {
+    this.zones = zones;
+    this.capabilities = { views, proxied: false, asyncApply: false };
+  }
+  async listZones(): Promise<string[]> {
+    return [...this.zones].sort();
+  }
+  async listRecords(zone: string, filter: { name?: string; type?: string; view?: string } = {}): Promise<DnsRecord[]> {
+    return this.records
+      .filter((r) => r.zone === normalizeDnsName(zone))
+      .filter(
+        (r) => (!filter.name || r.name === normalizeDnsName(filter.name)) && (!filter.type || r.type === filter.type),
+      )
+      .filter((r) => !filter.view || r.view === filter.view)
+      .map(({ zone: _z, ...r }) => ({ ...r }));
+  }
+  async upsert(zone: string, input: Parameters<DnsProvider["upsert"]>[1]): Promise<DnsRecord> {
+    const problems = dnsRecordProblems(zone, input);
+    if (problems.length > 0) throw new Error(problems.join("; "));
+    const name = normalizeDnsName(input.name);
+    const view = input.view ?? null;
+    const existing = this.records.find(
+      (r) => r.zone === normalizeDnsName(zone) && r.name === name && r.type === input.type && r.view === view,
+    );
+    const record = {
+      id: existing?.id ?? `m${this.next++}`,
+      name,
+      type: input.type,
+      content: input.content,
+      ttl: input.ttl,
+      view,
+    };
+    if (existing) Object.assign(existing, record);
+    else this.records.push({ ...record, zone: normalizeDnsName(zone) });
+    return { ...record };
+  }
+  async delete(zone: string, id: string): Promise<void> {
+    const i = this.records.findIndex((r) => r.zone === normalizeDnsName(zone) && r.id === id);
+    if (i >= 0) this.records.splice(i, 1);
+  }
+}
 
 /** Objects in memory, copied in and out. */
 export class MemoryStore implements ObjectStore {

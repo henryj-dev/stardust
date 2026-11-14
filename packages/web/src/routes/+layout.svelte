@@ -8,6 +8,7 @@ let { data, children } = $props();
       <a href="/">stardust</a>
       {#if data.user.isAdmin}
         <a href="/admin/users" data-nav-users>Users</a>
+        {#if data.capabilities.includes("domains.list")}<a href="/domains" data-nav-domains>Domains</a>{/if}
         <a href="/admin/audit" data-nav-audit>Audit log</a>
       {/if}
       <a href="/account" data-nav-account>Account</a>

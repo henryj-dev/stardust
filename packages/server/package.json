@@ -17,6 +17,7 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
+    "@stardust/plugin-domains": "workspace:*",
     "@stardust/plugin-identity-oidc": "workspace:*",
     "@stardust/plugin-secrets-sops-age": "workspace:*"
   }
