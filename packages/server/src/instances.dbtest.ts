@@ -28,6 +28,14 @@ let admin: Record<string, string>;
 let feature: ReturnType<typeof buildFeatures>[number];
 const compute = new MemoryCompute();
 const dns = new MemoryDns(["example.com"]);
+/** What a hook saw and did, and whether it refuses. */
+const hook = { calls: [] as string[], refuseCreate: false, refuseDelete: false };
+const sentUserData = new Map<string, string>();
+const realCreate = compute.create.bind(compute);
+compute.create = async (input) => {
+  sentUserData.set(input.hostname, input.userData ?? "");
+  return realCreate(input);
+};
 /** The fake cloud brings every pending instance up whenever the saga waits. */
 const bootAll = async () => {
   for (const i of compute.instances.values()) i.state = "running";
@@ -53,6 +61,25 @@ before(async () => {
     guards: guardStore(db.sql, db.sql),
     compute: { vultr: compute },
     dns: { cloudflare: dns },
+    instanceHooks: {
+      enrol: {
+        async prepare(d: { hostname: string }) {
+          if (hook.refuseCreate) throw new Error("not in the inventory");
+          hook.calls.push(`prepare ${d.hostname}`);
+          return { userData: `#!/bin/sh\nenrol --token one-time-${d.hostname}\n` };
+        },
+        async created(i: { hostname: string }) {
+          hook.calls.push(`created ${i.hostname}`);
+        },
+        async beforeDestroy(i: { hostname: string }) {
+          if (hook.refuseDelete) throw new Error("still enrolled");
+          hook.calls.push(`beforeDestroy ${i.hostname}`);
+        },
+        async destroyed(i: { hostname: string }) {
+          hook.calls.push(`destroyed ${i.hostname}`);
+        },
+      },
+    },
   };
   [feature] = buildFeatures(createPluginRegistry([plugin]).resolve(sections), sections, ports, quiet, "test") as [
     ReturnType<typeof buildFeatures>[number],
@@ -101,6 +128,27 @@ describe("creating", () => {
       ].sort(),
     );
     assert.equal(compute.reverse.get(made.mainIp ?? ""), "web-1.example.com");
+    const sent = sentUserData.get("web-1.example.com") ?? "";
+    assert.match(sent, /multipart\/mixed/);
+    assert.match(sent, /hostname: web-1\.example\.com/);
+    assert.match(sent, /enrol --token one-time-web-1\.example\.com/, "the hook's part went in");
+    assert.deepEqual(
+      hook.calls.filter((c) => c.endsWith("web-1.example.com")),
+      ["prepare web-1.example.com", "created web-1.example.com"],
+    );
+    const [saga] = await db.sql<
+      { state: unknown }[]
+    >`SELECT state FROM saga_runs WHERE kind = 'instances.create' LIMIT 1`;
+    assert.ok(!JSON.stringify(saga?.state).includes("one-time"), "what a hook returns is never stored");
+  });
+
+  it("stops a create a hook refuses, before anything is made", async () => {
+    hook.refuseCreate = true;
+    await make("web-5.example.com");
+    await drive();
+    assert.match((await op("web-5.example.com"))?.error ?? "", /hook enrol refused: not in the inventory/);
+    assert.equal(byHost("web-5.example.com"), undefined);
+    hook.refuseCreate = false;
   });
 
   it("resumes a create that stopped after the instance was made, without making a second", async () => {
@@ -161,14 +209,30 @@ describe("resizing and deleting", () => {
       403,
       "a ticket is for one instance",
     );
-    const done = await call("POST", `/instances/${web1}/delete`, { ticket });
+    hook.refuseDelete = true;
+    const refused = await call("POST", `/instances/${web1}/delete`, { ticket });
+    assert.equal(refused.status, 409, "a hook can refuse a delete");
+    assert.ok(byHost("web-1.example.com"), "and nothing was deleted");
+    hook.refuseDelete = false;
+    const again = (await (
+      await call("POST", `/instances/${web1}/delete/approve`, { confirm: "web-1.example.com" })
+    ).json()) as { ticket: string };
+    const done = await call("POST", `/instances/${web1}/delete`, { ticket: again.ticket });
     assert.equal(done.status, 200);
     assert.equal(((await done.json()) as { recordsRemoved: number }).recordsRemoved, 2);
     assert.equal(byHost("web-1.example.com"), undefined);
     assert.ok(!(await dns.listRecords("example.com")).some((r) => r.name.startsWith("web-1.")));
-    assert.equal((await call("POST", `/instances/${web2}/delete`, { ticket })).status, 403);
+    assert.equal((await call("POST", `/instances/${web2}/delete`, { ticket: again.ticket })).status, 403);
+    assert.deepEqual(hook.calls.filter((c) => c.endsWith("web-1.example.com")).slice(-2), [
+      "beforeDestroy web-1.example.com",
+      "destroyed web-1.example.com",
+    ]);
     const actions = (await listAudit(db.sql, { action: "instances.delete" })).events.map((e) => e.action).sort();
-    assert.deepEqual(actions, ["instances.delete", "instances.delete.approve"]);
+    assert.deepEqual(
+      actions,
+      ["instances.delete", "instances.delete.approve", "instances.delete.approve"],
+      "a refused delete spent its ticket",
+    );
   });
 
   it("never deletes a protected host, and asks a stale session to sign in again", async () => {
