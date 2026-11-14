@@ -44,3 +44,12 @@ export interface RepoIO {
 export function isRetryable(result: CommitResult): boolean {
   return result.status === "error" && (result.kind === "stale_head" || result.kind === "ref_race");
 }
+
+/** The `deployRepo` port: the repository Flux applies, and how stardust writes to it. */
+export interface DeployRepo {
+  repo: RepoIO;
+  /** Where the env layers live. Default `deploy/env`. */
+  envRoot?: string;
+  /** Pod template annotation that records the build, e.g. `example.com/build-rev`. */
+  buildRevAnnotation?: string;
+}

@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { bumpImage } from "./bump.ts";
+import { bumpImage } from "@stardust/core";
 import { GitCliRepo } from "./git-cli.ts";
 
 const sh = (cwd: string, ...args: string[]) =>

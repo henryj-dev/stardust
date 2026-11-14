@@ -5,18 +5,8 @@
  * the digest the deploy repository cannot be pointed at what was built.
  */
 import { setTimeout as sleep } from "node:timers/promises";
+import type { BuildOutcome, KubeClient } from "@stardust/core";
 import { DIGEST_LINE } from "./job.ts";
-import type { KubeClient } from "./kube.ts";
-
-export interface BuildOutcome {
-  result: "success" | "failed" | "cancelled";
-  jobName: string;
-  digest?: string;
-  /** Why it failed, when it did. */
-  reason?: string;
-  /** The last lines of the build container's log. */
-  logTail: string;
-}
 
 export interface RunBuildOptions {
   signal: AbortSignal;

@@ -5,13 +5,13 @@
 import assert from "node:assert/strict";
 import { createHmac, randomBytes } from "node:crypto";
 import { after, before, describe, it } from "node:test";
+import type { BuildLog, BuildLogReader } from "@stardust/core";
+import { type PullTarget, TargetError } from "@stardust/core";
+import { MemoryRepo } from "@stardust/core/testing";
 import { createUser, ensureBootstrapAdmin, putProject, signIn, startRun } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
-import type { BuildLog, BuildLogReader } from "@stardust/plugin-builder-buildkit";
-import { MemoryRepo } from "@stardust/plugin-gitops-git/testing";
 import { createApp } from "./app.ts";
 import { fakeCodec } from "./env-testing.ts";
-import { type PullTarget, TargetError } from "./source.ts";
 
 const PASSWORD = "correct horse battery";
 let db: TestDb;

@@ -27,14 +27,15 @@ with Docker:
 
 `.dependency-cruiser.cjs` enforces:
 
-| Rule                    | Meaning                                                    |
-| ----------------------- | ---------------------------------------------------------- |
-| `core-is-pure`          | `packages/core` imports nothing else from this repository. |
-| `plugins-only-use-core` | A plugin may import `packages/core`, nothing else.         |
-| `plugins-are-isolated`  | Plugins never import each other. Shared code goes to core. |
-| `web-only-uses-sdk`     | The dashboard reaches the API only through `packages/sdk`. |
-| `sdk-is-standalone`     | The client does not import server code.                    |
-| `no-circular`           | No import cycles.                                          |
+| Rule                        | Meaning                                                                                                                  |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `core-is-pure`              | `packages/core` imports nothing else from this repository.                                                               |
+| `plugins-only-use-core`     | A plugin may import `packages/core`, nothing else.                                                                       |
+| `plugins-are-isolated`      | Plugins never import each other. Shared code goes to core.                                                               |
+| `only-bundle-loads-plugins` | Only `packages/bundle` imports plugins; the server and worker get ports from `assemble`. Tests may use a plugin's fakes. |
+| `web-only-uses-sdk`         | The dashboard reaches the API only through `packages/sdk`.                                                               |
+| `sdk-is-standalone`         | The client does not import server code.                                                                                  |
+| `no-circular`               | No import cycles.                                                                                                        |
 
 If a change needs to break a rule, discuss it in an issue first.
 

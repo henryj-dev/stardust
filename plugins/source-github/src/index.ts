@@ -1,4 +1,5 @@
 import { definePlugin } from "@stardust/core";
+import { targetApi } from "./api.ts";
 
 const isSecretRef = (value: unknown): boolean => {
   if (typeof value !== "object" || value === null) return false;
@@ -28,6 +29,22 @@ export const RETIRED_KEYS: Readonly<Record<string, string>> = {
  */
 export const plugin = definePlugin({
   manifest: { name: "source-github", description: "Builds from GitHub repositories (or a GitHub-compatible API)." },
+  provides: {
+    ports: ["source"],
+    async create({ config, resolveSecret, log }) {
+      const at = "plugins.source-github";
+      if (config.appId !== undefined) {
+        throw new Error(`${at}: GitHub App authentication is not implemented yet; use token`);
+      }
+      for (const [key, why] of Object.entries(RETIRED_KEYS)) {
+        if (config[key] !== undefined) log.warn(`${at}.${key} is ignored: ${why}`);
+      }
+      const apiBaseUrl = (config.apiBaseUrl as string | undefined) ?? "https://api.github.com";
+      // Optional: public repositories need no token.
+      const token = config.token === undefined ? undefined : await resolveSecret(config.token, `${at}.token`);
+      return { source: { resolveTarget: targetApi(apiBaseUrl, token) } };
+    },
+  },
   validateConfig(section) {
     const problems: string[] = [];
     if (typeof section !== "object" || section === null) return ["must be a mapping"];
@@ -50,3 +67,5 @@ export const plugin = definePlugin({
     return problems;
   },
 });
+
+export { targetApi } from "./api.ts";

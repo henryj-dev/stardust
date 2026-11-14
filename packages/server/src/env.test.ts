@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ENV_REVISION_ANNOTATION } from "@stardust/core";
+import { MemoryRepo } from "@stardust/core/testing";
 import type { Project } from "@stardust/db";
-import { MemoryRepo } from "@stardust/plugin-gitops-git/testing";
 import { parse } from "yaml";
 import {
   changeEnv,

@@ -7,10 +7,13 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@stardust/bundle": "workspace:*",
     "@stardust/config": "workspace:*",
     "@stardust/core": "workspace:*",
     "@stardust/db": "workspace:*",
-    "@stardust/plugin-builder-buildkit": "workspace:*",
-    "@stardust/plugin-gitops-git": "workspace:*"
+    "@stardust/kube": "workspace:*"
+  },
+  "devDependencies": {
+    "@stardust/plugin-builder-buildkit": "workspace:*"
   }
 }

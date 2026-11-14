@@ -5,7 +5,7 @@
  * file at a branch name — and planning against a stale view — cannot be
  * written by mistake.
  */
-import { type CommitResult, isRetryable, type PendingCommit, type RepoFile, type RepoIO } from "./repo.ts";
+import { type CommitResult, isRetryable, type PendingCommit, type RepoFile, type RepoIO } from "../ports/repo.ts";
 
 export interface BoundRepo {
   read(path: string): Promise<RepoFile | null>;

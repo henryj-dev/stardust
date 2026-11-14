@@ -1,7 +1,8 @@
-import { definePlugin } from "@stardust/core";
+import { definePlugin, type Oidc } from "@stardust/core";
+import { createOidc } from "./oidc.ts";
 
-export type { AccessRules, Identity, Oidc, OidcOptions, PendingLogin } from "./oidc.ts";
-export { createOidc, decideAccess } from "./oidc.ts";
+export type { OidcOptions } from "./oidc.ts";
+export { createOidc } from "./oidc.ts";
 
 const KEYS = [
   "issuer",
@@ -32,6 +33,44 @@ const strings = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === 
  */
 export const plugin = definePlugin({
   manifest: { name: "identity-oidc", description: "Signs people in through an OpenID Connect provider." },
+  provides: {
+    ports: ["identity"],
+    async create({ config, resolveSecret, log, publicUrl }) {
+      const at = "plugins.identity-oidc";
+      const redirectUri = `${publicUrl}/login/oidc/callback`;
+      const options = {
+        issuer: config.issuer as string,
+        clientId: config.clientId as string,
+        clientSecret: await resolveSecret(config.clientSecret, `${at}.clientSecret`),
+        redirectUri,
+        ...(config.scopes ? { scopes: config.scopes as string[] } : {}),
+        ...(config.groupsClaim ? { groupsClaim: config.groupsClaim as string } : {}),
+      };
+      // Discovery runs at first use and is retried after a failure.
+      let pending: Promise<Oidc> | null = null;
+      const client = () => {
+        pending ??= createOidc(options).catch((err: Error) => {
+          pending = null;
+          log.error("OpenID discovery failed", { issuer: options.issuer, error: err.message });
+          throw err;
+        });
+        return pending;
+      };
+      log.info("OpenID sign-in enabled", { issuer: options.issuer, redirectUri });
+      return {
+        identity: {
+          client,
+          redirectUri,
+          displayName: (config.displayName as string | undefined) ?? "single sign-on",
+          autoCreate: config.autoCreate === true,
+          rules: {
+            ...(config.allowedGroups ? { allowedGroups: config.allowedGroups as string[] } : {}),
+            ...(config.adminGroups ? { adminGroups: config.adminGroups as string[] } : {}),
+          },
+        },
+      };
+    },
+  },
   validateConfig(section) {
     if (typeof section !== "object" || section === null) return ["must be a mapping"];
     const s = section as Record<string, unknown>;

@@ -1,0 +1,17 @@
+{
+  "name": "@stardust/bundle",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@stardust/core": "workspace:*",
+    "@stardust/plugin-builder-buildkit": "workspace:*",
+    "@stardust/plugin-gitops-git": "workspace:*",
+    "@stardust/plugin-identity-oidc": "workspace:*",
+    "@stardust/plugin-secrets-sops-age": "workspace:*",
+    "@stardust/plugin-source-github": "workspace:*"
+  }
+}

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { CommitResult, RepoIO } from "../ports/repo.ts";
+import { MemoryRepo } from "../testing.ts";
 import { bumpImage, bumpMessage } from "./bump.ts";
 import { commitWithCas } from "./cas.ts";
 import { addResource } from "./kustomization.ts";
-import type { CommitResult, RepoIO } from "./repo.ts";
-import { MemoryRepo } from "./testing.ts";
 
 const noSleep = { sleep: async () => {} };
 

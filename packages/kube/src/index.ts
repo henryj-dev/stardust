@@ -1,31 +1,12 @@
 /**
- * The few Kubernetes API calls the builder needs, over node:https with the
- * in-cluster service account. The token is re-read for every request because
- * projected tokens rotate.
+ * The Kubernetes API over node:https with the in-cluster service account:
+ * the `kube` port that the server and the worker hand to plugins. The token
+ * is re-read for every request because projected tokens rotate.
  */
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { request } from "node:https";
-
-export interface KubeResponse {
-  status: number;
-  body: string;
-}
-
-export interface KubeClient {
-  request(method: string, path: string, body?: unknown): Promise<KubeResponse>;
-}
-
-/** A GET whose body is read as it arrives, such as a followed pod log. */
-export interface KubeStreamResponse {
-  status: number;
-  body: AsyncIterable<Uint8Array>;
-}
-
-export interface KubeStreamClient extends KubeClient {
-  /** Aborting the signal ends the request and the body. */
-  stream(path: string, signal: AbortSignal): Promise<KubeStreamResponse>;
-}
+import type { KubeStreamClient } from "@stardust/core";
 
 const SA = "/var/run/secrets/kubernetes.io/serviceaccount";
 

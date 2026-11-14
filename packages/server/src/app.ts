@@ -1,4 +1,17 @@
-import { type Action, can, type Logger, PipelineDefError, pipelineDefFromComponents } from "@stardust/core";
+import {
+  type Action,
+  type BuildLogReader,
+  can,
+  decideAccess,
+  type Identity,
+  type IdentityProvider,
+  type Logger,
+  PipelineDefError,
+  type PullTarget,
+  pipelineDefFromComponents,
+  type ResolvedTarget,
+  TargetError,
+} from "@stardust/core";
 import {
   type AuditActor,
   type AuditInput,
@@ -32,14 +45,11 @@ import {
   type UserChange,
   updateUser,
 } from "@stardust/db";
-import type { BuildLogReader } from "@stardust/plugin-builder-buildkit";
-import { type AccessRules, decideAccess, type Identity, type Oidc } from "@stardust/plugin-identity-oidc";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import { changeEnv, checkChange, EnvConflict, type EnvEditor, EnvInputError, readEnv } from "./env.ts";
 import type { RunEvents } from "./events.ts";
-import { type PullTarget, type ResolvedTarget, TargetError } from "./source.ts";
 
 export interface AppInfo {
   readonly version: string;
@@ -56,14 +66,7 @@ export interface Services {
   /** Editing env and secrets in the deploy repository. Without it the env endpoints say it is off. */
   env?: EnvEditor;
   /** Sign-in through an OpenID provider. Without it only passwords work. */
-  oidc?: {
-    /** Resolved lazily: the provider may be unreachable when the server starts. */
-    client: () => Promise<Oidc>;
-    redirectUri: string;
-    displayName: string;
-    rules: AccessRules;
-    autoCreate: boolean;
-  };
+  oidc?: IdentityProvider;
   /** Interval of SSE heartbeats, so proxies keep idle streams open. */
   heartbeatMs?: number;
   log?: Logger;

@@ -8,15 +8,16 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
+    "@stardust/bundle": "workspace:*",
     "@stardust/config": "workspace:*",
     "@stardust/core": "workspace:*",
     "@stardust/db": "workspace:*",
-    "@stardust/plugin-builder-buildkit": "workspace:*",
-    "@stardust/plugin-gitops-git": "workspace:*",
-    "@stardust/plugin-identity-oidc": "workspace:*",
-    "@stardust/plugin-secrets-sops-age": "workspace:*",
-    "@stardust/plugin-source-github": "workspace:*",
+    "@stardust/kube": "workspace:*",
     "hono": "^4.13.14",
     "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@stardust/plugin-identity-oidc": "workspace:*",
+    "@stardust/plugin-secrets-sops-age": "workspace:*"
   }
 }

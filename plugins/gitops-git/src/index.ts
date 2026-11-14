@@ -1,23 +1,6 @@
-import { definePlugin, isEnvRoot } from "@stardust/core";
-import { repoFromUrl } from "./github-app.ts";
-
-export type { BumpImage, BumpResult } from "./bump.ts";
-export { bumpImage, bumpMessage } from "./bump.ts";
-export type { BoundRepo, CasOptions, CommitPlan } from "./cas.ts";
-export { commitWithCas } from "./cas.ts";
-export type { DirectoryPlan, DirectoryRewrite, FileRewrite, RewriteResult } from "./image-tag.ts";
-export {
-  imageRefTag,
-  imageTagPattern,
-  isBumpCandidate,
-  orderBumpCandidates,
-  planDirectoryRewrite,
-  rewriteBuildRev,
-  rewriteImageTag,
-} from "./image-tag.ts";
-export { addResource, listResources, removeResource } from "./kustomization.ts";
-export type { CommitErrorKind, CommitResult, PendingCommit, RepoFile, RepoIO } from "./repo.ts";
-export { isRetryable } from "./repo.ts";
+import { type DeployRepo, definePlugin, isEnvRoot } from "@stardust/core";
+import { GitCliRepo } from "./git-cli.ts";
+import { installationTokens, repoFromUrl } from "./github-app.ts";
 
 /**
  * `plugins.gitops-git` in stardust.yaml:
@@ -42,6 +25,35 @@ const isRef = (v: unknown) =>
 
 export const plugin = definePlugin({
   manifest: { name: "gitops-git", description: "Writes desired state to a Git deploy repository." },
+  provides: {
+    ports: ["deployRepo"],
+    async create({ config, resolveSecret }) {
+      const at = "plugins.gitops-git";
+      const url = config.url as string;
+      const token = config.token === undefined ? undefined : await resolveSecret(config.token, `${at}.token`);
+      // A GitHub App instead of a token: installation tokens for the deploy repository, renewed before they expire.
+      const app = config.githubApp as { appId: number; privateKey: unknown; apiBaseUrl?: string } | undefined;
+      const appTokens = app
+        ? installationTokens({
+            appId: app.appId,
+            privateKey: await resolveSecret(app.privateKey, `${at}.githubApp.privateKey`),
+            repo: repoFromUrl(url) as string,
+            ...(app.apiBaseUrl ? { apiBaseUrl: app.apiBaseUrl } : {}),
+          })
+        : undefined;
+      const deployRepo: DeployRepo = {
+        repo: new GitCliRepo({
+          url,
+          branch: config.branch as string,
+          ...(appTokens ? { token: appTokens } : token ? { token } : {}),
+          ...(config.username ? { username: config.username as string } : {}),
+        }),
+        ...(config.envRoot ? { envRoot: config.envRoot as string } : {}),
+        ...(config.buildRevAnnotation ? { buildRevAnnotation: config.buildRevAnnotation as string } : {}),
+      };
+      return { deployRepo };
+    },
+  },
   validateConfig(section) {
     if (typeof section !== "object" || section === null) return ["must be a mapping"];
     const s = section as Record<string, unknown>;
@@ -97,4 +109,3 @@ export type { GitCliOptions } from "./git-cli.ts";
 export { GitCliRepo } from "./git-cli.ts";
 export type { GitHubAppOptions } from "./github-app.ts";
 export { appJwt, installationTokens, repoFromUrl } from "./github-app.ts";
-export { stampPodTemplate } from "./stamp.ts";
