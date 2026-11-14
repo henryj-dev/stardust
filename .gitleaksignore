@@ -5,3 +5,8 @@
 # A made-up value a database test fed in to check it never leaks; the test
 # now generates it at run time.
 16b2c038254dc3c77fa457f94fb32544a1437322:packages/server/src/app.dbtest.ts:generic-api-key:741
+
+# Made-up credential shapes a log-masking test fed in; the test now builds
+# them at run time.
+2584680388440a67cc07d0ce4a5742967cbac2a3:packages/core/src/pipeline/redact.test.ts:curl-auth-header:9
+2584680388440a67cc07d0ce4a5742967cbac2a3:packages/core/src/pipeline/redact.test.ts:aws-access-token:10
