@@ -14,6 +14,7 @@ import {
   type ObjectStore,
   type RepoIO,
   redactLog,
+  type SourceHost,
   trustOf,
 } from "@stardust/core";
 import { getProject, type Sql } from "@stardust/db";
@@ -23,6 +24,8 @@ export interface BuildHandlerDeps {
   sql: Sql;
   builder: Builder;
   deployRepo: RepoIO;
+  /** Where code lives: a one-time clone token per build, when it gives one (a GitHub App). */
+  source?: SourceHost;
   /** External projects whose own code may be built (operator's `jobs.upstreamBuilds`). */
   upstreamBuilds?: readonly string[];
   /** Pipelines released outside Kubernetes, by letter (W: Cloudflare Workers). */
@@ -128,6 +131,15 @@ export function buildHandler(deps: BuildHandlerDeps): JobHandler {
       return { result: "success", detail };
     }
 
+    // Our own code, from a host that gives one: a token for this repository alone, for this build.
+    let cloneToken: string | null = null;
+    if (decision.trusted && job.def.pipeline !== "M" && deps.source?.cloneToken) {
+      try {
+        cloneToken = await deps.source.cloneToken(project.githubRepo);
+      } catch (err) {
+        return failed((err as Error).message);
+      }
+    }
     const outcome = await deps.builder.build(
       {
         projectId: project.id,
@@ -137,6 +149,7 @@ export function buildHandler(deps: BuildHandlerDeps): JobHandler {
         runId: job.runId,
         jobName: job.name,
         ...(decision.trusted ? {} : { trusted: false }),
+        ...(cloneToken ? { cloneToken } : {}),
         ...(component.context && job.def.pipeline !== "M" ? { context: component.context } : {}),
         // C builds the repository's Dockerfile; N builds a Node app with the builder's own; M copies a published image.
         ...(job.def.pipeline === "M"

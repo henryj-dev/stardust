@@ -1,5 +1,6 @@
 import { definePlugin } from "@stardust/core";
 import { targetApi } from "./api.ts";
+import { githubApp } from "./app.ts";
 
 const isSecretRef = (value: unknown): boolean => {
   if (typeof value !== "object" || value === null) return false;
@@ -33,13 +34,19 @@ export const plugin = definePlugin({
     ports: ["source"],
     async create({ config, resolveSecret, log }) {
       const at = "plugins.source-github";
-      if (config.appId !== undefined) {
-        throw new Error(`${at}: GitHub App authentication is not implemented yet; use token`);
-      }
       for (const [key, why] of Object.entries(RETIRED_KEYS)) {
         if (config[key] !== undefined) log.warn(`${at}.${key} is ignored: ${why}`);
       }
       const apiBaseUrl = (config.apiBaseUrl as string | undefined) ?? "https://api.github.com";
+      if (config.appId !== undefined) {
+        // A token per repository, read-only: for finding commits and for each build's clone.
+        const app = githubApp({
+          appId: config.appId as number,
+          privateKey: await resolveSecret(config.privateKey, `${at}.privateKey`),
+          apiBaseUrl,
+        });
+        return { source: { resolveTarget: targetApi(apiBaseUrl, app.tokenFor), cloneToken: app.cloneToken } };
+      }
       // Optional: public repositories need no token.
       const token = config.token === undefined ? undefined : await resolveSecret(config.token, `${at}.token`);
       return { source: { resolveTarget: targetApi(apiBaseUrl, token) } };

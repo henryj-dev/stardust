@@ -50,6 +50,12 @@ export interface BuildInput {
   source?: string;
   /** False for code nobody here reviewed: no clone token, no project secret. */
   trusted?: boolean;
+  /**
+   * The Job's own name and the Secret (key `token`) its clone step reads,
+   * for a one-time token: the Job is created suspended, released once the
+   * Secret exists.
+   */
+  oneTimeClone?: { jobName: string; secret: string };
   /** Port the Node app listens on (kind "node"). */
   port?: number;
   /** Environment during the Node build (kind "node"), e.g. which adapter or database driver to compile in. Not secret. */
@@ -314,7 +320,9 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
     apiVersion: "batch/v1",
     kind: "Job",
     metadata: {
-      generateName: `build-${input.projectId}-${input.component}-${short}-`.slice(0, 57),
+      ...(input.oneTimeClone
+        ? { name: input.oneTimeClone.jobName }
+        : { generateName: `build-${input.projectId}-${input.component}-${short}-`.slice(0, 57) }),
       labels,
       annotations: {
         [`${LABEL_PREFIX}/repo`]: input.repo,
@@ -323,6 +331,8 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
       },
     },
     spec: {
+      // Held until the one-time clone token's Secret exists.
+      ...(input.oneTimeClone ? { suspend: true } : {}),
       backoffLimit: 0,
       activeDeadlineSeconds: options.deadlineSeconds ?? 1800,
       ttlSecondsAfterFinished: options.ttlSeconds ?? 3600,
@@ -350,9 +360,21 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
                   SHA: input.sha,
                   HOME: "/workspace/home",
                 }),
-                ...(options.cloneSecret && input.trusted !== false
-                  ? [{ name: "GITHUB_TOKEN", valueFrom: { secretKeyRef: { name: options.cloneSecret, key: "token" } } }]
-                  : []),
+                ...(input.oneTimeClone && input.trusted !== false
+                  ? [
+                      {
+                        name: "GITHUB_TOKEN",
+                        valueFrom: { secretKeyRef: { name: input.oneTimeClone.secret, key: "token" } },
+                      },
+                    ]
+                  : options.cloneSecret && input.trusted !== false
+                    ? [
+                        {
+                          name: "GITHUB_TOKEN",
+                          valueFrom: { secretKeyRef: { name: options.cloneSecret, key: "token" } },
+                        },
+                      ]
+                    : []),
               ],
               securityContext: { ...restricted, seccompProfile: { type: "RuntimeDefault" } },
               volumeMounts: [{ name: "workspace", mountPath: "/workspace" }],

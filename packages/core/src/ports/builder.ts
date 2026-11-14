@@ -24,6 +24,12 @@ export interface BuildRequest {
   source?: string;
   /** False for code nobody here reviewed: the build gets no clone token and no project secret. */
   trusted?: boolean;
+  /**
+   * A short-lived token for this repository alone (the source host's), used
+   * instead of a static clone secret. The builder keeps it in a Secret owned
+   * by the build Job, seen by the clone step only and gone with the Job.
+   */
+  cloneToken?: string;
   /** Port the Node app listens on (kind "node"). */
   port?: number;
   /** Environment during the Node build (kind "node"). Not secret. */

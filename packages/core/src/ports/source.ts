@@ -26,4 +26,10 @@ export class TargetError extends Error {
 export interface SourceHost {
   /** The commit a manual run builds. Throws TargetError. */
   resolveTarget(repo: string, target: PullTarget): Promise<ResolvedTarget>;
+  /**
+   * A short-lived token a build clones this repository with, good for it alone
+   * (a GitHub App's); null for a public one. Throws for a private repository
+   * it cannot read. Absent when the host gives none (a static clone secret is used).
+   */
+  cloneToken?(repo: string): Promise<string | null>;
 }
