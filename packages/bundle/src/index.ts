@@ -4,7 +4,9 @@
  * `assemble`, never a plugin's functions. A new plugin is one line here.
  */
 import type { Plugin } from "@stardust/core";
+import { plugin as auditCloudflare } from "@stardust/plugin-audit-cloudflare";
 import { plugin as builderBuildkit } from "@stardust/plugin-builder-buildkit";
+import { plugin as cloudAudit } from "@stardust/plugin-cloud-audit";
 import { plugin as cloudVultr } from "@stardust/plugin-cloud-vultr";
 import { plugin as databases } from "@stardust/plugin-databases";
 import { plugin as dbStatefulset } from "@stardust/plugin-db-statefulset";
@@ -24,7 +26,9 @@ import { plugin as storeS3 } from "@stardust/plugin-store-s3";
 import { plugin as targetCfWorkers } from "@stardust/plugin-target-cf-workers";
 
 export const bundledPlugins: readonly Plugin[] = [
+  auditCloudflare,
   builderBuildkit,
+  cloudAudit,
   cloudVultr,
   databases,
   dbStatefulset,

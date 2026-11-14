@@ -208,9 +208,15 @@ importers:
       '@stardust/core':
         specifier: workspace:*
         version: link:../core
+      '@stardust/plugin-audit-cloudflare':
+        specifier: workspace:*
+        version: link:../../plugins/audit-cloudflare
       '@stardust/plugin-builder-buildkit':
         specifier: workspace:*
         version: link:../../plugins/builder-buildkit
+      '@stardust/plugin-cloud-audit':
+        specifier: workspace:*
+        version: link:../../plugins/cloud-audit
       '@stardust/plugin-cloud-vultr':
         specifier: workspace:*
         version: link:../../plugins/cloud-vultr
@@ -325,6 +331,9 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
     devDependencies:
+      '@stardust/plugin-cloud-audit':
+        specifier: workspace:*
+        version: link:../../plugins/cloud-audit
       '@stardust/plugin-databases':
         specifier: workspace:*
         version: link:../../plugins/databases
@@ -403,7 +412,19 @@ importers:
         specifier: workspace:*
         version: link:../../plugins/target-cf-workers
 
+  plugins/audit-cloudflare:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
   plugins/builder-buildkit:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  plugins/cloud-audit:
     dependencies:
       '@stardust/core':
         specifier: workspace:*
