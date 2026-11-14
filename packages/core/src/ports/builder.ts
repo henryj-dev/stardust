@@ -15,8 +15,15 @@ export interface BuildRequest {
   /** Path of the Dockerfile and build context inside the repository. Defaults to the root. */
   context?: string;
   dockerfile?: string;
-  /** "dockerfile" (default) builds the repository's Dockerfile; "node" builds a Node app with the builder's own. */
-  kind?: "dockerfile" | "node";
+  /**
+   * "dockerfile" (default) builds the repository's Dockerfile; "node" builds a
+   * Node app with the builder's own; "mirror" copies `source` as it is.
+   */
+  kind?: "dockerfile" | "node" | "mirror";
+  /** kind "mirror": the published image, pinned by digest. */
+  source?: string;
+  /** False for code nobody here reviewed: the build gets no clone token and no project secret. */
+  trusted?: boolean;
   /** Port the Node app listens on (kind "node"). */
   port?: number;
   /** Environment during the Node build (kind "node"). Not secret. */

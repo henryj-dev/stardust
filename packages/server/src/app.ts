@@ -1,6 +1,7 @@
 import {
   type Action,
   type BuildLogReader,
+  buildDecision,
   buildLogKey,
   bumpImage,
   can,
@@ -23,6 +24,7 @@ import {
   removeResource,
   scaffoldComponent,
   TargetError,
+  trustOf,
 } from "@stardust/core";
 import {
   API_TOKEN_PREFIX,
@@ -95,6 +97,8 @@ export interface AppInfo {
 }
 
 export interface Services {
+  /** External projects whose own code may be built (`jobs.upstreamBuilds`). */
+  upstreamBuilds?: readonly string[];
   /** This region's database: runs and jobs, and reads of global tables that decide nothing about access. */
   sql: Sql;
   /**
@@ -1140,8 +1144,11 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (!project) return c.json({ error: "unknown project" }, 404);
     if (!project.githubRepo) return c.json({ error: "the project has no repository to build from" }, 409);
     const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
-    const target = pullTarget(body ?? {});
-    if (typeof target === "string") return c.json({ error: target }, 400);
+    const asked = pullTarget(body ?? {});
+    if (typeof asked === "string") return c.json({ error: asked }, 400);
+    const trust = trustOf(project.metadata);
+    // A pinned project runs its pin unless asked for something else (which the check below refuses).
+    const target = trust.pin && Object.keys(asked).length === 0 ? { sha: trust.pin } : asked;
     const def = project.pipelineDef ?? pipelineDefFromComponents(project.components);
     // A build whose image no manifest uses cannot be delivered: say so before building.
     const missing = await undeliverable(project, def);
@@ -1161,6 +1168,15 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     } catch (err) {
       if (err instanceof TargetError) return c.json({ error: err.message }, err.notFound ? 422 : 502);
       throw err;
+    }
+    // Someone else's code: refused here, before anything is queued, as the worker would.
+    for (const job of Object.values(def.jobs)) {
+      const decision = buildDecision(
+        trust,
+        { projectId: project.id, pipeline: job.pipeline, sha: resolved.sha },
+        services.upstreamBuilds ?? [],
+      );
+      if (!decision.ok) return c.json({ error: decision.reason }, 409);
     }
     const user = c.get("user");
     const runId = await startRun(sql, {

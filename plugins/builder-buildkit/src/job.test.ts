@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -307,5 +307,59 @@ describe("node builds", () => {
     const env = envOf(manifest());
     assert.equal(env.BUILD_KIND, "dockerfile");
     assert.equal(env.NODE_DOCKERFILE, undefined);
+  });
+});
+
+describe("someone else's code", () => {
+  const DIGEST = `sha256:${"e".repeat(64)}`;
+  const base = {
+    projectId: "counter",
+    repo: "upstream/counter",
+    sha: "f".repeat(40),
+    component: "app",
+    imageRepository: "registry.example.com/counter/app",
+    runId: "r1",
+    jobName: "app",
+  };
+  const opts = { pushSecret: "push", cloneSecret: "clone", projectSecret: "project" };
+  type Pod = {
+    initContainers?: Array<{ env?: Array<{ name: string }> }>;
+    containers: Array<{
+      image: string;
+      command: string[];
+      env?: Array<{ name: string; value?: string }>;
+      volumeMounts?: Array<{ name: string }>;
+    }>;
+    volumes: Array<{ name: string }>;
+  };
+  const podOf = (j: Record<string, unknown>) => (j as { spec: { template: { spec: Pod } } }).spec.template.spec;
+
+  it("mirrors a pinned image with crane, checking the copy has the pin's digest, running none of its code", () => {
+    const pod = podOf(buildJob({ ...base, kind: "mirror", source: `docker.io/upstream/counter:2.7@${DIGEST}` }, opts));
+    assert.equal(pod.initContainers, undefined, "nothing is cloned");
+    const [c] = pod.containers;
+    assert.match(c?.image ?? "", /crane\/debug:v0\.22\.1@sha256:/);
+    const env = Object.fromEntries((c?.env ?? []).map((e) => [e.name, e.value]));
+    assert.equal(env.EXPECT, DIGEST);
+    assert.equal(env.TARGET, "registry.example.com/counter/app:fffffff");
+    assert.deepEqual(
+      pod.volumes.map((v) => v.name),
+      ["push-auth"],
+      "no clone token, no project secret",
+    );
+    assert.equal(spawnSync("sh", ["-n", "-c", c?.command[2] ?? ""]).status, 0);
+    assert.throws(
+      () => buildJob({ ...base, kind: "mirror", source: "docker.io/upstream/counter:latest" }, opts),
+      /pinned by digest/,
+    );
+  });
+
+  it("builds untrusted code without the clone token or the project secret", () => {
+    const pod = podOf(buildJob({ ...base, trusted: false }, opts));
+    assert.ok(!(pod.initContainers?.[0]?.env ?? []).some((e) => e.name === "GITHUB_TOKEN"));
+    assert.ok(!pod.volumes.some((v) => v.name === "project-secret"));
+    const trusted = podOf(buildJob(base, opts));
+    assert.ok((trusted.initContainers?.[0]?.env ?? []).some((e) => e.name === "GITHUB_TOKEN"));
+    assert.ok(trusted.volumes.some((v) => v.name === "project-secret"));
   });
 });

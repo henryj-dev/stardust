@@ -24,8 +24,8 @@ describe("validatePipelineDef", () => {
     rejects(withJobs({}), /empty/);
     rejects("text", /not an object/);
   });
-  it("pipeline must be W, C or N", () => {
-    rejects(withJobs({ a: { pipeline: "X" } }), /W, C or N/);
+  it("pipeline must be W, C, N or M", () => {
+    rejects(withJobs({ a: { pipeline: "X" } }), /W, C, N or M/);
   });
   it("needs must exist, must not be itself, must be an array", () => {
     rejects(withJobs({ a: { pipeline: "C", needs: ["zz"] } }), /does not exist/);
@@ -71,7 +71,7 @@ describe("loadPipelineDef", () => {
 });
 
 describe("pipelineDefFromComponents", () => {
-  it("makes one manually triggered job per component; only C names its component", () => {
+  it("makes one manually triggered job per component, each naming its component", () => {
     assert.deepEqual(
       pipelineDefFromComponents([
         { name: "Dashboard", pipeline: "N" },
@@ -79,7 +79,7 @@ describe("pipelineDefFromComponents", () => {
       ]),
       {
         on: { workflow_dispatch: {} },
-        jobs: { dashboard: { pipeline: "N" }, api: { pipeline: "C", component: "api" } },
+        jobs: { dashboard: { pipeline: "N", component: "Dashboard" }, api: { pipeline: "C", component: "api" } },
       },
     );
   });

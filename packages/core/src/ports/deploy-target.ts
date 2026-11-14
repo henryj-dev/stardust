@@ -18,6 +18,8 @@ export interface DeployRequest {
   context?: string;
   /** Environment during the build. Not secret. */
   buildEnv?: Record<string, string>;
+  /** False for code nobody here reviewed: no clone token. */
+  trusted?: boolean;
   runId: string;
   jobName: string;
 }
