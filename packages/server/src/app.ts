@@ -12,6 +12,7 @@ import {
   type IdentityProvider,
   type ImageNaming,
   type Logger,
+  type LogoutNotice,
   manifestUsesImage,
   type ObjectStore,
   type PipelineDef,
@@ -42,9 +43,11 @@ import {
   deleteProject,
   endAllSessions,
   endChallenge,
+  endOidcSessions,
   endSession,
   getAuditEvent,
   getProject,
+  guardStore,
   issueAccountLink,
   latestRuns,
   listApiTokens,
@@ -56,6 +59,7 @@ import {
   listUsers,
   markReauthenticated,
   newRecoveryCodesFor,
+  oidcLogoutHint,
   type Project,
   ProjectError,
   projectRole,
@@ -248,7 +252,8 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   // that started it (no login CSRF). The pending login is used once.
   app.post("/api/v1/auth/oidc/start", async (c) => {
     if (!services.oidc) return c.json({ error: "OpenID sign-in is not configured" }, 404);
-    const { url, pending } = await (await services.oidc.client()).start();
+    const body = (await c.req.json().catch(() => ({}))) as { reauth?: unknown } | null;
+    const { url, pending } = await (await services.oidc.client()).start({ reauth: body?.reauth === true });
     await savePendingLogin(globalSql, pending);
     return c.json({ url, state: pending.state });
   });
@@ -274,6 +279,20 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       log.warn("OpenID sign-in refused", { error: (err as Error).message });
       return c.json({ error: "the provider's answer did not check out" }, 401);
     }
+    // A confirmation asked the provider to sign the person in again: it must have, just now.
+    if (pending.reauth && (identity.authTime ?? 0) < Date.now() / 1000 - 300) {
+      return c.json({ error: "the provider did not sign you in again; try once more" }, 401);
+    }
+    const missing = (oidc.requireAmr ?? []).filter((m) => !(identity.amr ?? []).includes(m));
+    if (missing.length > 0) {
+      await auditAnonymous(c, {
+        action: "auth.login.failed",
+        actor: { kind: "anonymous", userId: null, name: null },
+        target: identity.subject,
+        detail: { via: "oidc", reason: "amr", missing },
+      });
+      return c.json({ error: `your sign-in at the provider did not use: ${missing.join(", ")}` }, 403);
+    }
     const access = decideAccess(identity, oidc.rules);
     if (!access.allowed) {
       log.warn("OpenID sign-in refused by group", { issuer: identity.issuer, subject: identity.subject });
@@ -288,6 +307,8 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     const result = await signInWithIdentity(globalSql, identity, {
       autoCreate: oidc.autoCreate,
       isAdmin: oidc.rules.adminGroups ? access.isAdmin : null,
+      sid: identity.sid ?? null,
+      ...(identity.idToken ? { idToken: identity.idToken } : {}),
     });
     if (!result.ok) {
       log.warn("OpenID sign-in refused", { subject: identity.subject, reason: result.reason });
@@ -309,12 +330,43 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     await auditAnonymous(c, {
       action: "auth.login",
       actor: { kind: "user", userId: result.user.id, name: result.user.username },
-      detail: { via: "oidc", created: result.created },
+      detail: { via: "oidc", created: result.created, ...(pending.reauth ? { reauth: true } : {}) },
     });
     return c.json({ token: result.token, user: result.user });
   });
 
   // Every other /api/v1 route needs a session.
+  // OpenID Connect Back-Channel Logout: the provider says a session ended
+  // there, and stardust ends the matching ones. Public: the signed logout
+  // token is the credential, and each token is accepted once.
+  app.post("/api/v1/auth/oidc/backchannel-logout", async (c) => {
+    const noStore = { "cache-control": "no-store" };
+    const oidc = services.oidc;
+    if (!oidc) return c.json({ error: "OpenID sign-in is not configured" }, 404, noStore);
+    const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
+    const token = (form as Record<string, unknown>).logout_token;
+    if (typeof token !== "string") return c.json({ error: "invalid_request" }, 400, noStore);
+    let notice: LogoutNotice;
+    try {
+      notice = await (await oidc.client()).verifyLogoutToken(token);
+    } catch (err) {
+      log.warn("a back-channel logout token did not check out", { error: (err as Error).message });
+      return c.json({ error: "invalid_request" }, 400, noStore);
+    }
+    if (!(await guardStore(globalSql).useOnce("oidc-logout", notice.jti, notice.expiresAt))) {
+      return c.json({ error: "invalid_request" }, 400, noStore);
+    }
+    const issuer = (await oidc.client()).issuer;
+    const ended = await endOidcSessions(globalSql, issuer, notice);
+    await auditAnonymous(c, {
+      action: "auth.logout.backchannel",
+      actor: { kind: "system", userId: null, name: "identity provider" },
+      ...(notice.subject ? { target: notice.subject } : {}),
+      detail: { sessions: ended, bySession: notice.sid !== null },
+    });
+    return c.body(null, 200, noStore);
+  });
+
   // Sets a password through a one-time link an administrator issued. Public:
   // the link is the credential. A used, expired or unknown link is the same 400.
   app.post("/api/v1/auth/link", async (c) => {
@@ -343,6 +395,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     "/api/v1/auth/oidc/callback",
     "/api/v1/auth/link",
     "/api/v1/auth/login/totp",
+    "/api/v1/auth/oidc/backchannel-logout",
   ]);
   app.use("/api/v1/*", async (c, next) => {
     if (PUBLIC_PATHS.has(c.req.path)) return next();
@@ -592,8 +645,15 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   });
 
   app.post("/api/v1/auth/logout", async (c) => {
+    // A single sign-on session also ends at the provider, when it has a page for that.
+    const hint = services.oidc ? await oidcLogoutHint(globalSql, c.get("token")) : null;
     await signOut(globalSql, c.get("token"));
     await audit(c, { action: "auth.logout" });
+    if (hint !== null && services.oidc) {
+      const back = services.oidc.redirectUri.replace(/\/login\/oidc\/callback$/, "/login");
+      const redirect = (await services.oidc.client().catch(() => null))?.endSessionUrl(hint, back) ?? null;
+      if (redirect) return c.json({ ok: true, redirect });
+    }
     return c.json({ ok: true });
   });
 

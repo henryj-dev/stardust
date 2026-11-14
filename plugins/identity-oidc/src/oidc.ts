@@ -7,7 +7,8 @@
  * the person is in stardust, and whether they may sign in, is the server's
  * decision from the claims returned here.
  */
-import type { Oidc, PendingLogin } from "@stardust/core";
+import type { LogoutNotice, Oidc, PendingLogin } from "@stardust/core";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import * as client from "openid-client";
 
 export interface OidcOptions {
@@ -41,13 +42,16 @@ export async function createOidc(options: OidcOptions): Promise<Oidc> {
   client.enableNonRepudiationChecks(config);
   const scope = [...new Set(["openid", ...(options.scopes ?? ["profile", "email"])])].join(" ");
   const groupsClaim = options.groupsClaim ?? "groups";
+  let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 
   return {
-    async start() {
+    issuer: config.serverMetadata().issuer,
+    async start(startOptions = {}) {
       const pending: PendingLogin = {
         state: client.randomState(),
         nonce: client.randomNonce(),
         codeVerifier: client.randomPKCECodeVerifier(),
+        ...(startOptions.reauth ? { reauth: true } : {}),
       };
       const url = client.buildAuthorizationUrl(config, {
         redirect_uri: options.redirectUri,
@@ -56,8 +60,43 @@ export async function createOidc(options: OidcOptions): Promise<Oidc> {
         nonce: pending.nonce,
         code_challenge: await client.calculatePKCECodeChallenge(pending.codeVerifier),
         code_challenge_method: "S256",
+        // Confirming it is you: the provider signs the person in again, now.
+        ...(startOptions.reauth ? { prompt: "login", max_age: "0" } : {}),
       });
       return { url: url.href, pending };
+    },
+
+    endSessionUrl(idTokenHint, postLogoutRedirectUri) {
+      const endpoint = config.serverMetadata().end_session_endpoint;
+      if (!endpoint) return null;
+      const url = new URL(endpoint);
+      if (idTokenHint) url.searchParams.set("id_token_hint", idTokenHint);
+      url.searchParams.set("client_id", options.clientId);
+      url.searchParams.set("post_logout_redirect_uri", postLogoutRedirectUri);
+      return url.href;
+    },
+
+    async verifyLogoutToken(token): Promise<LogoutNotice> {
+      const jwksUri = config.serverMetadata().jwks_uri;
+      if (!jwksUri) throw new Error("the provider publishes no keys");
+      jwks ??= createRemoteJWKSet(new URL(jwksUri));
+      const { payload } = await jwtVerify(token, jwks, {
+        issuer: config.serverMetadata().issuer,
+        audience: options.clientId,
+        maxTokenAge: "5m",
+      });
+      // OpenID Connect Back-Channel Logout 1.0 §2.4: the event, no nonce, a subject or a session, an id.
+      const events = payload.events as Record<string, unknown> | undefined;
+      if (!events || typeof events["http://schemas.openid.net/event/backchannel-logout"] !== "object") {
+        throw new Error("not a logout token");
+      }
+      if ("nonce" in payload) throw new Error("a logout token carries no nonce");
+      const sid = typeof payload.sid === "string" ? payload.sid : null;
+      const subject = typeof payload.sub === "string" ? payload.sub : null;
+      if (!sid && !subject) throw new Error("a logout token names a subject or a session");
+      if (typeof payload.jti !== "string") throw new Error("a logout token has an id");
+      const exp = typeof payload.exp === "number" ? payload.exp : (payload.iat ?? 0) + 300;
+      return { subject, sid, jti: payload.jti, expiresAt: new Date(exp * 1000) };
     },
 
     async finish(callbackUrl, pending) {
@@ -85,6 +124,10 @@ export async function createOidc(options: OidcOptions): Promise<Oidc> {
         emailVerified: claims.email_verified === true,
         name: str(claims.name),
         groups: Array.isArray(rawGroups) ? rawGroups.filter((g): g is string => typeof g === "string") : [],
+        sid: str(claims.sid),
+        amr: Array.isArray(claims.amr) ? claims.amr.filter((a): a is string => typeof a === "string") : [],
+        authTime: typeof claims.auth_time === "number" ? claims.auth_time : null,
+        ...(tokens.id_token ? { idToken: tokens.id_token } : {}),
       };
     },
   };

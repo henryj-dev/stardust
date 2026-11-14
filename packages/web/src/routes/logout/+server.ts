@@ -4,10 +4,12 @@ import type { RequestHandler } from "./$types";
 
 export const POST: RequestHandler = async ({ cookies, locals }) => {
   // End the session on the server too; a cookie deleted only here would leave the token valid.
-  if (locals.token)
-    await apiClient(locals.token, locals)
-      .logout()
-      .catch(() => {});
+  const ended = locals.token
+    ? await apiClient(locals.token, locals)
+        .logout()
+        .catch(() => ({}) as { redirect?: string })
+    : {};
   cookies.delete(SESSION_COOKIE, { path: "/" });
-  redirect(303, "/login");
+  // A single sign-on session is ended at the provider too, which sends the browser back to /login.
+  redirect(303, ended.redirect ?? "/login");
 };

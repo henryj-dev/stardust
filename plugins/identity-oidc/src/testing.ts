@@ -64,6 +64,27 @@ export class FakeProvider {
     return { code, state: url.searchParams.get("state") ?? "" };
   }
 
+  /**
+   * A back-channel logout token as the provider would POST it: for a subject,
+   * a provider session, or both. `tamper` makes it wrong in one way.
+   */
+  async logoutToken(
+    claims: { sub?: string; sid?: string },
+    tamper: { aud?: string; nonce?: string; noEvent?: boolean; foreignKey?: boolean } = {},
+  ): Promise<string> {
+    const jwt = new SignJWT({
+      ...claims,
+      ...(tamper.noEvent ? {} : { events: { "http://schemas.openid.net/event/backchannel-logout": {} } }),
+      ...(tamper.nonce ? { nonce: tamper.nonce } : {}),
+    })
+      .setProtectedHeader({ alg: "RS256", kid: "k1" })
+      .setIssuer(this.issuer)
+      .setAudience(tamper.aud ?? this.options.clientId)
+      .setIssuedAt()
+      .setJti(crypto.randomUUID());
+    return jwt.sign(tamper.foreignKey ? this.foreign : this.keys.key);
+  }
+
   close(): Promise<void> {
     return new Promise((resolve) => this.server.close(() => resolve()));
   }
@@ -83,6 +104,7 @@ export class FakeProvider {
         subject_types_supported: ["public"],
         id_token_signing_alg_values_supported: ["RS256"],
         code_challenge_methods_supported: ["S256"],
+        end_session_endpoint: `${this.issuer}/logout`,
       });
     }
     if (req.url === "/jwks") return json(200, { keys: [this.keys.jwk] });

@@ -55,7 +55,14 @@ export {
 } from "./identity.ts";
 export { MIGRATIONS_DIR, migrate } from "./migrate.ts";
 export type { ExternalIdentity, IdentitySignIn, PendingLoginRow } from "./oidc.ts";
-export { savePendingLogin, signInWithIdentity, takePendingLogin, usernameFrom } from "./oidc.ts";
+export {
+  endOidcSessions,
+  oidcLogoutHint,
+  savePendingLogin,
+  signInWithIdentity,
+  takePendingLogin,
+  usernameFrom,
+} from "./oidc.ts";
 export type { Databases } from "./plugins.ts";
 export { claimScheduleRun, databasePort, finishScheduleRun, migratePlugin } from "./plugins.ts";
 export type { Component, Project, RunSummary, RunView } from "./projects.ts";
