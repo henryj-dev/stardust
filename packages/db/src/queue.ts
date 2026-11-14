@@ -24,12 +24,26 @@ export interface ClaimedJob {
 
 export type JobResult = Extract<JobStatus, "success" | "failed" | "cancelled">;
 
-/** Claims the oldest queued job, or returns null when there is none. */
+/**
+ * Claims the oldest queued job, or returns null when there is none — or when
+ * `maxRunning` jobs already run across all workers (0: no limit). With a
+ * limit, claims are serialised so two workers cannot both take the last slot.
+ */
 export async function claimJob(
   sql: Sql | TransactionSql,
   workerId: string,
   leaseMs: number,
+  maxRunning = 0,
 ): Promise<ClaimedJob | null> {
+  if (maxRunning > 0) {
+    if (!("begin" in sql)) throw new Error("a limited claim needs its own transaction");
+    return sql.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtext('stardust:claim'))`;
+      const [running] = await tx<{ n: number }[]>`SELECT count(*)::int AS n FROM jobs WHERE status = 'running'`;
+      if ((running?.n ?? 0) >= maxRunning) return null;
+      return claimJob(tx, workerId, leaseMs);
+    });
+  }
   const [row] = await sql<
     {
       id: string;

@@ -178,3 +178,32 @@ it("reads the enabled plugins and their capabilities", async () => {
   assert.deepEqual(await client.capabilities(), { plugins });
   assert.equal(asked, "http://api.test/api/v1/capabilities");
 });
+
+it("cancels a job, lists deliveries and rolls back, passing on the server's reason", async () => {
+  const seen: Array<{ url: string; method: string; body: unknown }> = [];
+  const client = createClient({
+    baseUrl: "http://api.test",
+    token: "t0k",
+    fetch: async (input, init) => {
+      const url = String(input);
+      seen.push({ url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (url.endsWith("/cancel")) return Response.json({ error: "the job has already finished" }, { status: 409 });
+      if (url.endsWith("/deliveries")) return Response.json({ deliveries: [{ jobId: "j1", sha: "a" }] });
+      return Response.json({ status: "committed", job: "j1" });
+    },
+  });
+  await assert.rejects(client.cancelJob("demo", "r 1", "api"), {
+    status: 409,
+    message: "the job has already finished",
+  });
+  assert.equal(seen[0]?.url, "http://api.test/api/v1/projects/demo/runs/r%201/jobs/api/cancel");
+  assert.deepEqual(await client.deliveries("demo", "api"), [{ jobId: "j1", sha: "a" }]);
+  assert.deepEqual(await client.rollback("demo", "api", "j1"), { status: "committed", job: "j1" });
+  assert.deepEqual(seen[2], {
+    url: "http://api.test/api/v1/projects/demo/components/api/rollback",
+    method: "POST",
+    body: { job: "j1" },
+  });
+  await client.rollback("demo", "api");
+  assert.deepEqual(seen[3]?.body, {});
+});

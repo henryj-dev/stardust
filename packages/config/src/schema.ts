@@ -34,6 +34,12 @@ export const configSchema = z.strictObject({
   database: z.strictObject({
     url: secretRef,
   }),
+  /** Jobs across all workers. `maxRunning` caps how many run at once; 0 is no limit. */
+  jobs: z
+    .strictObject({
+      maxRunning: z.number().int().min(0).max(1000).default(0),
+    })
+    .default({ maxRunning: 0 }),
   /** The audit log. The worker removes events older than `retentionDays`; 0 keeps them all. */
   audit: z
     .strictObject({

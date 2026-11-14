@@ -320,3 +320,20 @@ and pinning a tag says exactly which one.
 
 A definition may still carry an `on` block and `if.paths` filters from an
 older installation; they are accepted and have no effect.
+
+A job that has not finished can be **cancelled** from the run's page or with
+`POST /api/v1/projects/<id>/runs/<runId>/jobs/<job>/cancel` (maintainers). A
+running build is stopped: its worker loses the job at the next lease renewal
+and deletes the build Job. `jobs.maxRunning` in `stardust.yaml` caps how many
+jobs run at once across all workers (default 0, no limit).
+
+### Rolling back
+
+Each component's page lists its **deliveries**, newest first
+(`GET /api/v1/projects/<id>/components/<name>/deliveries`): the commit built,
+the image it pushed, the deploy commit. A maintainer can point the component
+back at an earlier one — the previous delivery, or a chosen one
+(`POST /api/v1/projects/<id>/components/<name>/rollback` with an optional
+`{"job": "<job id>"}`). It is one commit to the deploy repository, like a
+delivery, and Flux rolls it out. The audit log records it as
+`project.rollback`. Delivering again from the project's page moves it forward.
