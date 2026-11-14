@@ -4,6 +4,8 @@
  * composition root), so a second implementation needs no change outside its
  * own plugin.
  */
+import type { GuardStore } from "../guard.ts";
+import type { SagaStore } from "../saga.ts";
 import type { Builder } from "./builder.ts";
 import type { SecretCipher } from "./cipher.ts";
 import type { Database } from "./database.ts";
@@ -17,6 +19,10 @@ export interface Ports {
   kube: KubeStreamClient;
   /** stardust's own database. Provided by the composition root. */
   database: Database;
+  /** Where sagas are kept between steps. Provided by the composition root. */
+  sagas: SagaStore;
+  /** Memory for the guards (used tickets, recent reveals). Provided by the composition root. */
+  guards: GuardStore;
   source: SourceHost;
   deployRepo: DeployRepo;
   cipher: SecretCipher;
@@ -29,6 +35,8 @@ export type PortName = keyof Ports;
 export const PORT_NAMES: readonly PortName[] = [
   "kube",
   "database",
+  "sagas",
+  "guards",
   "source",
   "deployRepo",
   "cipher",

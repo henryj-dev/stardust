@@ -3,7 +3,16 @@ import { serve } from "@hono/node-server";
 import { bundledPlugins } from "@stardust/bundle";
 import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/config";
 import { assemble, buildFeatures, createPluginRegistry, type Feature, type Logger, type Ports } from "@stardust/core";
-import { connect, databasePort, ensureBootstrapAdmin, migrate, migratePlugin, type Sql } from "@stardust/db";
+import {
+  connect,
+  databasePort,
+  ensureBootstrapAdmin,
+  guardStore,
+  migrate,
+  migratePlugin,
+  type Sql,
+  sagaStore,
+} from "@stardust/db";
 import { inClusterClient } from "@stardust/kube";
 import { createApp, type Services } from "./app.ts";
 import { RunEvents } from "./events.ts";
@@ -29,7 +38,7 @@ try {
     plugins,
     sections: config.plugins,
     want: ["source", "identity", "builder", "deployRepo", "cipher"],
-    platform: { database: databasePort(sql), ...kube() },
+    platform: { database: databasePort(sql), sagas: sagaStore(sql), guards: guardStore(sql), ...kube() },
     resolveSecret: resolveSecretRef,
     log,
     publicUrl: config.server.publicUrl,

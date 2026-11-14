@@ -3,7 +3,7 @@
  * here. Several workers may purge at once; a DELETE by age is idempotent.
  */
 import type { Logger } from "@stardust/core";
-import { purgeAudit, type Sql } from "@stardust/db";
+import { purgeAudit, purgeGuards, type Sql } from "@stardust/db";
 
 export interface HousekeepingOptions {
   sql: Sql;
@@ -29,14 +29,25 @@ export async function purgeOnce(
   }
 }
 
+/** Forgets expired approval tickets and old guard events. */
+async function purgeGuardsOnce(opts: Pick<HousekeepingOptions, "sql" | "log">): Promise<void> {
+  try {
+    await purgeGuards(opts.sql);
+  } catch (err) {
+    opts.log.warn("purging guard records failed", { error: (err as Error).message });
+  }
+}
+
 /** Purges now and then every `everyMs` until the signal is aborted. */
 export function startHousekeeping(opts: HousekeepingOptions): void {
-  if (opts.auditRetentionDays === 0) {
-    opts.log.info("audit events are kept forever (audit.retentionDays is 0)");
-    return;
-  }
-  void purgeOnce(opts);
-  const timer = setInterval(() => void purgeOnce(opts), opts.everyMs ?? 3_600_000);
+  const keepAudit = opts.auditRetentionDays === 0;
+  if (keepAudit) opts.log.info("audit events are kept forever (audit.retentionDays is 0)");
+  const once = () => {
+    if (!keepAudit) void purgeOnce(opts);
+    void purgeGuardsOnce(opts);
+  };
+  once();
+  const timer = setInterval(once, opts.everyMs ?? 3_600_000);
   timer.unref();
   opts.signal.addEventListener("abort", () => clearInterval(timer), { once: true });
 }

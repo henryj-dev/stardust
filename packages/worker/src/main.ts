@@ -2,7 +2,7 @@ import { hostname } from "node:os";
 import { bundledPlugins } from "@stardust/bundle";
 import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/config";
 import { assemble, buildFeatures, createPluginRegistry, type Feature, type Logger, type Ports } from "@stardust/core";
-import { connect, databasePort, migrate, migratePlugin, type Sql } from "@stardust/db";
+import { connect, databasePort, guardStore, migrate, migratePlugin, type Sql, sagaStore } from "@stardust/db";
 import { inClusterClient } from "@stardust/kube";
 import { buildHandler } from "./build-handler.ts";
 import { startHousekeeping } from "./housekeeping.ts";
@@ -33,6 +33,8 @@ try {
     // Builds run as Kubernetes Jobs: a worker that builds runs in the cluster.
     platform: {
       database: databasePort(sql),
+      sagas: sagaStore(sql),
+      guards: guardStore(sql),
       ...(config.plugins["builder-buildkit"] && config.plugins["gitops-git"] ? { kube: inClusterClient() } : {}),
     },
     resolveSecret: resolveSecretRef,
