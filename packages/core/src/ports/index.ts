@@ -9,6 +9,7 @@ import type { SagaStore } from "../saga.ts";
 import type { Builder, ImageNaming } from "./builder.ts";
 import type { SecretCipher } from "./cipher.ts";
 import type { Database } from "./database.ts";
+import type { DnsProvider } from "./dns.ts";
 import type { IdentityProvider } from "./identity.ts";
 import type { KubeStreamClient } from "./kube.ts";
 import type { LogSource } from "./logs.ts";
@@ -41,6 +42,8 @@ export interface Ports {
   logs: Record<string, LogSource>;
   /** Object storage for what outlives the cluster, such as build logs. */
   store: ObjectStore;
+  /** DNS providers by name, e.g. `cloudflare` and `parallax`. */
+  dns: Record<string, DnsProvider>;
 }
 
 export type PortName = keyof Ports;
@@ -60,6 +63,7 @@ export const PORT_NAMES: readonly PortName[] = [
   "identity",
   "logs",
   "store",
+  "dns",
 ];
 
 /**
@@ -67,11 +71,12 @@ export const PORT_NAMES: readonly PortName[] = [
  * name (two DNS providers, say). Their value in `Ports` is a record keyed by
  * instance name.
  */
-export const MULTI_PORTS: ReadonlySet<PortName> = new Set<PortName>(["logs"]);
+export const MULTI_PORTS: ReadonlySet<PortName> = new Set<PortName>(["logs", "dns"]);
 
 export * from "./builder.ts";
 export * from "./cipher.ts";
 export * from "./database.ts";
+export * from "./dns.ts";
 export * from "./identity.ts";
 export * from "./kube.ts";
 export * from "./logs.ts";

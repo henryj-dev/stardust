@@ -195,6 +195,12 @@ importers:
       '@stardust/plugin-builder-buildkit':
         specifier: workspace:*
         version: link:../../plugins/builder-buildkit
+      '@stardust/plugin-dns-cloudflare':
+        specifier: workspace:*
+        version: link:../../plugins/dns-cloudflare
+      '@stardust/plugin-dns-parallax':
+        specifier: workspace:*
+        version: link:../../plugins/dns-parallax
       '@stardust/plugin-gitops-git':
         specifier: workspace:*
         version: link:../../plugins/gitops-git
@@ -337,6 +343,18 @@ importers:
         version: link:../../plugins/builder-buildkit
 
   plugins/builder-buildkit:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  plugins/dns-cloudflare:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  plugins/dns-parallax:
     dependencies:
       '@stardust/core':
         specifier: workspace:*

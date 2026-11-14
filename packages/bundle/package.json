@@ -9,6 +9,8 @@
   "dependencies": {
     "@stardust/core": "workspace:*",
     "@stardust/plugin-builder-buildkit": "workspace:*",
+    "@stardust/plugin-dns-cloudflare": "workspace:*",
+    "@stardust/plugin-dns-parallax": "workspace:*",
     "@stardust/plugin-gitops-git": "workspace:*",
     "@stardust/plugin-identity-oidc": "workspace:*",
     "@stardust/plugin-logs-kube": "workspace:*",
