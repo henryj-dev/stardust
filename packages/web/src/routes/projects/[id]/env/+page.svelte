@@ -115,6 +115,10 @@ const confirmRemove = (e: SubmitEvent, name: string) => {
             </label>
             <!-- A password field for both kinds: nothing typed here is echoed or prefilled. -->
             <label>Value <input type="password" name="value" autocomplete="new-password" /></label>
+            <!-- Plain values are committed to Git; one whose name looks secret is refused unless this is ticked. -->
+            <label data-env-public
+              ><input type="checkbox" name="public" /> The value is public (a plain value whose name looks like a secret's)</label
+            >
             <button type="submit">Save</button>
           </form>
         {/if}

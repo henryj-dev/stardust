@@ -15,6 +15,9 @@ import {
   type BoundRepo,
   commitWithCas,
   definePlugin,
+  ENV_REVISION_ANNOTATION,
+  envConfigMapName,
+  envLanding,
   type FeatureContext,
   findWorkloads,
   type Ports,
@@ -140,6 +143,74 @@ function routes(needs: Needs): Route[] {
   };
 
   return [
+    {
+      method: "GET",
+      path: "/projects/:project/components/:component/env",
+      permission: "runtime:view",
+      async handle({ params }) {
+        const c = await component(params);
+        if (!c) return notFound("component");
+        const head = await repo.headSha();
+        const at = { read: (p: string) => repo.readFile(p, head), list: (p: string) => repo.listDir(p, head) };
+        const files = await manifests(at, c.deployDir);
+        const rendered = files.get(`${c.deployDir}/env.configmap.yaml`);
+        if (!rendered) return { status: 200, body: { revision: null, landing: [] } };
+        const doc = parse(rendered) as {
+          metadata?: { namespace?: string; annotations?: Record<string, string> };
+        } | null;
+        const revision = doc?.metadata?.annotations?.[ENV_REVISION_ANNOTATION] ?? null;
+        const namespace = doc?.metadata?.namespace;
+        if (!revision || !namespace) return { status: 200, body: { revision, landing: [] } };
+        const ns = encodeURIComponent(namespace);
+        const cm = await kube.request(
+          "GET",
+          `/api/v1/namespaces/${ns}/configmaps/${encodeURIComponent(envConfigMapName(c.name))}`,
+        );
+        const applied =
+          cm.status === 200
+            ? ((JSON.parse(cm.body) as { metadata?: { annotations?: Record<string, string> } }).metadata?.annotations?.[
+                ENV_REVISION_ANNOTATION
+              ] ?? null)
+            : null;
+        // The ConfigMap and the Secret are rendered and applied together; the server never reads Secrets.
+        const objects = cm.status === 200 ? { revision: applied } : null;
+        const landing = [];
+        for (const w of await placed(c.deployDir)) {
+          if (!w.namespace) continue;
+          const res = await kube.request(
+            "GET",
+            `/apis/apps/v1/namespaces/${encodeURIComponent(w.namespace)}/${w.kind.toLowerCase()}s/${encodeURIComponent(w.name)}`,
+          );
+          const live =
+            res.status === 200
+              ? (JSON.parse(res.body) as {
+                  metadata?: { generation?: number };
+                  spec?: { replicas?: number; template?: { metadata?: { annotations?: Record<string, string> } } };
+                  status?: Record<string, number>;
+                })
+              : null;
+          const st = live?.status ?? {};
+          const want = live?.spec?.replicas ?? st.desiredNumberScheduled ?? 1;
+          const rolledOut =
+            (st.observedGeneration ?? 0) >= (live?.metadata?.generation ?? 0) &&
+            (st.updatedReplicas ?? st.updatedNumberScheduled ?? 0) >= want &&
+            (st.availableReplicas ?? st.numberAvailable ?? 0) >= want;
+          const templateRevision = live?.spec?.template?.metadata?.annotations?.[ENV_REVISION_ANNOTATION] ?? null;
+          landing.push({
+            workload: `${w.kind}/${w.name}`,
+            state: envLanding(
+              {
+                configMap: objects,
+                secret: objects,
+                workload: live && templateRevision ? { templateRevision, rolledOut } : null,
+              },
+              revision,
+            ),
+          });
+        }
+        return { status: 200, body: { revision, applied, landing } };
+      },
+    },
     {
       method: "GET",
       path: "/projects/:project/components/:component/pods/:pod/log",
@@ -274,6 +345,13 @@ export const plugin = definePlugin({
     { id: "runtime:view", description: "See a component's workloads, pods and events", grantedTo: "project-readers" },
     { id: "runtime:operate", description: "Restart, scale and size a component", grantedTo: "project-writers" },
   ],
-  capabilities: ["runtime.view", "runtime.logs", "runtime.restart", "runtime.scale", "runtime.resources"],
+  capabilities: [
+    "runtime.view",
+    "runtime.env",
+    "runtime.logs",
+    "runtime.restart",
+    "runtime.scale",
+    "runtime.resources",
+  ],
   routes: ({ ports }: FeatureContext) => routes(ports as Needs),
 });

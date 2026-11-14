@@ -304,6 +304,18 @@ To turn it on, give the server what it writes with:
    `envEditing.ageKeySecret` (key `keys.txt` by default). Only the server
    mounts it.
 
+A **plain value whose name looks like a secret's** (`*_TOKEN`, `*_PASSWORD`,
+`DATABASE_URL`, `API_KEY` and the like; client ids, key ids and `PUBLIC_*`
+names are not) is refused, because plain values are committed to Git in
+clear: save it as a secret, or list it in `plainOnPurpose` (the dashboard's
+"The value is public" box) when it really is public.
+
+With the runtime plugin, a component's page shows whether its env has
+**landed**: committed but not applied yet, applied but still rolling out, or
+running with it — from the env ConfigMap's revision and the workload's pod
+template. Secrets are never read for this.
+
+
 ## Projects
 
 A project is registered through the API, by an administrator (with a session

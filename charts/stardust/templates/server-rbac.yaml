@@ -12,7 +12,8 @@ metadata:
 {{- range .Values.runtime.namespaces }}
 ---
 # The runtime plugin shows what a component runs: workloads, pods, their logs
-# and events in this namespace. Read-only: restarts and scaling are commits
+# and events in this namespace, and whether an env change has landed (from
+# the env ConfigMap's revision; Secrets are never read). Read-only: restarts and scaling are commits
 # to the deploy repository, applied by the GitOps controller.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -23,7 +24,7 @@ metadata:
     {{- include "stardust.labels" $ | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: ["pods", "events"]
+    resources: ["pods", "events", "configmaps"]
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods/log"]

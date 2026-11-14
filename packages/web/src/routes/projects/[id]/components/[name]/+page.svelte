@@ -3,6 +3,12 @@ let { data, form } = $props();
 const projectHref = $derived(`/projects/${encodeURIComponent(data.projectId)}`);
 const time = (iso: string) => new Date(iso).toLocaleString();
 const short = (digest: string) => digest.replace(/^sha256:/, "").slice(0, 12);
+const LANDING: Record<string, string> = {
+  live: "running with it",
+  "committed-not-applied": "committed; the GitOps controller has not applied it yet",
+  "applied-not-rolled-out": "applied; the workload is still rolling out",
+  "no-consumer": "applied, but this workload does not use it",
+};
 </script>
 
 <svelte:head>
@@ -22,6 +28,16 @@ const short = (digest: string) => digest.replace(/^sha256:/, "").slice(0, 12);
         ? `, deploy commit ${form.rolledBack.deployCommit.slice(0, 7)}`
         : ""}.
     </p>
+  {/if}
+
+  {#if data.env?.revision}
+    <h2>Environment</h2>
+    <p data-env-revision>Revision <code>{data.env.revision}</code></p>
+    <ul>
+      {#each data.env.landing as l (l.workload)}
+        <li data-env-landing={l.state}>{l.workload}: {LANDING[l.state] ?? l.state}</li>
+      {/each}
+    </ul>
   {/if}
 
   <h2>Running now</h2>

@@ -68,6 +68,8 @@ export interface EnvView {
 export interface EnvChangeInput {
   expectedRevision: string;
   set?: Record<string, string>;
+  /** Names in `set` that look like secrets but hold public values. Without it the server refuses them. */
+  plainOnPurpose?: string[];
   unset?: string[];
   setSecrets?: Record<string, string>;
   unsetSecrets?: string[];
