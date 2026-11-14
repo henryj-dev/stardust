@@ -16,6 +16,8 @@ import {
   type LogoutNotice,
   manifestUsesImage,
   type ObjectStore,
+  ownedElsewhere,
+  ownerRegion,
   type PipelineDef,
   PipelineDefError,
   type PullTarget,
@@ -97,6 +99,8 @@ export interface AppInfo {
 }
 
 export interface Services {
+  /** This installation's region: projects it owns are changed here, others refused with their owner's name. */
+  region?: string;
   /** External projects whose own code may be built (`jobs.upstreamBuilds`). */
   upstreamBuilds?: readonly string[];
   /** This region's database: runs and jobs, and reads of global tables that decide nothing about access. */
@@ -416,6 +420,19 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
         return c.json({ error: "set up two-step sign-in first", totpSetupRequired: true }, 403);
       }
     }
+    await next();
+  });
+
+  // A project another region owns is changed there: refuse, and say where.
+  const PROJECT_WRITE = /^\/api\/v1\/(?:projects|plugins\/[^/]+\/projects)\/([^/]+)(?:\/|$)/;
+  app.use("/api/v1/*", async (c, next) => {
+    const method = c.req.method;
+    const id = PROJECT_WRITE.exec(c.req.path)?.[1];
+    if (method === "GET" || method === "HEAD" || !id || !services.region) return next();
+    const project = await getProject(globalSql, decodeURIComponent(id));
+    const owner = ownedElsewhere(project?.metadata, services.region);
+    if (owner)
+      return c.json({ error: `project ${id} belongs to region ${owner}: change it there`, region: owner }, 409);
     await next();
   });
 
@@ -820,7 +837,11 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       components: body.components ?? [],
       metadata: body.metadata ?? {},
     };
-    const existed = (await getProject(sql, project.id)) !== null;
+    const before = await getProject(globalSql, project.id);
+    const existed = before !== null;
+    // A project belongs to the region it is made in, and keeps its owner when edited.
+    const owner = ownerRegion(project.metadata) ?? ownerRegion(before?.metadata) ?? services.region;
+    if (owner) project.metadata = { ...project.metadata, region: owner };
     try {
       await putProject(globalSql, project);
     } catch (err) {
