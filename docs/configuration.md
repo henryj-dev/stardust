@@ -297,6 +297,47 @@ A parallax write is published by applying its view at the revision the write
 made (a write alone is a draft there); stardust then waits until that view
 serves it.
 
+### `databases`
+
+PostgreSQL for your applications, through the deploy repository: administrators
+create instances, adopt ones already running, and give an application its own
+role and database on `/databases`. Stardust never connects to a database and
+never shows a password. It generates passwords, seals them with the cipher
+(`secrets-sops-age`), and commits manifests that an engine plugin (such as
+`db-statefulset`) renders.
+
+- **Create**: the instance's manifests and a sealed superuser password under
+  `<root>/<name>/`.
+- **Adopt**: records a running instance whose pod reads `POSTGRES_PASSWORD`
+  from a Secret. Nothing of the instance changes.
+- **Grant**: a Job that creates the role and a database it owns (and revokes
+  `PUBLIC`'s connect), with the password sealed beside it, then
+  `DATABASE_URL`, `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` and `PGPASSWORD`
+  (optionally prefixed, e.g. `ORDERS_DATABASE_URL`) in the chosen env layer,
+  so the components reading it roll out. Granting again sets a new password.
+- **Revoke**: removes those env values and the grant's manifests. The role and
+  its data stay in the database.
+- **Backups**: with `backup` set, one CronJob per namespace that holds
+  instances dumps each of them, encrypts the dump to the age key, uploads it,
+  reads the stored size back and prunes old dumps. It is rendered again
+  whenever the instances change.
+
+```yaml
+databases:
+  root: deploy/databases # optional
+  backup: # optional
+    schedule: "15 3 * * *"
+    storage:
+      endpoint: https://s3.example.com
+      bucket: backups
+      credentials: db-backup-s3 # a Secret with access-key-id and secret-access-key, in each backed-up namespace
+      prefix: pg
+    recipient: age1... # the public key; keep the identity off the cluster
+    retentionHours: 168
+```
+
+Point a GitOps Kustomization (with SOPS decryption) at `root`.
+
 ### `db-statefulset`
 
 Provides the `databases` port for PostgreSQL run as a plain StatefulSet (one

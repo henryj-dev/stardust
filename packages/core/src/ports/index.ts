@@ -14,6 +14,7 @@ import type { DnsProvider } from "./dns.ts";
 import type { IdentityProvider } from "./identity.ts";
 import type { KubeStreamClient } from "./kube.ts";
 import type { LogSource } from "./logs.ts";
+import type { ProjectEnv } from "./project-env.ts";
 import type { ProjectCatalog } from "./projects.ts";
 import type { DeployRepo } from "./repo.ts";
 import type { SourceHost } from "./source.ts";
@@ -47,6 +48,8 @@ export interface Ports {
   dns: Record<string, DnsProvider>;
   /** Database engines by name, e.g. `statefulset`. */
   databases: Record<string, DatabaseProvider>;
+  /** Secret env values on a project's layers, provided by the server. */
+  projectEnv: ProjectEnv;
 }
 
 export type PortName = keyof Ports;
@@ -68,6 +71,7 @@ export const PORT_NAMES: readonly PortName[] = [
   "store",
   "dns",
   "databases",
+  "projectEnv",
 ];
 
 /**
@@ -85,6 +89,7 @@ export * from "./dns.ts";
 export * from "./identity.ts";
 export * from "./kube.ts";
 export * from "./logs.ts";
+export * from "./project-env.ts";
 export * from "./projects.ts";
 export * from "./repo.ts";
 export * from "./source.ts";

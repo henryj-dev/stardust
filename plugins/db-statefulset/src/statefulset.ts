@@ -214,7 +214,11 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
         `q -c "REVOKE ALL ON DATABASE ${database} FROM PUBLIC"`,
         `echo "[ok] ${role} owns ${database}"`,
       ].join("\n");
-      const name = `${target.ref.name}-grant-${role}`.slice(0, 63).replace(/-+$/, "");
+      const suffix = grant.revision ? `-${grant.revision}` : "";
+      const base = `${target.ref.name}-grant-${role.replace(/_/g, "-")}`
+        .slice(0, 63 - suffix.length)
+        .replace(/-+$/, "");
+      const name = `${base}${suffix}`;
       const job = {
         apiVersion: "batch/v1",
         kind: "Job",

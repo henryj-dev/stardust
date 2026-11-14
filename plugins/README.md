@@ -53,21 +53,22 @@ The server and the worker never import a plugin. `packages/bundle` lists the
 plugins compiled in (enforced by `only-bundle-loads-plugins`), and
 `assemble` from `@stardust/core` builds the ports each process wants.
 
-| Plugin             | Provides                                             | Needs  |
-| ------------------ | ---------------------------------------------------- | ------ |
-| `builder-buildkit` | `builder`                                            | `kube` |
-| `dns-cloudflare`   | `dns` (`cloudflare`)                                 |        |
-| `dns-parallax`     | `dns` (`parallax`, internal/external views)          |        |
-| `db-statefulset`   | `databases` (needs `kube`)                           |        |
-| `domains`          | (feature: requires `dns`, `globalDatabase`)          |        |
-| `nodes`            | (feature: requires `database`)                       |        |
-| `gitops-git`       | `deployRepo`                                         |        |
-| `identity-oidc`    | `identity`                                           |        |
-| `logs-kube`        | `logs` (`kube`, live)                                | `kube` |
-| `logs-loki`        | `logs` (`loki`, history)                             |        |
-| `store-s3`         | `store`                                              |        |
-| `runtime`          | (feature: requires `kube`, `deployRepo`, `projects`) |        |
-| `secrets-sops-age` | `cipher`                                             |        |
-| `source-github`    | `source`                                             |        |
+| Plugin             | Provides                                                            | Needs  |
+| ------------------ | ------------------------------------------------------------------- | ------ |
+| `builder-buildkit` | `builder`                                                           | `kube` |
+| `dns-cloudflare`   | `dns` (`cloudflare`)                                                |        |
+| `dns-parallax`     | `dns` (`parallax`, internal/external views)                         |        |
+| `databases`        | (feature: requires `databases`, `deployRepo`, `cipher`, `database`) |        |
+| `db-statefulset`   | `databases` (needs `kube`)                                          |        |
+| `domains`          | (feature: requires `dns`, `globalDatabase`)                         |        |
+| `nodes`            | (feature: requires `database`)                                      |        |
+| `gitops-git`       | `deployRepo`                                                        |        |
+| `identity-oidc`    | `identity`                                                          |        |
+| `logs-kube`        | `logs` (`kube`, live)                                               | `kube` |
+| `logs-loki`        | `logs` (`loki`, history)                                            |        |
+| `store-s3`         | `store`                                                             |        |
+| `runtime`          | (feature: requires `kube`, `deployRepo`, `projects`)                |        |
+| `secrets-sops-age` | `cipher`                                                            |        |
+| `source-github`    | `source`                                                            |        |
 
 `kube` is provided by the server and the worker themselves (`packages/kube`).

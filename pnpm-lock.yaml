@@ -195,6 +195,9 @@ importers:
       '@stardust/plugin-builder-buildkit':
         specifier: workspace:*
         version: link:../../plugins/builder-buildkit
+      '@stardust/plugin-databases':
+        specifier: workspace:*
+        version: link:../../plugins/databases
       '@stardust/plugin-db-statefulset':
         specifier: workspace:*
         version: link:../../plugins/db-statefulset
@@ -297,6 +300,12 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
     devDependencies:
+      '@stardust/plugin-databases':
+        specifier: workspace:*
+        version: link:../../plugins/databases
+      '@stardust/plugin-db-statefulset':
+        specifier: workspace:*
+        version: link:../../plugins/db-statefulset
       '@stardust/plugin-domains':
         specifier: workspace:*
         version: link:../../plugins/domains
@@ -368,6 +377,15 @@ importers:
       '@stardust/core':
         specifier: workspace:*
         version: link:../../packages/core
+
+  plugins/databases:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   plugins/db-statefulset:
     dependencies:

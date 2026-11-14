@@ -33,12 +33,13 @@ import {
   type MergedEnv,
   mergeEnv,
   type PendingCommit,
+  type ProjectEnv,
   plaintextSecrets,
   type RepoIO,
   renderEnv,
   stampPodTemplate,
 } from "@stardust/core";
-import type { Component, Project } from "@stardust/db";
+import { type Component, getProject, type Project, type Sql } from "@stardust/db";
 import { Document, isMap, parse, parseAllDocuments, parseDocument } from "yaml";
 
 /** SOPS, as the editor needs it: decrypt a document, and encrypt one unless it decrypts to the same. */
@@ -441,4 +442,43 @@ export function commitMessage(project: string, layer: string, change: EnvChange,
   if (names(change.setSecrets).length) parts.push(`set secrets ${names(change.setSecrets).join(", ")}`);
   if (change.unsetSecrets?.length) parts.push(`unset secrets ${change.unsetSecrets.join(", ")}`);
   return `chore(env): ${project}/${layer} — ${parts.join("; ")}\n\nChanged by ${by} in stardust.`;
+}
+
+/**
+ * The `projectEnv` port: plugins set secret values on a layer through the same
+ * editor (one commit, consumers stamped to roll out), re-reading the layer when
+ * someone else changed it in between.
+ */
+export function projectEnvPort(editor: EnvEditor, sql: Sql): ProjectEnv {
+  return {
+    async setSecrets(projectId, layer, values, by) {
+      const project = await getProject(sql, projectId);
+      if (!project) throw new EnvInputError(`unknown project "${projectId}"`);
+      const setSecrets: Record<string, string> = {};
+      const unsetSecrets: string[] = [];
+      for (const [key, value] of Object.entries(values)) {
+        if (value === null) unsetSecrets.push(key);
+        else setSecrets[key] = value;
+      }
+      for (let attempt = 0; ; attempt++) {
+        const view = (await readEnv(editor, project)).layers.find((l) => l.layer === layer);
+        if (!view) throw new EnvInputError(`"${layer}" is not a layer of this project`);
+        const absent = unsetSecrets.filter((k) => !view.secrets.includes(k));
+        const change = checkChange({
+          expectedRevision: view.revision,
+          ...(Object.keys(setSecrets).length > 0 ? { setSecrets } : {}),
+          ...(unsetSecrets.length > absent.length
+            ? { unsetSecrets: unsetSecrets.filter((k) => !absent.includes(k)) }
+            : {}),
+        });
+        try {
+          const r = await changeEnv(editor, project, layer, change, by);
+          return { status: r.status, commit: r.commit };
+        } catch (err) {
+          if (err instanceof EnvConflict && attempt < 2) continue;
+          throw err;
+        }
+      }
+    },
+  };
 }

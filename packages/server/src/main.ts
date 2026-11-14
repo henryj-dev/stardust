@@ -16,6 +16,7 @@ import {
 } from "@stardust/db";
 import { inClusterClient } from "@stardust/kube";
 import { createApp, type Services } from "./app.ts";
+import { type EnvEditor, projectEnvPort } from "./env.ts";
 import { RunEvents } from "./events.ts";
 import { attachSockets } from "./sockets.ts";
 
@@ -56,6 +57,8 @@ try {
     publicUrl: config.server.publicUrl,
     region: config.region,
   });
+  const editor = envEditorOf(ports);
+  if (editor) ports.projectEnv = projectEnvPort(editor, sql);
   features = buildFeatures(plugins, config.plugins, ports, log, config.region);
 } catch (err) {
   console.error((err as Error).message);
@@ -135,19 +138,23 @@ function buildLogServices(): Pick<Services, "buildLogs"> {
  * writes to the deploy repository and decrypts the env layers it edits.
  */
 function envServices(): Pick<Services, "env"> {
-  const { deployRepo, cipher } = ports;
-  if (!deployRepo || !cipher) {
+  const editor = envEditorOf(ports);
+  if (!editor) {
     log.info("editing env is off: a deploy repository and a cipher are not both available");
     return {};
   }
-  log.info("editing env enabled", { envRoot: deployRepo.envRoot ?? "deploy/env" });
+  log.info("editing env enabled", { envRoot: editor.root ?? "deploy/env" });
+  return { env: editor };
+}
+
+function envEditorOf(p: Partial<Ports>): EnvEditor | undefined {
+  const { deployRepo, cipher } = p;
+  if (!deployRepo || !cipher) return undefined;
   return {
-    env: {
-      repo: deployRepo.repo,
-      codec: cipher,
-      ...(deployRepo.envRoot ? { root: deployRepo.envRoot } : {}),
-      revisionKey: cipher.revisionKey,
-    },
+    repo: deployRepo.repo,
+    codec: cipher,
+    ...(deployRepo.envRoot ? { root: deployRepo.envRoot } : {}),
+    revisionKey: cipher.revisionKey,
   };
 }
 
