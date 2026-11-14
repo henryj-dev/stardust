@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
@@ -24,6 +24,9 @@ function app(lockfile: "npm" | "pnpm" | "none") {
   const root = mkdtempSync(join(tmpdir(), "stardust-w-"));
   const src = join(root, "src");
   mkdirSync(src);
+  // The build runs as uid 1000, which owns neither directory on a CI runner.
+  chmodSync(root, 0o777);
+  chmodSync(src, 0o777);
   writeFileSync(join(src, "package.json"), pkg("fixture"));
   if (lockfile === "npm") {
     writeFileSync(
