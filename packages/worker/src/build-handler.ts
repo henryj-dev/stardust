@@ -8,6 +8,7 @@ import {
   type Builder,
   buildLogKey,
   bumpImage,
+  type DeployTarget,
   type Logger,
   type ObjectStore,
   type RepoIO,
@@ -20,6 +21,8 @@ export interface BuildHandlerDeps {
   sql: Sql;
   builder: Builder;
   deployRepo: RepoIO;
+  /** Pipelines released outside Kubernetes, by letter (W: Cloudflare Workers). */
+  targets?: Readonly<Record<string, DeployTarget>>;
   /** Keeps each finished build's log after the cluster cleans the build up. Optional. */
   store?: ObjectStore;
   buildRevAnnotation?: string;
@@ -71,13 +74,47 @@ export function buildHandler(deps: BuildHandlerDeps): JobHandler {
     const project = await getProject(deps.sql, job.projectId);
     if (!project) return failed(`project ${job.projectId} no longer exists`);
     if (!project.githubRepo) return failed("the project has no repository to build from");
-    if (job.def.pipeline !== "C" && job.def.pipeline !== "N") {
-      return failed(`build kind ${job.def.pipeline} is not supported yet`);
-    }
-
     const name = job.def.component ?? (project.components.length === 1 ? project.components[0]?.name : undefined);
     const component = project.components.find((c) => c.name === name);
     if (!component) return failed(`job "${job.name}" names no known component`);
+
+    if (job.def.pipeline !== "C" && job.def.pipeline !== "N") {
+      const target = deps.targets?.[job.def.pipeline];
+      if (!target) return failed(`pipeline ${job.def.pipeline} has no deploy target configured`);
+      // A pull request is never released: its head is unreviewed code.
+      if (job.event === "pull_request") {
+        return { result: "success", detail: { deploy: "skipped: pull requests are not released" } };
+      }
+      let released: Awaited<ReturnType<DeployTarget["deploy"]>>;
+      try {
+        released = await target.deploy(
+          {
+            projectId: project.id,
+            repo: project.githubRepo,
+            sha: job.sha,
+            component: component.name,
+            runId: job.runId,
+            jobName: job.name,
+            ...(component.context ? { context: component.context } : {}),
+            ...(component.buildEnv ? { buildEnv: component.buildEnv } : {}),
+          },
+          { signal, ...(deps.pollMs !== undefined ? { pollMs: deps.pollMs } : {}) },
+        );
+      } catch (err) {
+        return failed((err as Error).message);
+      }
+      const detail: Record<string, unknown> = { releaseJob: released.jobName };
+      if (released.result === "cancelled") return { result: "cancelled", detail };
+      if (released.result === "failed" || !released.version) {
+        return failed(released.reason ?? "the release failed", {
+          ...detail,
+          logTail: redactLog(released.logTail).slice(-4000),
+        });
+      }
+      detail.version = released.version;
+      deps.log.info("released", { job: job.id, component: component.name, version: released.version });
+      return { result: "success", detail };
+    }
 
     const outcome = await deps.builder.build(
       {

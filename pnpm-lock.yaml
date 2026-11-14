@@ -237,6 +237,9 @@ importers:
       '@stardust/plugin-store-s3':
         specifier: workspace:*
         version: link:../../plugins/store-s3
+      '@stardust/plugin-target-cf-workers':
+        specifier: workspace:*
+        version: link:../../plugins/target-cf-workers
 
   packages/config:
     dependencies:
@@ -371,6 +374,9 @@ importers:
       '@stardust/plugin-builder-buildkit':
         specifier: workspace:*
         version: link:../../plugins/builder-buildkit
+      '@stardust/plugin-target-cf-workers':
+        specifier: workspace:*
+        version: link:../../plugins/target-cf-workers
 
   plugins/builder-buildkit:
     dependencies:
@@ -475,6 +481,12 @@ importers:
         version: link:../../packages/core
 
   plugins/store-s3:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  plugins/target-cf-workers:
     dependencies:
       '@stardust/core':
         specifier: workspace:*
