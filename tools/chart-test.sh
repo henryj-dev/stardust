@@ -129,6 +129,22 @@ else
 fi
 if ! grep -q "t-stardust-runtime" <<<"$(render)"; then pass runtime-off-no-role; else bad runtime-off-no-role "a runtime Role exists without namespaces"; fi
 
+# The databases plugins: a read-only Role per listed namespace, never Secrets.
+dbr="$(render --set 'databases.namespaces={databases,apps}')"
+dbroles="$(grep -c 'name: t-stardust-databases$' <<<"$dbr")"
+dbverbs="$(awk '/name: t-stardust-databases$/{r=1} r&&/verbs:/{print} /^---/{r=0}' <<<"$dbr" | sort -u | tr -d ' ')"
+dbres="$(awk '/kind: Role$/{r=1} r&&/resources:/{print} /^---/{r=0}' <<<"$dbr" | grep -c secrets || true)"
+if [ "$dbroles" = "6" ] && [ "$dbverbs" = 'verbs:["get","list"]' ] && [ "$dbres" = "0" ] && grep -q 'serviceAccountName: t-stardust-server' <<<"$dbr"; then
+  pass databases-roles-read-only
+else
+  bad databases-roles-read-only "expected a read-only Role without secrets in each of two namespaces (got $dbroles names, verbs: $dbverbs, secrets rules: $dbres)"
+fi
+if render --set 'databases.namespaces={databases}' | docker run --rm -i "$KUBECONFORM" -strict -summary -kubernetes-version 1.30.0 - >/dev/null 2>&1; then
+  pass databases-kubeconform
+else
+  bad databases-kubeconform "manifests with database namespaces do not validate"
+fi
+
 # Editing env: the age identity is mounted in the server alone, read-only, and only when named.
 out="$(render --set envEditing.ageKeySecret=stardust-age)"
 section() { awk -v f="# Source: stardust/templates/$1.yaml" '$0==f{w=1;next} /^# Source: /{w=0} w' <<<"$out"; }

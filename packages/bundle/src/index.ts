@@ -5,6 +5,7 @@
  */
 import type { Plugin } from "@stardust/core";
 import { plugin as builderBuildkit } from "@stardust/plugin-builder-buildkit";
+import { plugin as dbStatefulset } from "@stardust/plugin-db-statefulset";
 import { plugin as dnsCloudflare } from "@stardust/plugin-dns-cloudflare";
 import { plugin as dnsParallax } from "@stardust/plugin-dns-parallax";
 import { plugin as domains } from "@stardust/plugin-domains";
@@ -20,6 +21,7 @@ import { plugin as storeS3 } from "@stardust/plugin-store-s3";
 
 export const bundledPlugins: readonly Plugin[] = [
   builderBuildkit,
+  dbStatefulset,
   dnsCloudflare,
   dnsParallax,
   domains,

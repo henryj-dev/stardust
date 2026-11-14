@@ -9,6 +9,7 @@
   "dependencies": {
     "@stardust/core": "workspace:*",
     "@stardust/plugin-builder-buildkit": "workspace:*",
+    "@stardust/plugin-db-statefulset": "workspace:*",
     "@stardust/plugin-dns-cloudflare": "workspace:*",
     "@stardust/plugin-dns-parallax": "workspace:*",
     "@stardust/plugin-domains": "workspace:*",

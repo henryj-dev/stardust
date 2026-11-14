@@ -75,6 +75,14 @@ builds:
 runtime:
   namespaces: []
 
+# The databases plugins (config.plugins.db-statefulset): namespaces where
+# database instances live, including the one new instances go to. The server
+# gets a read-only Role in each (statefulsets, volume claims, jobs, cronjobs)
+# to find instances and follow grant and backup jobs; everything it changes is
+# a commit to the deploy repository. It never reads Secrets.
+databases:
+  namespaces: []
+
 # Editing env and secrets in the dashboard. The server then writes to the
 # deploy repository (config.plugins.gitops-git; its credentials must reach the
 # server, e.g. through extraEnvFrom) and encrypts with SOPS
