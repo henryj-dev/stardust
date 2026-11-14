@@ -3,6 +3,7 @@ import { error, fail, redirect } from "@sveltejs/kit";
 import { requireClient } from "$lib/server/api";
 import { projectFields } from "$lib/server/project-form";
 import { findProject, requireAdmin, saveProject } from "$lib/server/project-save";
+import { needsReauth, reauthFrom } from "$lib/server/reauth";
 import type { Actions, PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ locals, params, url }) => {
@@ -28,9 +29,15 @@ export const actions: Actions = {
     requireAdmin(locals);
     const form = await request.formData();
     if (form.get("confirm") !== params.id) return fail(400, { deleteError: `Type ${params.id} to delete it.` });
+    if (form.get("proof")) {
+      const problem = await reauthFrom(client, form);
+      if (problem) return fail(403, { deleteError: problem });
+    }
     try {
       await client.deleteProject(params.id, { withdraw: form.get("withdraw") === "on" });
     } catch (err) {
+      if (needsReauth(err))
+        return fail(401, { deleteError: "Confirm it is you: enter your password or a code below." });
       if (err instanceof ApiError && err.status < 500) return fail(err.status, { deleteError: err.message });
       throw err;
     }

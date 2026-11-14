@@ -34,7 +34,9 @@ export {
   API_TOKEN_PREFIX,
   apiTokenFor,
   authenticate,
+  checkPassword,
   createApiToken,
+  createSession,
   createUser,
   DEFAULT_SIGN_IN,
   ensureBootstrapAdmin,
@@ -76,3 +78,17 @@ export { advanceRun, startRun } from "./runs.ts";
 export type { CoreTableScope } from "./scopes.ts";
 export { TABLE_SCOPES } from "./scopes.ts";
 export { guardStore, purgeGuards, sagaStore } from "./stores.ts";
+export type { TotpStatus } from "./totp.ts";
+export {
+  beginTotp,
+  checkSecondFactor,
+  confirmTotp,
+  endChallenge,
+  markReauthenticated,
+  newRecoveryCodesFor,
+  removeTotp,
+  sessionFreshness,
+  startChallenge,
+  takeChallengeTry,
+  totpStatus,
+} from "./totp.ts";

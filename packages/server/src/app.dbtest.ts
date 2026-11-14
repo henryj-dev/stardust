@@ -345,6 +345,13 @@ describe("every API route is guarded", () => {
     "POST /api/v1/account/password",
     "GET /api/v1/account/sessions",
     "DELETE /api/v1/account/sessions/:sessionId",
+    // One's own two-step sign-in and re-authentication (tested in totp.dbtest.ts).
+    "GET /api/v1/account/totp",
+    "POST /api/v1/account/totp/setup",
+    "POST /api/v1/account/totp/confirm",
+    "POST /api/v1/account/totp/recovery-codes",
+    "DELETE /api/v1/account/totp",
+    "POST /api/v1/account/reauth",
   ]);
   const PUBLIC = new Set([
     "POST /api/v1/auth/login",
@@ -353,6 +360,8 @@ describe("every API route is guarded", () => {
     "POST /api/v1/auth/oidc/callback",
     // The one-time link is the credential.
     "POST /api/v1/auth/link",
+    // The challenge from the password step is the credential.
+    "POST /api/v1/auth/login/totp",
   ]);
   const routes = () => [
     ...new Set(

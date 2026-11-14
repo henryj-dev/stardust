@@ -60,6 +60,12 @@ export async function parseConfig(
         issues,
       )
     : undefined;
+  const totpKey = raw.auth.local.totpKey
+    ? await resolveSecret(raw.auth.local.totpKey, "auth.local.totpKey", env, readSecretFile, issues)
+    : undefined;
+  if (totpKey !== undefined && totpKey.length < 32) {
+    issues.push({ path: "auth.local.totpKey", message: "must be at least 32 characters" });
+  }
   if (issues.length > 0 || databaseUrl === undefined) {
     throw new ConfigError(source, issues);
   }
@@ -72,6 +78,14 @@ export async function parseConfig(
         ? { ...server, bootstrapAdmin: { username: bootstrapAdmin.username, password: bootstrapPassword } }
         : server,
     database: { url: databaseUrl },
+    auth: {
+      ...raw.auth,
+      local: {
+        enabled: raw.auth.local.enabled,
+        totp: raw.auth.local.totp,
+        ...(totpKey !== undefined ? { totpKey } : {}),
+      },
+    },
   };
 }
 

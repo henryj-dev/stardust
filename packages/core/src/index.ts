@@ -1,4 +1,5 @@
 export * from "./auth/rbac.ts";
+export * from "./auth/totp.ts";
 export * from "./compose.ts";
 export * from "./env/consumers.ts";
 export * from "./env/merge.ts";

@@ -23,6 +23,41 @@ const time = (iso: string) => new Date(iso).toLocaleString();
     <button type="submit">Change password</button>
   </form>
 
+  <h2>Two-step sign-in</h2>
+  {#if form?.totpError}<p role="alert" data-totp-error>{form.totpError}</p>{/if}
+  {#if form?.recoveryCodes}
+    <div data-recovery-codes>
+      <p>Your recovery codes. Each works once, in place of a code, if you lose your phone. Keep them somewhere safe: they are not shown again.</p>
+      <pre>{form.recoveryCodes.join("\n")}</pre>
+    </div>
+  {/if}
+  {#if data.totp.policy === "off"}
+    <p>Two-step sign-in is off on this server.</p>
+  {:else if form?.setup}
+    <p>Add this to your authenticator app, then enter the code it shows.</p>
+    <p>Secret: <code data-totp-secret>{form.setup.secret}</code></p>
+    <p>Or open this link on the phone: <code>{form.setup.uri}</code></p>
+    <form method="POST" action="?/totpConfirm">
+      <label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" required /></label>
+      <button type="submit">Turn on</button>
+    </form>
+  {:else if data.totp.enrolled && !form?.totpOff}
+    <p data-totp-on>On. {data.totp.recoveryCodesLeft} recovery code(s) left.</p>
+    <form method="POST" action="?/totpCodes">
+      <label>Code from your app <input name="code" inputmode="numeric" autocomplete="one-time-code" required /></label>
+      <button type="submit">New recovery codes</button>
+    </form>
+    {#if data.totp.policy !== "required"}
+      <form method="POST" action="?/totpOff">
+        <label>Code (or a recovery code) <input name="code" autocomplete="one-time-code" required /></label>
+        <button type="submit">Turn off</button>
+      </form>
+    {/if}
+  {:else}
+    <p data-totp-off>{data.totp.policy === "required" ? "Required on this server: set it up to continue." : "Off."}</p>
+    <form method="POST" action="?/totpSetup"><button type="submit">Set up</button></form>
+  {/if}
+
   <h2>Sessions</h2>
   {#if form?.sessionError}<p role="alert">{form.sessionError}</p>{/if}
   <table>
