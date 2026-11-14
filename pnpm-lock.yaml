@@ -201,6 +201,9 @@ importers:
       '@stardust/plugin-identity-oidc':
         specifier: workspace:*
         version: link:../../plugins/identity-oidc
+      '@stardust/plugin-runtime':
+        specifier: workspace:*
+        version: link:../../plugins/runtime
       '@stardust/plugin-secrets-sops-age':
         specifier: workspace:*
         version: link:../../plugins/secrets-sops-age
@@ -348,6 +351,15 @@ importers:
       jose:
         specifier: 6.2.13
         version: 6.2.13
+
+  plugins/runtime:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   plugins/secrets-sops-age:
     dependencies:

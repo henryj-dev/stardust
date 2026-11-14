@@ -69,6 +69,12 @@ builds:
   # namespace. false keeps the server without a token; runs then show no log.
   logs: true
 
+# The runtime plugin (config.plugins.runtime): namespaces whose workloads the
+# dashboard shows. The server gets a read-only Role in each (workloads, pods,
+# pod logs, events); restarts and scaling go through the deploy repository.
+runtime:
+  namespaces: []
+
 # Editing env and secrets in the dashboard. The server then writes to the
 # deploy repository (config.plugins.gitops-git; its credentials must reach the
 # server, e.g. through extraEnvFrom) and encrypts with SOPS

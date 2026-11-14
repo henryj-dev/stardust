@@ -2,7 +2,13 @@
  * Projects: the repository, the pipeline definition, and per component how to
  * build it and which deploy directory holds its manifests.
  */
-import { hasControlCharacter, type JobPipeline, loadPipelineDef, type PipelineDef } from "@stardust/core";
+import {
+  hasControlCharacter,
+  type JobPipeline,
+  loadPipelineDef,
+  type PipelineDef,
+  type ProjectCatalog,
+} from "@stardust/core";
 import type { Sql } from "postgres";
 
 export interface Component {
@@ -254,4 +260,21 @@ export async function listRuns(sql: Sql, projectId: string, limit = 20, onlyRun?
         detail: j.detail,
       })),
   }));
+}
+
+/** The `projects` port: what plugins may read of a project. */
+export function projectCatalog(sql: Sql): ProjectCatalog {
+  return {
+    async get(id) {
+      const p = await getProject(sql, id);
+      return p
+        ? {
+            id: p.id,
+            name: p.name,
+            githubRepo: p.githubRepo,
+            components: p.components.map((c) => ({ name: c.name, deployDir: c.deployDir })),
+          }
+        : null;
+    },
+  };
 }

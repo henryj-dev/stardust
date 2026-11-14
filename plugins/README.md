@@ -18,7 +18,9 @@ A plugin:
 
 A feature plugin may also declare, all checked when it is defined or mounted:
 
-- `permissions`: `<plugin>:<verb>`, granted to `admins` or `signed-in`;
+- `permissions`: `<plugin>:<verb>`, granted to `admins`, `signed-in`, or per
+  project to `project-readers` (viewers and maintainers) or `project-writers`
+  (maintainers) — those routes name the project as `:project`;
 - `routes(context)`: served under `/api/v1/plugins/<plugin>`, each with one
   of its permissions, and an audit action for every change;
 - `schedules`: run by one worker at a time, at most once per interval;
@@ -48,12 +50,13 @@ The server and the worker never import a plugin. `packages/bundle` lists the
 plugins compiled in (enforced by `only-bundle-loads-plugins`), and
 `assemble` from `@stardust/core` builds the ports each process wants.
 
-| Plugin             | Provides     | Needs  |
-| ------------------ | ------------ | ------ |
-| `builder-buildkit` | `builder`    | `kube` |
-| `gitops-git`       | `deployRepo` |        |
-| `identity-oidc`    | `identity`   |        |
-| `secrets-sops-age` | `cipher`     |        |
-| `source-github`    | `source`     |        |
+| Plugin             | Provides                                             | Needs  |
+| ------------------ | ---------------------------------------------------- | ------ |
+| `builder-buildkit` | `builder`                                            | `kube` |
+| `gitops-git`       | `deployRepo`                                         |        |
+| `identity-oidc`    | `identity`                                           |        |
+| `runtime`          | (feature: requires `kube`, `deployRepo`, `projects`) |        |
+| `secrets-sops-age` | `cipher`                                             |        |
+| `source-github`    | `source`                                             |        |
 
 `kube` is provided by the server and the worker themselves (`packages/kube`).

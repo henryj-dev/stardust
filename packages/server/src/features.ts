@@ -4,8 +4,8 @@
  * plugin sees the request, and each change is audited with the route's
  * action. The plugin never sees the request object itself.
  */
-import type { Feature, Logger, Method, RouteResponse } from "@stardust/core";
-import { mayUse } from "@stardust/core";
+import type { Feature, Logger, Method, ProjectRole, RouteResponse } from "@stardust/core";
+import { can, mayUse } from "@stardust/core";
 import type { AuditInput, User } from "@stardust/db";
 import type { Context, Hono } from "hono";
 
@@ -13,6 +13,8 @@ type Env = { Variables: { user: User; token: string } };
 
 export interface MountOptions {
   audit: (c: Context<Env>, event: Omit<AuditInput, "actor">) => Promise<void>;
+  /** The caller's role in a project, for per-project permissions. */
+  roleIn: (userId: string, projectId: string) => Promise<ProjectRole | null>;
   log: Logger;
 }
 
@@ -35,7 +37,17 @@ export function mountFeatures(app: Hono<Env>, features: readonly Feature[], opti
       const path = `/api/v1/plugins/${feature.plugin}${route.path}`;
       app[METHODS[route.method]](path, async (c) => {
         const user = c.get("user");
-        if (!mayUse(user, permissions.get(route.permission))) return c.json({ error: "forbidden" }, 403);
+        const permission = permissions.get(route.permission);
+        const projectId = c.req.param("project");
+        const role =
+          permission?.grantedTo.startsWith("project-") && projectId ? await options.roleIn(user.id, projectId) : null;
+        if (!mayUse(user, permission, role)) {
+          // A project the caller cannot read is unknown to them, as everywhere else.
+          if (projectId && permission?.grantedTo.startsWith("project-") && !can(user, "project:read", role)) {
+            return c.json({ error: "unknown project" }, 404);
+          }
+          return c.json({ error: "forbidden" }, 403);
+        }
         let body: unknown = null;
         if (route.method !== "GET" && route.method !== "DELETE") {
           const text = await c.req.text();

@@ -199,6 +199,11 @@ export interface RollbackResult {
   job: string;
 }
 
+export interface PluginClient {
+  get<T>(path: string): Promise<T>;
+  send<T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T>;
+}
+
 export interface Client {
   health(): Promise<{ status: string; version: string }>;
   /** Signs in with a username and password. Wrong credentials and lockout are results, not errors. */
@@ -217,6 +222,11 @@ export interface Client {
   session(): Promise<SessionUser | null>;
   /** The enabled plugins and what each adds, so a dashboard shows only what this server has. */
   capabilities(): Promise<Capabilities>;
+  /**
+   * A plugin's own API, under /api/v1/plugins/<name>. An ApiError carries the
+   * server's reason; 404 also means the plugin is not enabled.
+   */
+  plugin(name: string): PluginClient;
   runs(projectId: string): Promise<RunView[]>;
   /** One run with its jobs; an ApiError with status 404 when the project or the run is unknown. */
   run(projectId: string, runId: string): Promise<RunView>;
@@ -336,6 +346,26 @@ export function createClient(options: ClientOptions): Client {
       if (!res.ok) throw new ApiError(res.status, `POST /api/v1/auth/login failed: ${res.status}`);
       const body = (await res.json()) as { token: string; user: SessionUser };
       return { ok: true, token: body.token, user: body.user };
+    },
+    plugin(name) {
+      const root = `/api/v1/plugins/${encodeURIComponent(name)}`;
+      const call = async (method: string, path: string, body?: unknown) => {
+        const res = await doFetch(`${base}${root}${path}`, {
+          method,
+          headers: { ...headers(), ...(body === undefined ? {} : { "content-type": "application/json" }) },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+        if (!res.ok) {
+          const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+          throw new ApiError(res.status, error || `${method} ${root}${path} failed: ${res.status}`);
+        }
+        return res.status === 204 ? undefined : res.json();
+      };
+      return {
+        get: async <T>(path: string) => (await call("GET", path)) as T,
+        send: async <T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) =>
+          (await call(method, path, body)) as T,
+      };
     },
     async capabilities() {
       return (await (await get("/api/v1/capabilities")).json()) as Capabilities;

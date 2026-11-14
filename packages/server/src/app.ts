@@ -272,7 +272,11 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
 
   app.get("/api/v1/session", (c) => c.json({ user: c.get("user") }));
 
-  mountFeatures(app, services.features ?? [], { audit, log });
+  mountFeatures(app, services.features ?? [], {
+    audit,
+    roleIn: (userId, projectId) => projectRole(globalSql, userId, projectId),
+    log,
+  });
 
   app.post("/api/v1/auth/logout", async (c) => {
     await signOut(globalSql, c.get("token"));

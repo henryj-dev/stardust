@@ -111,6 +111,24 @@ else
 fi
 if ! grep -q "kind: Role" <<<"$(render)"; then pass builds-off-no-role; else bad builds-off-no-role "a Role exists with builds disabled"; fi
 
+# The runtime plugin: a read-only Role per listed namespace, bound to the server's own account.
+rt="$(render --set 'runtime.namespaces={apps,web}')"
+# Each namespace names it three times: the Role, the RoleBinding and its roleRef.
+roles="$(grep -c 'name: t-stardust-runtime$' <<<"$rt")"
+verbs="$(awk '/name: t-stardust-runtime$/{r=1} r&&/verbs:/{print} /^---/{r=0}' <<<"$rt" | sort -u | tr -d ' ')"
+if [ "$roles" = "6" ] && [ "$verbs" = 'verbs:["get","list"]
+verbs:["get"]' ] && grep -q 'serviceAccountName: t-stardust-server' <<<"$rt"; then
+  pass runtime-roles-read-only
+else
+  bad runtime-roles-read-only "expected a read-only Role and binding in each of two namespaces (got $roles names — Role, RoleBinding and roleRef each, verbs: $verbs)"
+fi
+if render --set 'runtime.namespaces={apps}' | docker run --rm -i "$KUBECONFORM" -strict -summary -kubernetes-version 1.30.0 - >/dev/null 2>&1; then
+  pass runtime-kubeconform
+else
+  bad runtime-kubeconform "manifests with runtime namespaces do not validate"
+fi
+if ! grep -q "t-stardust-runtime" <<<"$(render)"; then pass runtime-off-no-role; else bad runtime-off-no-role "a runtime Role exists without namespaces"; fi
+
 # Editing env: the age identity is mounted in the server alone, read-only, and only when named.
 out="$(render --set envEditing.ageKeySecret=stardust-age)"
 section() { awk -v f="# Source: stardust/templates/$1.yaml" '$0==f{w=1;next} /^# Source: /{w=0} w' <<<"$out"; }

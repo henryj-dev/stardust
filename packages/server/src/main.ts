@@ -10,6 +10,7 @@ import {
   guardStore,
   migrate,
   migratePlugin,
+  projectCatalog,
   type Sql,
   sagaStore,
 } from "@stardust/db";
@@ -45,6 +46,7 @@ try {
       database: databasePort(sql),
       globalDatabase: databasePort(globalSql),
       sagas: sagaStore(sql),
+      projects: projectCatalog(sql),
       guards: guardStore(sql, globalSql),
       ...kube(),
     },

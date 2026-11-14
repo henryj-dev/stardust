@@ -1,0 +1,50 @@
+{{- if include "stardust.serverReadsCluster" . }}
+# The server's own account, with a token: only when it reads the cluster
+# (build logs, or the runtime plugin's namespaces). It is bound to read-only
+# Roles, never a ClusterRole.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "stardust.fullname" . }}-server
+  labels:
+    {{- include "stardust.labels" . | nindent 4 }}
+{{- end }}
+{{- range .Values.runtime.namespaces }}
+---
+# The runtime plugin shows what a component runs: workloads, pods, their logs
+# and events in this namespace. Read-only: restarts and scaling are commits
+# to the deploy repository, applied by the GitOps controller.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "stardust.fullname" $ }}-runtime
+  namespace: {{ . }}
+  labels:
+    {{- include "stardust.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "stardust.fullname" $ }}-runtime
+  namespace: {{ . }}
+  labels:
+    {{- include "stardust.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "stardust.fullname" $ }}-runtime
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "stardust.fullname" $ }}-server
+    namespace: {{ $.Release.Namespace }}
+{{- end }}

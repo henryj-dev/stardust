@@ -207,3 +207,24 @@ it("cancels a job, lists deliveries and rolls back, passing on the server's reas
   await client.rollback("demo", "api");
   assert.deepEqual(seen[3]?.body, {});
 });
+
+it("calls a plugin's API under its name and passes on its errors", async () => {
+  const seen: Array<{ url: string; method: string; body: string | null }> = [];
+  const client = createClient({
+    baseUrl: "http://api.test",
+    token: "t0k",
+    fetch: async (input, init) => {
+      seen.push({ url: String(input), method: init?.method ?? "GET", body: (init?.body as string) ?? null });
+      if (init?.method === "PUT") return Response.json({ error: "replicas must be a number" }, { status: 400 });
+      return Response.json({ ok: true });
+    },
+  });
+  const runtime = client.plugin("runtime");
+  assert.deepEqual(await runtime.get("/projects/demo/components/api"), { ok: true });
+  assert.equal(seen[0]?.url, "http://api.test/api/v1/plugins/runtime/projects/demo/components/api");
+  await assert.rejects(runtime.send("PUT", "/x", { replicas: "2" }), {
+    status: 400,
+    message: "replicas must be a number",
+  });
+  assert.equal(seen[1]?.body, '{"replicas":"2"}');
+});
