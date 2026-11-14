@@ -1,8 +1,11 @@
-/** The tickets stardust's Vultr plugin signs are the ones this broker accepts, and only those. */
+/**
+ * The tickets the Vultr plugin signs are the ones the broker accepts, and only
+ * those. Here, not in either package: each stays free of the other.
+ */
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { approvalClaims, signApproval } from "@stardust/plugin-cloud-vultr";
-import { verifyApproval } from "./policy.ts";
+import { verifyApproval } from "../broker/vultr/src/policy.ts";
+import { approvalClaims, signApproval } from "../plugins/cloud-vultr/src/approval.ts";
 
 const TARGET = "6f1c2a4e-8b3d-4c5e-9f7a-1b2c3d4e5f60";
 
