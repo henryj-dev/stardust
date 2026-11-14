@@ -1,7 +1,12 @@
 <script lang="ts">
 import type { AuditEventView } from "@stardust/sdk";
 
-let { events, older, showProject }: { events: AuditEventView[]; older: string | null; showProject: boolean } = $props();
+let {
+  events,
+  older,
+  showProject,
+  linkEvents = false,
+}: { events: AuditEventView[]; older: string | null; showProject: boolean; linkEvents?: boolean } = $props();
 
 const who = (e: AuditEventView) =>
   e.actor.name ?? (e.actor.kind === "anonymous" ? "(someone signing in)" : e.actor.kind);
@@ -24,7 +29,9 @@ const from = (e: AuditEventView) => e.forwardedFor ?? e.ip ?? "";
           <td>
             {who(e)}{#if e.actor.kind === "token"}<br /><small>API token</small>{/if}
           </td>
-          <td><code>{e.action}</code></td>
+          <td>
+            {#if linkEvents}<a href={`/admin/audit/${encodeURIComponent(e.id)}`}><code>{e.action}</code></a>{:else}<code>{e.action}</code>{/if}
+          </td>
           {#if showProject}<td>{e.projectId ?? ""}</td>{/if}
           <td>{e.target ?? ""}</td>
           <!-- Text, never HTML. -->

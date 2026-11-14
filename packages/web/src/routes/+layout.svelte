@@ -6,7 +6,11 @@ let { data, children } = $props();
   <header>
     <nav aria-label="Main">
       <a href="/">stardust</a>
-      {#if data.user.isAdmin}<a href="/admin/audit" data-nav-audit>Audit log</a>{/if}
+      {#if data.user.isAdmin}
+        <a href="/admin/users" data-nav-users>Users</a>
+        <a href="/admin/audit" data-nav-audit>Audit log</a>
+      {/if}
+      <a href="/account" data-nav-account>Account</a>
     </nav>
     <span data-user>{data.user.displayName || data.user.username}</span>
     <!-- Signing out changes state, so it is a POST, never a link. -->

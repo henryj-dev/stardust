@@ -41,6 +41,14 @@ plugins:
 - **Sign-in** is by username and password (`POST /api/v1/auth/login`). Ten
   failures in 15 minutes lock a username for that window. Sessions last 12
   hours.
+- **Accounts without email.** An administrator adds people on the Users page
+  (`/admin/users`), which gives each new account a one-time invitation link;
+  for a forgotten password it gives a reset link. A link works once, for 72
+  hours, and a newer one replaces it; only its hash is stored, and it is shown
+  only to the administrator who asked, to hand on. Setting a password through
+  a link ends every session and API token of the account. People change their
+  own password, and see and end their sessions, on `/account`; an
+  administrator can end all of someone's sessions and tokens at once.
 - **Roles** are per project: `maintainer` changes it, `viewer` reads it.
   Administrators do everything. Someone who is not a member gets 404 for a
   project, so project names do not leak.

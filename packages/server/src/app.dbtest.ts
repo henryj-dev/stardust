@@ -341,12 +341,18 @@ describe("every API route is guarded", () => {
     "GET /api/v1/projects",
     // Which plugins are enabled: no data, only what the dashboard may show.
     "GET /api/v1/capabilities",
+    // One's own password and sessions (tested in accounts.dbtest.ts).
+    "POST /api/v1/account/password",
+    "GET /api/v1/account/sessions",
+    "DELETE /api/v1/account/sessions/:sessionId",
   ]);
   const PUBLIC = new Set([
     "POST /api/v1/auth/login",
     "GET /api/v1/auth/methods",
     "POST /api/v1/auth/oidc/start",
     "POST /api/v1/auth/oidc/callback",
+    // The one-time link is the credential.
+    "POST /api/v1/auth/link",
   ]);
   const routes = () => [
     ...new Set(
@@ -361,7 +367,9 @@ describe("every API route is guarded", () => {
       .replace(":runId", "00000000-0000-0000-0000-000000000000")
       .replace(":job", "api")
       .replace(":layer", "_shared")
-      .replace(":name", "api");
+      .replace(":name", "api")
+      .replace(":sessionId", "00000000-0000-0000-0000-000000000000")
+      .replace(":eventId", "1");
 
   it("the list is not empty and holds the routes we know of", () => {
     const all = routes();

@@ -24,22 +24,29 @@ import {
   TargetError,
 } from "@stardust/core";
 import {
+  API_TOKEN_PREFIX,
   type AuditActor,
   type AuditInput,
   type AuditQuery,
   apiTokenFor,
   authenticate,
   cancelJob,
+  changePassword,
   createApiToken,
   createUser,
   deleteProject,
+  endAllSessions,
+  endSession,
+  getAuditEvent,
   getProject,
+  issueAccountLink,
   latestRuns,
   listApiTokens,
   listAudit,
   listDeliveries,
   listProjects,
   listRuns,
+  listSessions,
   listUsers,
   type Project,
   ProjectError,
@@ -58,6 +65,7 @@ import {
   type User,
   type UserChange,
   updateUser,
+  useAccountLink,
 } from "@stardust/db";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -240,11 +248,33 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   });
 
   // Every other /api/v1 route needs a session.
+  // Sets a password through a one-time link an administrator issued. Public:
+  // the link is the credential. A used, expired or unknown link is the same 400.
+  app.post("/api/v1/auth/link", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { token?: unknown; password?: unknown } | null;
+    if (typeof body?.token !== "string" || typeof body.password !== "string") {
+      return c.json({ error: "token and password are required" }, 400);
+    }
+    const result = await useAccountLink(globalSql, body.token, body.password);
+    if (!result.ok) {
+      return result.reason === "weak"
+        ? c.json({ error: "passwords must be 12 to 1024 characters" }, 400)
+        : c.json({ error: "this link is not valid: it was used, it expired, or it was replaced by a newer one" }, 400);
+    }
+    await auditAnonymous(c, {
+      action: result.purpose === "invite" ? "account.invite.accept" : "account.reset",
+      actor: { kind: "anonymous", userId: null, name: result.username },
+      target: result.username,
+    });
+    return c.json({ username: result.username });
+  });
+
   const PUBLIC_PATHS = new Set([
     "/api/v1/auth/login",
     "/api/v1/auth/methods",
     "/api/v1/auth/oidc/start",
     "/api/v1/auth/oidc/callback",
+    "/api/v1/auth/link",
   ]);
   app.use("/api/v1/*", async (c, next) => {
     if (PUBLIC_PATHS.has(c.req.path)) return next();
@@ -284,6 +314,79 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   };
 
   app.get("/api/v1/session", (c) => c.json({ user: c.get("user") }));
+
+  // One's own account: password and sessions.
+  app.post("/api/v1/account/password", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { current?: unknown; password?: unknown } | null;
+    if (typeof body?.current !== "string" || typeof body.password !== "string") {
+      return c.json({ error: "current and password are required" }, 400);
+    }
+    if (c.get("token").startsWith(API_TOKEN_PREFIX))
+      return c.json({ error: "change a password from a session, not with an API token" }, 403);
+    const result = await changePassword(globalSql, c.get("user").id, c.get("token"), body.current, body.password);
+    if (!result.ok) {
+      const [status, error] = {
+        "wrong-password": [403, "the current password is wrong"],
+        weak: [400, "passwords must be 12 to 1024 characters"],
+        "no-password": [409, "this account signs in through single sign-on and has no password"],
+      }[result.reason] as [400 | 403 | 409, string];
+      return c.json({ error }, status);
+    }
+    await audit(c, { action: "account.password", target: c.get("user").username });
+    return c.json({ ok: true });
+  });
+
+  app.get("/api/v1/account/sessions", async (c) =>
+    c.json({ sessions: await listSessions(globalSql, c.get("user").id, c.get("token")) }),
+  );
+
+  app.delete("/api/v1/account/sessions/:sessionId", async (c) => {
+    const id = c.req.param("sessionId");
+    if (!UUID.test(id) || !(await endSession(globalSql, c.get("user").id, id)))
+      return c.json({ error: "unknown session" }, 404);
+    await audit(c, { action: "account.session.end", target: id });
+    return c.json({ ok: true });
+  });
+
+  // An administrator: a one-time link for someone to set their password, or ending everything that acts as them.
+  app.post("/api/v1/users/:username/links", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const body = (await c.req.json().catch(() => null)) as { purpose?: unknown } | null;
+    if (body?.purpose !== "invite" && body?.purpose !== "reset")
+      return c.json({ error: "purpose must be invite or reset" }, 400);
+    const username = c.req.param("username");
+    const result = await issueAccountLink(globalSql, username, body.purpose, c.get("user").username);
+    if ("error" in result) {
+      const [status, error] = {
+        "unknown-user": [404, "unknown user, or disabled"],
+        "not-local": [409, "this account signs in through single sign-on"],
+        "has-password": [409, "this account has a password already: issue a reset link"],
+        "no-password": [409, "this account has no password yet: issue an invitation"],
+      }[result.error] as [404 | 409, string];
+      return c.json({ error }, status);
+    }
+    await audit(c, {
+      action: `user.link.${body.purpose}`,
+      target: username,
+      detail: { expiresAt: result.expiresAt.toISOString() },
+    });
+    // The token is in the answer only: the person who asked hands the link on.
+    return c.json(
+      { token: result.token, path: `/account/link/${result.token}`, expiresAt: result.expiresAt.toISOString() },
+      201,
+    );
+  });
+
+  app.post("/api/v1/users/:username/sessions/end", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const username = c.req.param("username");
+    const ended = await endAllSessions(globalSql, username);
+    if (!ended) return c.json({ error: "unknown user" }, 404);
+    await audit(c, { action: "user.sessions.end", target: username, detail: ended });
+    return c.json(ended);
+  });
 
   mountFeatures(app, services.features ?? [], {
     audit,
@@ -675,6 +778,13 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     const query = auditQuery(c.req.query());
     if (typeof query === "string") return c.json({ error: query }, 400);
     return c.json(await listAudit(sql, query));
+  });
+
+  app.get("/api/v1/audit/:eventId", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const event = await getAuditEvent(sql, c.req.param("eventId"));
+    return event ? c.json(event) : c.json({ error: "unknown event" }, 404);
   });
 
   app.get("/api/v1/projects/:id/audit", async (c) => {
