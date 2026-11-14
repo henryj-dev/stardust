@@ -15,6 +15,7 @@ export * from "./pipeline/dag.ts";
 export * from "./pipeline/definition.ts";
 export * from "./pipeline/job-status.ts";
 export * from "./pipeline/plan.ts";
+export * from "./pipeline/redact.ts";
 export type { Plugin, PluginContext, PluginManifest, PluginRegistry, PortProvider } from "./plugin.ts";
 export { createPluginRegistry, definePlugin } from "./plugin.ts";
 export * from "./ports/index.ts";

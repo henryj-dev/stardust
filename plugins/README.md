@@ -60,6 +60,7 @@ plugins compiled in (enforced by `only-bundle-loads-plugins`), and
 | `identity-oidc`    | `identity`                                           |        |
 | `logs-kube`        | `logs` (`kube`, live)                                | `kube` |
 | `logs-loki`        | `logs` (`loki`, history)                             |        |
+| `store-s3`         | `store`                                              |        |
 | `runtime`          | (feature: requires `kube`, `deployRepo`, `projects`) |        |
 | `secrets-sops-age` | `cipher`                                             |        |
 | `source-github`    | `source`                                             |        |

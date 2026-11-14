@@ -41,7 +41,7 @@ try {
   ports = await assemble({
     plugins,
     sections: config.plugins,
-    want: ["builder", "deployRepo"],
+    want: ["builder", "deployRepo", "store"],
     // Builds run as Kubernetes Jobs: a worker that builds runs in the cluster.
     platform: {
       database: databasePort(sql),
@@ -73,6 +73,7 @@ if (ports.builder && ports.deployRepo) {
     sql,
     builder: ports.builder,
     deployRepo: ports.deployRepo.repo,
+    ...(ports.store ? { store: ports.store } : {}),
     ...(ports.deployRepo.buildRevAnnotation ? { buildRevAnnotation: ports.deployRepo.buildRevAnnotation } : {}),
     log,
   });

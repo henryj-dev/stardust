@@ -4,7 +4,15 @@
  * A job succeeds only when both happened — a pushed image that the deploy
  * repository does not reference has not been delivered.
  */
-import { type Builder, bumpImage, type Logger, type RepoIO } from "@stardust/core";
+import {
+  type Builder,
+  buildLogKey,
+  bumpImage,
+  type Logger,
+  type ObjectStore,
+  type RepoIO,
+  redactLog,
+} from "@stardust/core";
 import { getProject, type Sql } from "@stardust/db";
 import type { HandlerOutcome, JobHandler } from "./loop.ts";
 
@@ -12,6 +20,8 @@ export interface BuildHandlerDeps {
   sql: Sql;
   builder: Builder;
   deployRepo: RepoIO;
+  /** Keeps each finished build's log after the cluster cleans the build up. Optional. */
+  store?: ObjectStore;
   buildRevAnnotation?: string;
   log: Logger;
   pollMs?: number;
@@ -21,6 +31,40 @@ const failed = (reason: string, extra: Record<string, unknown> = {}): HandlerOut
   result: "failed",
   detail: { reason, ...extra },
 });
+
+const MAX_KEPT = 16 * 1024 * 1024;
+
+/**
+ * Copies a finished build's log from its pod to the object store, masked,
+ * before the cluster cleans the build up. A failure here is logged and the
+ * delivery goes on: the log is a convenience, the image is the delivery.
+ */
+async function keepLog(
+  deps: BuildHandlerDeps,
+  projectId: string,
+  runId: string,
+  jobName: string,
+  signal: AbortSignal,
+): Promise<string | null> {
+  if (!deps.store || !deps.builder.logs) return null;
+  try {
+    const found = await deps.builder.logs({ runId, jobName, follow: false, signal });
+    if (found.state !== "open") return null;
+    const decoder = new TextDecoder();
+    let text = "";
+    for await (const chunk of found.body) {
+      text += decoder.decode(chunk, { stream: true });
+      if (text.length > MAX_KEPT) break;
+    }
+    text += decoder.decode();
+    const key = buildLogKey(projectId, runId, jobName);
+    await deps.store.put(key, new TextEncoder().encode(redactLog(text.slice(-MAX_KEPT))), "text/plain; charset=utf-8");
+    return key;
+  } catch (err) {
+    deps.log.warn("keeping the build log failed", { run: runId, job: jobName, error: (err as Error).message });
+    return null;
+  }
+}
 
 export function buildHandler(deps: BuildHandlerDeps): JobHandler {
   return async (job, signal) => {
@@ -59,6 +103,8 @@ export function buildHandler(deps: BuildHandlerDeps): JobHandler {
     );
     const detail: Record<string, unknown> = { buildJob: outcome.jobName };
     if (outcome.result === "cancelled") return { result: "cancelled", detail };
+    const kept = await keepLog(deps, project.id, job.runId, job.name, signal);
+    if (kept) detail.keptLog = kept;
     if (outcome.result === "failed" || !outcome.digest) {
       return failed(outcome.reason ?? "the build failed", { ...detail, logTail: outcome.logTail.slice(-4000) });
     }

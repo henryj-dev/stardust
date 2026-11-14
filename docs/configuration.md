@@ -235,6 +235,27 @@ Only a component's own pods can be read: a live pod must match one of its
 workloads' selectors, and a kept one must be named after one of its
 workloads. Logs are sent as plain text and never stored by stardust.
 
+### `store-s3`
+
+Object storage on S3, R2 or MinIO (path-style requests, Signature V4). With
+it, the worker keeps each finished build's log — credentials it recognises
+(GitHub tokens, URL passwords, `Authorization` headers, AWS key ids) masked —
+at `build-logs/<project>/<run>/<job>.log`, and the run page shows that copy
+once the cluster has cleaned the build up.
+
+```yaml
+store-s3:
+  endpoint: https://<account>.r2.cloudflarestorage.com
+  bucket: stardust
+  region: auto # R2; for S3 the bucket's region
+  accessKeyId: { env: S3_ACCESS_KEY_ID }
+  secretAccessKey: { env: S3_SECRET_ACCESS_KEY }
+  prefix: stardust/ # optional
+```
+
+Give the credentials to both the server (reads) and the worker (writes).
+Expire old logs with a bucket lifecycle rule; stardust does not delete them.
+
 ## Environment and secrets
 
 A project's runtime environment lives in env layers in the deploy repository,

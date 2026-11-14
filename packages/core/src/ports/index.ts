@@ -15,6 +15,7 @@ import type { LogSource } from "./logs.ts";
 import type { ProjectCatalog } from "./projects.ts";
 import type { DeployRepo } from "./repo.ts";
 import type { SourceHost } from "./source.ts";
+import type { ObjectStore } from "./store.ts";
 
 export interface Ports {
   /** The Kubernetes API. Provided by the composition root, not by a plugin. */
@@ -36,6 +37,8 @@ export interface Ports {
   identity: IdentityProvider;
   /** Pod log sources by name, e.g. `kube` (live) and `loki` (history). */
   logs: Record<string, LogSource>;
+  /** Object storage for what outlives the cluster, such as build logs. */
+  store: ObjectStore;
 }
 
 export type PortName = keyof Ports;
@@ -53,6 +56,7 @@ export const PORT_NAMES: readonly PortName[] = [
   "builder",
   "identity",
   "logs",
+  "store",
 ];
 
 /**
@@ -71,3 +75,4 @@ export * from "./logs.ts";
 export * from "./projects.ts";
 export * from "./repo.ts";
 export * from "./source.ts";
+export * from "./store.ts";

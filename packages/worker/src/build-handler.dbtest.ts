@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import type { KubeClient, Logger } from "@stardust/core";
-import { MemoryRepo } from "@stardust/core/testing";
+import { MemoryRepo, MemoryStore } from "@stardust/core/testing";
 import { claimJob, putProject, startRun } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
 import { createBuilder } from "@stardust/plugin-builder-buildkit";
@@ -66,7 +66,13 @@ function kube(final: Record<string, unknown>, log: string) {
   return { client, created };
 }
 
-async function runOnce(client: KubeClient, repo: MemoryRepo, event = "workflow_dispatch", projectId = "demo") {
+async function runOnce(
+  client: KubeClient,
+  repo: MemoryRepo,
+  event = "workflow_dispatch",
+  projectId = "demo",
+  keep?: { store: MemoryStore; log: string },
+) {
   const runId = await startRun(db.sql, {
     projectId,
     event,
@@ -85,13 +91,24 @@ async function runOnce(client: KubeClient, repo: MemoryRepo, event = "workflow_d
     sql: db.sql,
     // The real BuildKit builder over a fake Kubernetes API: the handler and the Job it makes, together.
     builder: createBuilder({
-      kube: { ...client, stream: () => Promise.reject(new Error("no log stream in this test")) },
+      kube: {
+        ...client,
+        stream: keep
+          ? async () => ({
+              status: 200,
+              body: (async function* () {
+                yield new TextEncoder().encode(keep.log);
+              })(),
+            })
+          : () => Promise.reject(new Error("no log stream in this test")),
+      },
       namespace: "builds",
       registry: "registry.example.com",
       cloneSecret: "clone",
       pushSecret: "push",
     }),
     deployRepo: repo,
+    ...(keep ? { store: keep.store } : {}),
     log: quiet,
     pollMs: 1,
   });
@@ -102,6 +119,41 @@ async function runOnce(client: KubeClient, repo: MemoryRepo, event = "workflow_d
 }
 
 describe("buildHandler", () => {
+  it("keeps the finished build's log, masked, where the server finds it after the pod is gone", async () => {
+    const repo = new MemoryRepo({ [`${DIR}/deployment.yaml`]: "image: registry.example.com/demo/api:old\n" });
+    const base = kube({ succeeded: 1 }, `[stardust-image-digest] ${DIGEST}\n`);
+    // The build pod has run: its build container terminated, so its log can be read.
+    const client: KubeClient = {
+      async request(method, path, body) {
+        if (path.includes("/pods?") && path.includes("stardust%2Frun"))
+          return {
+            status: 200,
+            body: JSON.stringify({
+              items: [
+                {
+                  metadata: { name: "p" },
+                  status: { containerStatuses: [{ name: "build", state: { terminated: {} } }] },
+                },
+              ],
+            }),
+          };
+        return base.client.request(method, path, body);
+      },
+    };
+    const store = new MemoryStore();
+    const token = `ghs_${"z".repeat(36)}`;
+    const { row, runId } = await runOnce(client, repo, "workflow_dispatch", "demo", {
+      store,
+      log: `step 1\ntoken ${token}\n[stardust-image-digest] ${DIGEST}\n`,
+    });
+    assert.equal(row?.status, "success");
+    const key = `build-logs/demo/${runId}/api.log`;
+    assert.equal(row?.detail.keptLog, key);
+    const kept = new TextDecoder().decode((await store.get(key)) ?? new Uint8Array());
+    assert.ok(kept.startsWith("step 1\n"), kept);
+    assert.ok(!kept.includes(token), "a token the build printed is not kept");
+  });
+
   it("builds, bumps the deploy repository to the digest, and records both", async () => {
     const repo = new MemoryRepo({ [`${DIR}/deployment.yaml`]: "image: registry.example.com/demo/api:old\n" });
     const { client, created } = kube({ succeeded: 1 }, `[stardust-image-digest] ${DIGEST}\n`);

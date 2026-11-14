@@ -1,6 +1,7 @@
 import {
   type Action,
   type BuildLogReader,
+  buildLogKey,
   bumpImage,
   can,
   type DeployRepo,
@@ -9,6 +10,7 @@ import {
   type Identity,
   type IdentityProvider,
   type Logger,
+  type ObjectStore,
   PipelineDefError,
   type PullTarget,
   pipelineDefFromComponents,
@@ -80,6 +82,8 @@ export interface Services {
   env?: EnvEditor;
   /** Sign-in through an OpenID provider. Without it only passwords work. */
   oidc?: IdentityProvider;
+  /** Kept build logs, served once the cluster has cleaned a build up. Optional. */
+  store?: ObjectStore;
   /** The deploy repository, for rolling a component back. Without it rollback answers 404. */
   deployRepo?: DeployRepo;
   /** Enabled plugins' routes and capabilities, mounted under /api/v1/plugins. */
@@ -742,7 +746,26 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     const job = run.jobs.find((j) => j.name === c.req.param("job"));
     if (!job) return c.json({ error: "unknown job" }, 404);
     const reader = services.buildLogs;
-    if (!reader) return c.json({ error: "build logs are not enabled on this server" }, 404);
+    const finished = job.status !== "queued" && job.status !== "running";
+    // The copy kept when the build finished, for when its pod is gone.
+    const kept = async (): Promise<Response | null> => {
+      if (!finished || !services.store) return null;
+      const body = await services.store.get(buildLogKey(id, run.id, job.name)).catch((err: Error) => {
+        log.warn("reading a kept build log failed", { project: id, run: run.id, job: job.name, error: err.message });
+        return null;
+      });
+      return body
+        ? new Response(body, {
+            headers: {
+              "content-type": "text/plain; charset=utf-8",
+              "x-content-type-options": "nosniff",
+              "cache-control": "no-store",
+              "x-stardust-log": "kept",
+            },
+          })
+        : null;
+    };
+    if (!reader) return (await kept()) ?? c.json({ error: "build logs are not enabled on this server" }, 404);
 
     // Ends the cluster request when the client goes away.
     const upstream = new AbortController();
@@ -770,7 +793,10 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     }
     if (found.state !== "open") {
       release();
-      const finished = job.status !== "queued" && job.status !== "running";
+      if (found.state === "none" && finished) {
+        const copy = await kept();
+        if (copy) return copy;
+      }
       if (found.state === "none" && finished)
         return c.json({ error: "this build's log is no longer available: the cluster has cleaned up the build" }, 410);
       return c.json({ error: "the build has not started printing yet" }, 409);

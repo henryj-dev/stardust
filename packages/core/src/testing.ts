@@ -7,6 +7,27 @@ import type { CommitResult, PendingCommit, RepoFile, RepoIO } from "./ports/repo
 
 export type { LogSeed } from "./ports/testing/logs.contract.ts";
 export { logSourceContract } from "./ports/testing/logs.contract.ts";
+export { objectStoreContract } from "./ports/testing/store.contract.ts";
+
+import type { ObjectStore } from "./ports/store.ts";
+
+/** Objects in memory, copied in and out. */
+export class MemoryStore implements ObjectStore {
+  readonly objects = new Map<string, { body: Uint8Array; contentType: string }>();
+  async put(key: string, body: Uint8Array, contentType: string): Promise<void> {
+    this.objects.set(key, { body: new Uint8Array(body), contentType });
+  }
+  async get(key: string): Promise<Uint8Array | null> {
+    const o = this.objects.get(key);
+    return o ? new Uint8Array(o.body) : null;
+  }
+  async list(prefix: string): Promise<string[]> {
+    return [...this.objects.keys()].filter((k) => k.startsWith(prefix)).sort();
+  }
+  async delete(key: string): Promise<void> {
+    this.objects.delete(key);
+  }
+}
 export type { RepoFixture } from "./ports/testing/repo.contract.ts";
 export { repoContract } from "./ports/testing/repo.contract.ts";
 export { guardStoreContract, sagaStoreContract } from "./ports/testing/stores.contract.ts";
