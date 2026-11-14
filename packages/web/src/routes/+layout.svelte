@@ -13,6 +13,7 @@ let { data, children } = $props();
         {#if data.capabilities.includes("databases.list")}<a href="/databases" data-nav-databases>Databases</a>{/if}
         {#if data.capabilities.includes("instances.list")}<a href="/instances" data-nav-instances>Instances</a>{/if}
         {#if data.capabilities.includes("cloud-audit.findings")}<a href="/cloud-audit" data-nav-cloud-audit>Cloud audit</a>{/if}
+        {#if data.capabilities.includes("upstream-images.checks")}<a href="/upstream-images" data-nav-upstream-images>Upstream images</a>{/if}
         <a href="/admin/audit" data-nav-audit>Audit log</a>
       {/if}
       <a href="/account" data-nav-account>Account</a>

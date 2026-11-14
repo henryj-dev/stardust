@@ -662,6 +662,12 @@ jobs:
   upstreamBuilds: [station] # external projects whose own code may be built
 ```
 
+With `upstream-images: {}`, stardust checks daily whether the image each
+mirrored component is pinned to has a newer release on Docker Hub (the newest
+stable version, else the newest version, else the newest tag), and lists them
+on `/upstream-images`. It changes nothing: move the pin by editing the
+component. Images elsewhere are listed as not checked.
+
 #### Pipeline W: `target-cf-workers`
 
 Pipeline `W`: a component released as a Cloudflare Worker instead of an image.

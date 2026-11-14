@@ -25,6 +25,7 @@ import { plugin as secretsSopsAge } from "@stardust/plugin-secrets-sops-age";
 import { plugin as sourceGithub } from "@stardust/plugin-source-github";
 import { plugin as storeS3 } from "@stardust/plugin-store-s3";
 import { plugin as targetCfWorkers } from "@stardust/plugin-target-cf-workers";
+import { plugin as upstreamImages } from "@stardust/plugin-upstream-images";
 
 export const bundledPlugins: readonly Plugin[] = [
   auditCloudflare,
@@ -48,4 +49,5 @@ export const bundledPlugins: readonly Plugin[] = [
   sourceGithub,
   storeS3,
   targetCfWorkers,
+  upstreamImages,
 ];
