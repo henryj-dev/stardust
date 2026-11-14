@@ -29,6 +29,13 @@ spec:
               value: {{ $port | quote }}
             - name: STARDUST_API_URL
               value: {{ printf "http://%s-server:%d" (include "stardust.fullname" .) (int (default 8080 .Values.config.server.port)) | quote }}
+            {{- with .Values.web.regions }}
+            # Several regions as one: each project's work goes to the region that owns it.
+            - name: STARDUST_HOME_REGION
+              value: {{ $.Values.config.region | quote }}
+            - name: STARDUST_REGIONS
+              value: {{ $parts := list }}{{ range $name, $url := . }}{{ $parts = append $parts (printf "%s=%s" $name $url) }}{{ end }}{{ join "," $parts | quote }}
+            {{- end }}
             {{- with .Values.config.server.publicUrl }}
             # Where people reach the dashboard. Without it the adapter assumes https and
             # refuses every form posted over plain http as cross-site.

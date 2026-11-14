@@ -152,7 +152,35 @@
       "$ref": "#/definitions/workload"
     },
     "web": {
-      "$ref": "#/definitions/workload"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "resources": {
+          "type": "object"
+        },
+        "regions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^https?://\\S+$"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]{0,62}$"
+          }
+        }
+      }
     },
     "serviceAccount": {
       "type": "object",

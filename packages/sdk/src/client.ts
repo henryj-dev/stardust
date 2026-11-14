@@ -1,3 +1,5 @@
+import { ApiError } from "./errors.ts";
+import { type RegionOptions, regionFetch } from "./regions.ts";
 /**
  * HTTP client for the stardust API.
  *
@@ -15,6 +17,11 @@ export interface ClientOptions {
    * someone else (the dashboard for a browser). The server does not verify them.
    */
   readonly forward?: { readonly forwardedFor?: string; readonly userAgent?: string };
+  /**
+   * Several regions' stardust as one: each project's requests go to the region
+   * that owns it, shared ones to `home` (or the next that answers).
+   */
+  readonly regions?: RegionOptions;
 }
 
 /** One entry of the audit log: who did what. Details name things, never secret values. */
@@ -158,15 +165,7 @@ export interface ProjectListItem extends ProjectView {
 /** What to pull: the default branch when empty, or one branch, tag or commit. */
 export type PullTarget = { branch: string } | { tag: string } | { sha: string } | Record<string, never>;
 
-export class ApiError extends Error {
-  readonly status: number;
-
-  constructor(status: number, message: string) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-  }
-}
+export { ApiError } from "./errors.ts";
 
 export interface SessionUser {
   id: string;
@@ -366,8 +365,10 @@ export interface Client {
 }
 
 export function createClient(options: ClientOptions): Client {
-  const doFetch = options.fetch ?? fetch;
   const base = options.baseUrl.replace(/\/+$/, "");
+  const doFetch = options.regions
+    ? regionFetch(options.fetch ?? fetch, base, options.regions)
+    : (options.fetch ?? fetch);
   const headers = (): Record<string, string> => ({
     ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
     ...(options.forward?.forwardedFor ? { "x-forwarded-for": options.forward.forwardedFor } : {}),

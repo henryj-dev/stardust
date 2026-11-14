@@ -33,7 +33,10 @@ let { data } = $props();
       <tbody>
         {#each data.projects as project (project.id)}
           <tr data-project={project.id}>
-            <td><a href={`/projects/${encodeURIComponent(project.id)}`}>{project.name}</a></td>
+            <td>
+              <a href={`/projects/${encodeURIComponent(project.id)}`}>{project.name}</a>
+              {#if project.region}<small data-region={project.region}>{project.region}{project.regionUnreachable ? " (not answering)" : ""}</small>{/if}
+            </td>
             <td>{project.githubRepo ?? "—"}</td>
             {#if project.lastRun}
               <td>
