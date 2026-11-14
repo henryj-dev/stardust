@@ -106,6 +106,16 @@ pull request.
   session (401) and a user without a role (403, or 404 for a project), so a
   new route without a check fails CI (`packages/server/src/app.dbtest.ts`).
 - Projects a user cannot read answer 404, so their names do not leak.
+- Plugin routes live under `/api/v1/plugins/<plugin>/` behind the same
+  sign-in. A plugin cannot declare a route without one of its own
+  permissions (`<plugin>:<verb>`, granted to admins or to anyone signed in),
+  and every route that changes something must name an audit action; both are
+  checked before the server starts. The permission is checked before the
+  plugin sees the request, and a failing plugin answers 500 without its error
+  (`packages/server/src/features.dbtest.ts`).
+- A plugin's migrations may only create, change or write tables named after
+  it (`<plugin>_*`), so a plugin cannot alter stardust's own tables or another
+  plugin's (`migrationProblems` in `packages/core/src/feature.ts`).
 - Passwords: scrypt, 12 to 1024 characters. Ten failures in 15 minutes lock
   the username; each attempt is recorded before the password is checked, so
   parallel guesses get no more tries than sequential ones. API bodies are

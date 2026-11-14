@@ -3,6 +3,7 @@ import {
   type BuildLogReader,
   can,
   decideAccess,
+  type Feature,
   type Identity,
   type IdentityProvider,
   type Logger,
@@ -50,6 +51,7 @@ import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import { changeEnv, checkChange, EnvConflict, type EnvEditor, EnvInputError, readEnv } from "./env.ts";
 import type { RunEvents } from "./events.ts";
+import { mountFeatures } from "./features.ts";
 
 export interface AppInfo {
   readonly version: string;
@@ -67,6 +69,8 @@ export interface Services {
   env?: EnvEditor;
   /** Sign-in through an OpenID provider. Without it only passwords work. */
   oidc?: IdentityProvider;
+  /** Enabled plugins' routes and capabilities, mounted under /api/v1/plugins. */
+  features?: readonly Feature[];
   /** Interval of SSE heartbeats, so proxies keep idle streams open. */
   heartbeatMs?: number;
   log?: Logger;
@@ -251,6 +255,8 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   };
 
   app.get("/api/v1/session", (c) => c.json({ user: c.get("user") }));
+
+  mountFeatures(app, services.features ?? [], { audit, log });
 
   app.post("/api/v1/auth/logout", async (c) => {
     await signOut(sql, c.get("token"));

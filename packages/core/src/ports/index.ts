@@ -6,6 +6,7 @@
  */
 import type { Builder } from "./builder.ts";
 import type { SecretCipher } from "./cipher.ts";
+import type { Database } from "./database.ts";
 import type { IdentityProvider } from "./identity.ts";
 import type { KubeStreamClient } from "./kube.ts";
 import type { DeployRepo } from "./repo.ts";
@@ -14,6 +15,8 @@ import type { SourceHost } from "./source.ts";
 export interface Ports {
   /** The Kubernetes API. Provided by the composition root, not by a plugin. */
   kube: KubeStreamClient;
+  /** stardust's own database. Provided by the composition root. */
+  database: Database;
   source: SourceHost;
   deployRepo: DeployRepo;
   cipher: SecretCipher;
@@ -23,7 +26,15 @@ export interface Ports {
 
 export type PortName = keyof Ports;
 
-export const PORT_NAMES: readonly PortName[] = ["kube", "source", "deployRepo", "cipher", "builder", "identity"];
+export const PORT_NAMES: readonly PortName[] = [
+  "kube",
+  "database",
+  "source",
+  "deployRepo",
+  "cipher",
+  "builder",
+  "identity",
+];
 
 /**
  * Ports that more than one plugin may provide at once, each under its own
@@ -34,6 +45,7 @@ export const MULTI_PORTS: ReadonlySet<PortName> = new Set<PortName>();
 
 export * from "./builder.ts";
 export * from "./cipher.ts";
+export * from "./database.ts";
 export * from "./identity.ts";
 export * from "./kube.ts";
 export * from "./repo.ts";

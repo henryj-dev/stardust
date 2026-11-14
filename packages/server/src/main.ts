@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { bundledPlugins } from "@stardust/bundle";
 import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/config";
-import { assemble, createPluginRegistry, type Logger, type Ports } from "@stardust/core";
-import { connect, ensureBootstrapAdmin, migrate } from "@stardust/db";
+import { assemble, buildFeatures, createPluginRegistry, type Feature, type Logger, type Ports } from "@stardust/core";
+import { connect, databasePort, ensureBootstrapAdmin, migrate, migratePlugin, type Sql } from "@stardust/db";
 import { inClusterClient } from "@stardust/kube";
 import { createApp, type Services } from "./app.ts";
 import { RunEvents } from "./events.ts";
@@ -19,17 +19,22 @@ const log: Logger = {
 
 let config: StardustConfig;
 let ports: Partial<Ports>;
+let features: Feature[];
+let sql: Sql;
 try {
   config = await loadConfig(configPath);
+  sql = connect(config.database.url, { max: 8 });
+  const plugins = createPluginRegistry(bundledPlugins).resolve(config.plugins);
   ports = await assemble({
-    plugins: createPluginRegistry(bundledPlugins).resolve(config.plugins),
+    plugins,
     sections: config.plugins,
     want: ["source", "identity", "builder", "deployRepo", "cipher"],
-    platform: kube(),
+    platform: { database: databasePort(sql), ...kube() },
     resolveSecret: resolveSecretRef,
     log,
     publicUrl: config.server.publicUrl,
   });
+  features = buildFeatures(plugins, config.plugins, ports, log);
 } catch (err) {
   console.error((err as Error).message);
   process.exit(1);
@@ -46,8 +51,8 @@ function kube(): Partial<Ports> {
   return {};
 }
 
-const sql = connect(config.database.url, { max: 8 });
 await migrate(sql);
+for (const feature of features) await migratePlugin(sql, feature.plugin, await feature.migrations());
 
 if (config.server.bootstrapAdmin) {
   const { username, password } = config.server.bootstrapAdmin;
@@ -65,6 +70,7 @@ if (ports.source) {
     sql,
     resolveTarget: (repo, target) => (ports.source as NonNullable<Ports["source"]>).resolveTarget(repo, target),
     ...(ports.identity ? { oidc: ports.identity } : {}),
+    features,
     ...buildLogServices(),
     ...envServices(),
   };

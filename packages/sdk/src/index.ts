@@ -2,6 +2,7 @@ export type {
   AuditEventView,
   AuditFilter,
   AuditPage,
+  Capabilities,
   Client,
   ClientOptions,
   EnvChangeInput,

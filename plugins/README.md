@@ -16,6 +16,15 @@ A plugin:
   A plugin that cannot work without a port lists it in `requires`, and
   start-up stops naming it when it is missing.
 
+A feature plugin may also declare, all checked when it is defined or mounted:
+
+- `permissions`: `<plugin>:<verb>`, granted to `admins` or `signed-in`;
+- `routes(context)`: served under `/api/v1/plugins/<plugin>`, each with one
+  of its permissions, and an audit action for every change;
+- `schedules`: run by one worker at a time, at most once per interval;
+- `migrations()`: its own tables, named `<plugin>_*`;
+- `capabilities`: what the dashboard may show, `<plugin>.<what>`.
+
 Rules that do no IO (CAS commits, image bumps, env rendering) live in core,
 next to the port they use, so every implementation of a port shares them.
 

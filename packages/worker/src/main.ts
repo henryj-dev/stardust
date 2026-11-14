@@ -1,12 +1,13 @@
 import { hostname } from "node:os";
 import { bundledPlugins } from "@stardust/bundle";
 import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/config";
-import { assemble, createPluginRegistry, type Logger, type Ports } from "@stardust/core";
-import { connect, migrate } from "@stardust/db";
+import { assemble, buildFeatures, createPluginRegistry, type Feature, type Logger, type Ports } from "@stardust/core";
+import { connect, databasePort, migrate, migratePlugin, type Sql } from "@stardust/db";
 import { inClusterClient } from "@stardust/kube";
 import { buildHandler } from "./build-handler.ts";
 import { startHousekeeping } from "./housekeeping.ts";
 import { type JobHandler, runWorker } from "./loop.ts";
+import { startSchedules } from "./schedules.ts";
 
 const configPath = process.env.STARDUST_CONFIG ?? "stardust.yaml";
 
@@ -19,25 +20,33 @@ const log: Logger = {
 
 let config: StardustConfig;
 let ports: Partial<Ports>;
+let features: Feature[];
+let sql: Sql;
 try {
   config = await loadConfig(configPath);
+  sql = connect(config.database.url, { max: 4 });
+  const plugins = createPluginRegistry(bundledPlugins).resolve(config.plugins);
   ports = await assemble({
-    plugins: createPluginRegistry(bundledPlugins).resolve(config.plugins),
+    plugins,
     sections: config.plugins,
     want: ["builder", "deployRepo"],
     // Builds run as Kubernetes Jobs: a worker that builds runs in the cluster.
-    platform: config.plugins["builder-buildkit"] && config.plugins["gitops-git"] ? { kube: inClusterClient() } : {},
+    platform: {
+      database: databasePort(sql),
+      ...(config.plugins["builder-buildkit"] && config.plugins["gitops-git"] ? { kube: inClusterClient() } : {}),
+    },
     resolveSecret: resolveSecretRef,
     log,
     publicUrl: config.server.publicUrl,
   });
+  features = buildFeatures(plugins, config.plugins, ports, log);
 } catch (err) {
   console.error((err as Error).message);
   process.exit(1);
 }
 
-const sql = connect(config.database.url, { max: 4 });
 await migrate(sql);
+for (const feature of features) await migratePlugin(sql, feature.plugin, await feature.migrations());
 
 let handler: JobHandler;
 if (ports.builder && ports.deployRepo) {
@@ -69,5 +78,6 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 const workerId = `${hostname()}:${process.pid}`;
 console.log(`stardust worker started (${workerId})`);
 startHousekeeping({ sql, log, auditRetentionDays: config.audit.retentionDays, signal: stop.signal });
+startSchedules({ sql, features, holder: workerId, log, signal: stop.signal });
 await runWorker({ sql, workerId, handler, log, signal: stop.signal });
 await sql.end({ timeout: 5 });

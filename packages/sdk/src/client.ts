@@ -175,6 +175,11 @@ export type LoginResult =
   | { ok: true; token: string; user: SessionUser }
   | { ok: false; reason: "invalid" | "locked"; message: string };
 
+/** The enabled plugins, by name, and what each adds (e.g. `runtime.restart`). */
+export interface Capabilities {
+  plugins: Array<{ name: string; capabilities: string[] }>;
+}
+
 export interface Client {
   health(): Promise<{ status: string; version: string }>;
   /** Signs in with a username and password. Wrong credentials and lockout are results, not errors. */
@@ -191,6 +196,8 @@ export interface Client {
   checkToken(): Promise<boolean>;
   /** Who the token belongs to, or null when it is not accepted (401). */
   session(): Promise<SessionUser | null>;
+  /** The enabled plugins and what each adds, so a dashboard shows only what this server has. */
+  capabilities(): Promise<Capabilities>;
   runs(projectId: string): Promise<RunView[]>;
   /** One run with its jobs; an ApiError with status 404 when the project or the run is unknown. */
   run(projectId: string, runId: string): Promise<RunView>;
@@ -288,6 +295,9 @@ export function createClient(options: ClientOptions): Client {
       if (!res.ok) throw new ApiError(res.status, `POST /api/v1/auth/login failed: ${res.status}`);
       const body = (await res.json()) as { token: string; user: SessionUser };
       return { ok: true, token: body.token, user: body.user };
+    },
+    async capabilities() {
+      return (await (await get("/api/v1/capabilities")).json()) as Capabilities;
     },
     async authMethods() {
       return (await (await get("/api/v1/auth/methods")).json()) as {

@@ -163,3 +163,18 @@ it("reads one run, and relays a build log's response whatever its status", async
     signal: true,
   });
 });
+
+it("reads the enabled plugins and their capabilities", async () => {
+  const plugins = [{ name: "runtime", capabilities: ["runtime.restart"] }];
+  let asked = "";
+  const client = createClient({
+    baseUrl: "http://api.test",
+    token: "t0k",
+    fetch: async (input) => {
+      asked = String(input);
+      return Response.json({ plugins });
+    },
+  });
+  assert.deepEqual(await client.capabilities(), { plugins });
+  assert.equal(asked, "http://api.test/api/v1/capabilities");
+});
