@@ -58,7 +58,14 @@ export interface AppInfo {
 }
 
 export interface Services {
+  /** This region's database: runs and jobs, and reads of global tables that decide nothing about access. */
   sql: Sql;
+  /**
+   * The global database: accounts, sessions, roles, API tokens, projects and
+   * the audit log are written here, and every decision about access reads
+   * here. Without it, the regional database is also the global one.
+   */
+  globalSql?: Sql;
   /** The commit a manual run builds, from the source host. */
   resolveTarget: (repo: string, target: PullTarget) => Promise<ResolvedTarget>;
   /** Live run updates. Without it the events endpoint is not served. */
@@ -87,13 +94,16 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   const app = new Hono<Env>();
   app.get("/healthz", (c) => c.json({ status: "ok", version: info.version }));
   if (!services) return app;
+  // Two handles (see Services.globalSql): accounts, sessions, roles and every
+  // write to a global table use the global one; the rest read locally.
   const { sql } = services;
+  const globalSql = services.globalSql ?? sql;
   const log = services.log ?? silent;
 
   // Adds an audit event; also for requests that have no session yet (signing in).
   const auditAnonymous = async (c: Context, event: AuditInput) => {
     try {
-      await recordAudit(sql, { ...clientOf(c), ...event });
+      await recordAudit(globalSql, { ...clientOf(c), ...event });
     } catch (err) {
       log.error("writing an audit event failed", { action: event.action, error: (err as Error).message });
     }
@@ -110,7 +120,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (typeof body?.username !== "string" || typeof body.password !== "string") {
       return c.json({ error: "username and password are required" }, 400);
     }
-    const result = await signIn(sql, body.username, body.password);
+    const result = await signIn(globalSql, body.username, body.password);
     if (!result.ok) {
       // Only an existing username is logged: people type passwords into the username field.
       log.warn("sign-in refused", {
@@ -145,7 +155,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   app.post("/api/v1/auth/oidc/start", async (c) => {
     if (!services.oidc) return c.json({ error: "OpenID sign-in is not configured" }, 404);
     const { url, pending } = await (await services.oidc.client()).start();
-    await savePendingLogin(sql, pending);
+    await savePendingLogin(globalSql, pending);
     return c.json({ url, state: pending.state });
   });
 
@@ -161,7 +171,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       return c.json({ error: `the provider refused: ${query.get("error_description") ?? query.get("error")}` }, 401);
     }
     if (query.get("state") !== body.state) return c.json({ error: "this sign-in was not started here" }, 401);
-    const pending = await takePendingLogin(sql, body.state);
+    const pending = await takePendingLogin(globalSql, body.state);
     if (!pending) return c.json({ error: "this sign-in expired or was already used; start again" }, 401);
     let identity: Identity;
     try {
@@ -181,7 +191,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       });
       return c.json({ error: "your account is not allowed to use stardust" }, 403);
     }
-    const result = await signInWithIdentity(sql, identity, {
+    const result = await signInWithIdentity(globalSql, identity, {
       autoCreate: oidc.autoCreate,
       isAdmin: oidc.rules.adminGroups ? access.isAdmin : null,
     });
@@ -221,7 +231,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (PUBLIC_PATHS.has(c.req.path)) return next();
 
     const token = bearer(c.req.header("authorization"));
-    const user = token ? await authenticate(sql, token) : null;
+    const user = token ? await authenticate(globalSql, token) : null;
     if (!user) return c.json({ error: "unauthorized" }, 401);
     c.set("user", user);
     c.set("token", token);
@@ -231,7 +241,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   /** Null when allowed; otherwise the response to send. Unreadable projects are 404, not 403. */
   const deny = async (c: Context<Env>, action: Action, projectId?: string): Promise<Response | null> => {
     const user = c.get("user");
-    const role = projectId ? await projectRole(sql, user.id, projectId) : null;
+    const role = projectId ? await projectRole(globalSql, user.id, projectId) : null;
     if (can(user, action, role)) return null;
     if (projectId && !can(user, "project:read", role)) return c.json({ error: "unknown project" }, 404);
     return c.json({ error: "forbidden" }, 403);
@@ -240,7 +250,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   /** Who is asking, as the audit log names them. */
   const actorOf = async (c: Context<Env>): Promise<AuditActor> => {
     const user = c.get("user");
-    const token = await apiTokenFor(sql, c.get("token"));
+    const token = await apiTokenFor(globalSql, c.get("token"));
     return token
       ? { kind: "token", userId: user.id, name: user.username, tokenId: token.id }
       : { kind: "user", userId: user.id, name: user.username };
@@ -259,13 +269,13 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   mountFeatures(app, services.features ?? [], { audit, log });
 
   app.post("/api/v1/auth/logout", async (c) => {
-    await signOut(sql, c.get("token"));
+    await signOut(globalSql, c.get("token"));
     await audit(c, { action: "auth.logout" });
     return c.json({ ok: true });
   });
 
   // Users manage their own API tokens; a token acts with its user's roles.
-  app.get("/api/v1/tokens", async (c) => c.json({ tokens: await listApiTokens(sql, c.get("user").id) }));
+  app.get("/api/v1/tokens", async (c) => c.json({ tokens: await listApiTokens(globalSql, c.get("user").id) }));
 
   app.post("/api/v1/tokens", async (c) => {
     const body = (await c.req.json().catch(() => null)) as { name?: unknown; expiresInDays?: unknown } | null;
@@ -276,7 +286,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       return c.json({ error: "expiresInDays must be a whole number of days from 1 to 3650, or null" }, 400);
     }
     try {
-      const created = await createApiToken(sql, c.get("user").id, name, days as number | null);
+      const created = await createApiToken(globalSql, c.get("user").id, name, days as number | null);
       log.info("API token created", { username: c.get("user").username, name });
       await audit(c, { action: "token.create", target: created.id, detail: { name, expiresInDays: days } });
       return c.json(created, 201);
@@ -287,7 +297,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   });
 
   app.delete("/api/v1/tokens/:tokenId", async (c) => {
-    if (!(await revokeApiToken(sql, c.get("user").id, c.req.param("tokenId")))) {
+    if (!(await revokeApiToken(globalSql, c.get("user").id, c.req.param("tokenId")))) {
       return c.json({ error: "unknown token" }, 404);
     }
     await audit(c, { action: "token.revoke", target: c.req.param("tokenId") });
@@ -311,7 +321,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       return c.json({ error: "username and a password or an oidc identity are required" }, 400);
     }
     try {
-      const user = await createUser(sql, {
+      const user = await createUser(globalSql, {
         username: body.username,
         ...(typeof body.password === "string" ? { password: body.password } : {}),
         ...(oidc ? { oidc } : {}),
@@ -358,7 +368,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
         change.oidc = { issuer: o.issuer, subject: o.subject };
       else return c.json({ error: "oidc must be {issuer, subject} or null" }, 400);
     }
-    const result = await updateUser(sql, c.req.param("username"), change);
+    const result = await updateUser(globalSql, c.req.param("username"), change);
     if (!result.ok) {
       const [status, error] = {
         "unknown-user": [404, "unknown user"],
@@ -393,9 +403,9 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       return c.json({ error: "role must be maintainer, viewer or null" }, 400);
     }
     if (!(await getProject(sql, c.req.param("id")))) return c.json({ error: "unknown project" }, 404);
-    const [user] = await sql<{ id: string }[]>`SELECT id FROM users WHERE username = ${c.req.param("username")}`;
+    const [user] = await globalSql<{ id: string }[]>`SELECT id FROM users WHERE username = ${c.req.param("username")}`;
     if (!user) return c.json({ error: "unknown user" }, 404);
-    await setProjectRole(sql, c.req.param("id"), user.id, role);
+    await setProjectRole(globalSql, c.req.param("id"), user.id, role);
     await audit(c, {
       action: "project.member.set",
       projectId: c.req.param("id"),
@@ -424,7 +434,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     };
     const existed = (await getProject(sql, project.id)) !== null;
     try {
-      await putProject(sql, project);
+      await putProject(globalSql, project);
     } catch (err) {
       if (err instanceof ProjectError || err instanceof PipelineDefError) return c.json({ error: err.message }, 400);
       throw err;
@@ -496,7 +506,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (!services.env) return c.json({ error: "editing env is not enabled on this server" }, 404);
     try {
       const { layers } = await readEnv(services.env, project);
-      const role = await projectRole(sql, c.get("user").id, id);
+      const role = await projectRole(globalSql, c.get("user").id, id);
       return c.json({ layers, canEdit: can(c.get("user"), "project:write", role) });
     } catch (err) {
       log.warn("reading env failed", { project: id, error: (err as Error).message });
@@ -551,7 +561,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   app.get("/api/v1/users", async (c) => {
     const denied = await deny(c, "admin");
     if (denied) return denied;
-    return c.json({ users: await listUsers(sql) });
+    return c.json({ users: await listUsers(globalSql) });
   });
 
   // A run: someone with write access asks for a commit to be built and

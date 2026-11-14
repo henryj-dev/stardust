@@ -100,10 +100,15 @@
     },
     "config": {
       "type": "object",
-      "required": ["version", "server", "database"],
+      "required": ["version", "region", "server", "database"],
       "properties": {
         "version": {
           "const": 1
+        },
+        "region": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,62}$",
+          "description": "The region this installation serves. Required: change the example."
         },
         "server": {
           "type": "object",

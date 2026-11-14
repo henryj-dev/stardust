@@ -11,6 +11,12 @@ export const secretRef = z.union([
 
 export const configSchema = z.strictObject({
   version: z.literal(1),
+  /**
+   * The region this installation serves: one installation, one cluster, one
+   * region. Records this installation owns carry it. There is no default, so
+   * two installations cannot both silently be the same region.
+   */
+  region: z.string().regex(/^[a-z][a-z0-9-]{0,62}$/, "must be a lower-case name such as eu-west or office"),
   server: z.strictObject({
     host: z.string().default("0.0.0.0"),
     port: z.number().int().min(1).max(65535).default(8080),

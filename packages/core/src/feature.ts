@@ -22,6 +22,8 @@ export interface Permission {
 export interface FeatureContext {
   /** The plugin's section of stardust.yaml, already validated. */
   readonly config: Readonly<Record<string, unknown>>;
+  /** The region this installation serves (`region` in stardust.yaml). */
+  readonly region: string;
   readonly ports: Readonly<Partial<Ports>>;
   readonly log: Logger;
 }
@@ -73,9 +75,18 @@ export interface Schedule {
   run(context: FeatureContext & { signal: AbortSignal }): Promise<void>;
 }
 
+/**
+ * Where a table lives once stardust runs in several regions: `global` tables
+ * (accounts, definitions) have one primary every region writes to;
+ * `regional` tables (what happened here) live in each region's own database.
+ */
+export type TableScope = "global" | "regional";
+
 export interface Migration {
   /** `NNNN_<words>.sql`, applied in name order. */
   name: string;
+  /** Which database it runs in. One migration, one scope. */
+  scope: TableScope;
   sql: string;
 }
 
@@ -159,6 +170,9 @@ export function migrationProblems(plugin: string, migrations: readonly Migration
     if (!MIGRATION_NAME.test(m.name)) problems.push(`migration "${m.name}" must be named NNNN_<words>.sql`);
     if (seen.has(m.name)) problems.push(`migration "${m.name}" is declared twice`);
     seen.add(m.name);
+    if (m.scope !== "global" && m.scope !== "regional") {
+      problems.push(`migration "${m.name}" must say its scope: global or regional`);
+    }
     const text = m.sql.replace(/--[^\n]*/g, "");
     for (const match of text.matchAll(TABLE)) {
       const table = (match[2] ?? "").toLowerCase();

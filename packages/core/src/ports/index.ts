@@ -17,8 +17,10 @@ import type { SourceHost } from "./source.ts";
 export interface Ports {
   /** The Kubernetes API. Provided by the composition root, not by a plugin. */
   kube: KubeStreamClient;
-  /** stardust's own database. Provided by the composition root. */
+  /** This region's database (regional tables). Provided by the composition root. */
   database: Database;
+  /** The global database (global tables). The same as `database` until there are several regions. */
+  globalDatabase: Database;
   /** Where sagas are kept between steps. Provided by the composition root. */
   sagas: SagaStore;
   /** Memory for the guards (used tickets, recent reveals). Provided by the composition root. */
@@ -35,6 +37,7 @@ export type PortName = keyof Ports;
 export const PORT_NAMES: readonly PortName[] = [
   "kube",
   "database",
+  "globalDatabase",
   "sagas",
   "guards",
   "source",

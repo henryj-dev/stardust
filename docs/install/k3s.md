@@ -170,6 +170,7 @@ spec:
     builds: { enabled: true, namespace: stardust-builds }
     config:
       version: 1
+      region: eu-west # lower-case, required, no default
       server:
         port: 8080
         publicUrl: https://stardust.example.com

@@ -130,6 +130,8 @@ extraEnvFrom:
       name: stardust-delivery
 config:
   version: 1
+  # The region this installation serves. Change it: there is no default.
+  region: example
   server:
     port: 8080
     publicUrl: http://localhost:8080

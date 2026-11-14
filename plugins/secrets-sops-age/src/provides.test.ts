@@ -12,6 +12,7 @@ const context = (config: Record<string, unknown>, ports: Partial<Ports> = {}): P
   resolveSecret: async (_ref, at) => `secret for ${at}`,
   log: { debug() {}, info: (m) => lines.push(m), warn: (m) => lines.push(m), error: (m) => lines.push(m) },
   publicUrl: "https://stardust.example.com",
+  region: "test",
   ports,
 });
 

@@ -51,6 +51,13 @@ the previous pods keep running until the new ones are ready.
 
 ## Upgrade notes
 
+- **0.12.x → 0.13.0**: **add `region` to `stardust.yaml`** (under Helm:
+  `config.region`), a lower-case name such as `eu-west`. It has no default:
+  the server and the worker refuse to start without it and name the key.
+  Choose it once; records will carry it when stardust runs in several regions.
+  Migrations add `schedule_runs`, `saga_runs`, `guard_used` and
+  `guard_events`. Both processes now validate every plugin section at
+  start-up, so a typo in a section the process does not use stops it too.
 - **0.6.x → 0.7.0**: no configuration changes. Webhooks are gone: runs start
   only when asked for ("Pull and deliver", or `POST /api/v1/projects/<id>/runs`).
   `POST /webhooks/github/<project>` and `POST /api/v1/projects/<id>/plan`

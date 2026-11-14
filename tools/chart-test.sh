@@ -166,6 +166,8 @@ reject unknown-value "additional properties 'nope' not allowed" \
   --set database.existingSecret=db --set nope=1
 reject malformed-digest "image.server.digest" \
   --set database.existingSecret=db --set image.server.digest=latest
+reject malformed-region "config.region" \
+  --set database.existingSecret=db --set "config.region=EU West"
 
 if [ "$failures" -ne 0 ]; then
   echo "$failures chart test(s) failed" >&2

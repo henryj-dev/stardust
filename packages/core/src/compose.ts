@@ -27,6 +27,7 @@ export interface AssembleOptions {
   resolveSecret: PluginContext["resolveSecret"];
   log: Logger;
   publicUrl: string;
+  region: string;
   /** Ports several plugins may provide under instance names. Defaults to MULTI_PORTS. */
   multiPorts?: ReadonlySet<PortName>;
 }
@@ -112,6 +113,7 @@ export async function assemble(options: AssembleOptions): Promise<Partial<Ports>
         resolveSecret: options.resolveSecret,
         log: options.log,
         publicUrl: options.publicUrl.replace(/\/+$/, ""),
+        region: options.region,
         ports: { ...ports } as Partial<Ports>,
       })) as AnyPorts;
       for (const port of Object.keys(made) as PortName[]) {
@@ -157,6 +159,7 @@ export function buildFeatures(
   sections: Readonly<Record<string, unknown>>,
   ports: Partial<Ports>,
   log: Logger,
+  region: string,
 ): Feature[] {
   const problems: string[] = [];
   const out: Feature[] = [];
@@ -164,6 +167,7 @@ export function buildFeatures(
     const name = plugin.manifest.name;
     const context: FeatureContext = {
       config: (sections[name] ?? {}) as Record<string, unknown>,
+      region,
       ports,
       log,
     };

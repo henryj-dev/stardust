@@ -5,31 +5,54 @@
 import { type Database, type Migration, migrationProblems } from "@stardust/core";
 import type { Sql, TransactionSql } from "postgres";
 
+/** The two databases: this region's, and the global one (the same one until there are several regions). */
+export interface Databases {
+  regional: Sql;
+  global: Sql;
+}
+
 /**
- * Applies a plugin's pending migrations after stardust's, under the same lock.
- * They are recorded as `<plugin>/<name>`, so a plugin's numbering is its own.
+ * Applies a plugin's pending migrations after stardust's, each in the
+ * database of its scope, under the same lock. They are recorded as
+ * `<plugin>/<name>` in that database, so a plugin's numbering is its own.
  */
-export async function migratePlugin(sql: Sql, plugin: string, migrations: readonly Migration[]): Promise<string[]> {
+export async function migratePlugin(
+  databases: Databases,
+  plugin: string,
+  migrations: readonly Migration[],
+): Promise<string[]> {
   const problems = migrationProblems(plugin, migrations);
   if (problems.length > 0) throw new Error(`plugin ${plugin}: ${problems.join("; ")}`);
   const ordered = [...migrations].sort((a, b) => (a.name < b.name ? -1 : 1));
-  return sql.begin(async (tx) => {
-    await tx`SELECT pg_advisory_xact_lock(hashtext('stardust:migrate'))`;
-    const done = new Set(
-      (await tx<{ name: string }[]>`SELECT name FROM schema_migrations WHERE name LIKE ${`${plugin}/%`}`).map(
-        (r) => r.name,
-      ),
+  const applied: string[] = [];
+  const targets: Sql[] =
+    databases.global === databases.regional ? [databases.regional] : [databases.global, databases.regional];
+  for (const sql of targets) {
+    const mine = ordered.filter((m) =>
+      targets.length === 1 ? true : sql === databases.global ? m.scope === "global" : m.scope === "regional",
     );
-    const applied: string[] = [];
-    for (const m of ordered) {
-      const name = `${plugin}/${m.name}`;
-      if (done.has(name)) continue;
-      await tx.unsafe(m.sql);
-      await tx`INSERT INTO schema_migrations (name) VALUES (${name})`;
-      applied.push(name);
-    }
-    return applied;
-  });
+    if (mine.length === 0) continue;
+    applied.push(
+      ...(await sql.begin(async (tx) => {
+        await tx`SELECT pg_advisory_xact_lock(hashtext('stardust:migrate'))`;
+        const done = new Set(
+          (await tx<{ name: string }[]>`SELECT name FROM schema_migrations WHERE name LIKE ${`${plugin}/%`}`).map(
+            (r) => r.name,
+          ),
+        );
+        const now: string[] = [];
+        for (const m of mine) {
+          const name = `${plugin}/${m.name}`;
+          if (done.has(name)) continue;
+          await tx.unsafe(m.sql);
+          await tx`INSERT INTO schema_migrations (name) VALUES (${name})`;
+          now.push(name);
+        }
+        return now;
+      })),
+    );
+  }
+  return applied;
 }
 
 /** The `database` port over a postgres.js client. Nested transactions become savepoints. */

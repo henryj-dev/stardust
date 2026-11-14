@@ -35,6 +35,8 @@ export interface PluginContext {
   readonly log: Logger;
   /** The dashboard's public URL, without a trailing slash. */
   readonly publicUrl: string;
+  /** The region this installation serves (`region` in stardust.yaml). */
+  readonly region: string;
   /** Ports built before this plugin's: at least everything in `needs`. */
   readonly ports: Readonly<Partial<Ports>>;
 }

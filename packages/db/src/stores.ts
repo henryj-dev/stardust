@@ -46,10 +46,14 @@ export function sagaStore(sql: Sql): SagaStore {
   };
 }
 
-export function guardStore(sql: Sql): GuardStore {
+/**
+ * Used ids are global, so an approval ticket cannot be used once in each
+ * region; counted events are regional.
+ */
+export function guardStore(sql: Sql, globalSql: Sql = sql): GuardStore {
   return {
     async useOnce(scope, id, expiresAt) {
-      const rows = await sql`
+      const rows = await globalSql`
         INSERT INTO guard_used (scope, id, expires_at) VALUES (${scope}, ${id}, ${expiresAt})
         ON CONFLICT DO NOTHING RETURNING id`;
       return rows.length === 1;
@@ -66,8 +70,8 @@ export function guardStore(sql: Sql): GuardStore {
 }
 
 /** Forgets used ids past their expiry and events older than a day. */
-export async function purgeGuards(sql: Sql): Promise<number> {
-  const used = await sql`DELETE FROM guard_used WHERE expires_at < now()`;
+export async function purgeGuards(sql: Sql, globalSql: Sql = sql): Promise<number> {
+  const used = await globalSql`DELETE FROM guard_used WHERE expires_at < now()`;
   const events = await sql`DELETE FROM guard_events WHERE at < now() - interval '1 day'`;
   return used.count + events.count;
 }
