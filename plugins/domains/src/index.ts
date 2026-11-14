@@ -102,7 +102,7 @@ export async function refreshRdap(
     try {
       const found = await rdap.lookup(name);
       await db.query(
-        `UPDATE domains_zones SET registrar = $2, expires_at = $3, nameservers = $4::jsonb, rdap_checked_at = now(), rdap_error = NULL
+        `UPDATE domains_zones SET registrar = $2, expires_at = $3, nameservers = $4::text::jsonb, rdap_checked_at = now(), rdap_error = NULL
          WHERE name = $1`,
         [name, found?.registrar ?? null, found?.expires ?? null, JSON.stringify(found?.nameservers ?? [])],
       );

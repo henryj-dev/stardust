@@ -80,6 +80,11 @@ describe("domains", () => {
       "soonest expiry first",
     );
     assert.equal(domains[0]?.registrar, "Shop Registrar");
+    assert.deepEqual(
+      (domains[0] as { nameservers?: unknown }).nameservers,
+      ["ns.shop.test"],
+      "stored as a list, not a string",
+    );
     assert.ok((domains[0]?.daysLeft ?? 0) >= 9);
     assert.match(domains[1]?.rdapError ?? "", /503/);
   });
