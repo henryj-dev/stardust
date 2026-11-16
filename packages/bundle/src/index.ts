@@ -12,6 +12,7 @@ import { plugin as logsLoki } from "@stardust/plugin-logs-loki";
 import { plugin as runtime } from "@stardust/plugin-runtime";
 import { plugin as secretsSopsAge } from "@stardust/plugin-secrets-sops-age";
 import { plugin as sourceGithub } from "@stardust/plugin-source-github";
+import { plugin as storeS3 } from "@stardust/plugin-store-s3";
 
 export const bundledPlugins: readonly Plugin[] = [
   builderBuildkit,
@@ -22,4 +23,5 @@ export const bundledPlugins: readonly Plugin[] = [
   runtime,
   secretsSopsAge,
   sourceGithub,
+  storeS3,
 ];

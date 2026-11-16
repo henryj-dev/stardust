@@ -216,6 +216,9 @@ importers:
       '@stardust/plugin-source-github':
         specifier: workspace:*
         version: link:../../plugins/source-github
+      '@stardust/plugin-store-s3':
+        specifier: workspace:*
+        version: link:../../plugins/store-s3
 
   packages/config:
     dependencies:
@@ -389,6 +392,12 @@ importers:
         version: 2.9.1
 
   plugins/source-github:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  plugins/store-s3:
     dependencies:
       '@stardust/core':
         specifier: workspace:*

@@ -7,7 +7,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import type { BuildLog, BuildLogReader } from "@stardust/core";
 import { type PullTarget, TargetError } from "@stardust/core";
-import { MemoryRepo } from "@stardust/core/testing";
+import { MemoryRepo, MemoryStore } from "@stardust/core/testing";
 import { createUser, ensureBootstrapAdmin, putProject, signIn, startRun } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
 import { createApp } from "./app.ts";
@@ -583,6 +583,25 @@ describe("one run and its build logs", () => {
     const gone = await logOf(runId);
     assert.equal(gone.status, 410);
     assert.match(((await gone.json()) as { error: string }).error, /no longer available/);
+  });
+
+  it("once the pod is gone, serves the copy kept when the build finished", async () => {
+    const store = new MemoryStore();
+    const kept = createApp({ version: "test" }, { sql: db.sql, resolveTarget, buildLogs, store });
+    pods.set("api", { state: "none" });
+    await setJob("failed");
+    const url = `/api/v1/projects/logs/runs/${runId}/jobs/api/log`;
+    assert.equal((await kept.request(url, { headers: admin })).status, 410, "no copy yet");
+    await store.put(`build-logs/logs/${runId}/api.log`, new TextEncoder().encode("#1 kept\n"), "text/plain");
+    const res = await kept.request(url, { headers: admin });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("x-stardust-log"), "kept");
+    assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(await res.text(), "#1 kept\n");
+    await setJob("running");
+    pods.set("api", { state: "waiting" });
+    assert.equal((await kept.request(url, { headers: admin })).status, 409, "a running job's copy is not served");
+    await setJob("failed");
   });
 
   it("an unknown job is 404; a cluster that cannot be reached is 502 without its error", async () => {

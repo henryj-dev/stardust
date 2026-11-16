@@ -41,7 +41,7 @@ try {
   ports = await assemble({
     plugins,
     sections: config.plugins,
-    want: ["source", "identity", "builder", "deployRepo", "cipher"],
+    want: ["source", "identity", "builder", "deployRepo", "cipher", "store"],
     platform: {
       database: databasePort(sql),
       globalDatabase: databasePort(globalSql),
@@ -95,6 +95,7 @@ if (ports.source) {
     resolveTarget: (repo, target) => (ports.source as NonNullable<Ports["source"]>).resolveTarget(repo, target),
     ...(ports.identity ? { oidc: ports.identity } : {}),
     ...(ports.deployRepo ? { deployRepo: ports.deployRepo } : {}),
+    ...(ports.store ? { store: ports.store } : {}),
     features,
     ...buildLogServices(),
     ...envServices(),

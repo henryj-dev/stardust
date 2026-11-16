@@ -56,6 +56,11 @@ docker run --rm -d --name stardust-pg -e POSTGRES_PASSWORD=test -p 55432:5432 po
 DATABASE_URL_TEST=postgres://postgres:test@127.0.0.1:55432/postgres pnpm run test:db
 ```
 
+Object store tests (`*.s3test.ts`) run the ObjectStore contract against a
+real S3-compatible server, e.g. MinIO, with `S3_TEST_ENDPOINT`,
+`S3_TEST_BUCKET`, `S3_TEST_KEY` and `S3_TEST_SECRET` set:
+`pnpm run test:s3`.
+
 `pnpm run test:db` exits with an error when `DATABASE_URL_TEST` is not set
 rather than skipping, so a missing database is never reported as a pass.
 
