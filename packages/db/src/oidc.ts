@@ -85,9 +85,9 @@ export async function signInWithIdentity(
   }
   const token = randomBytes(32).toString("base64url");
   await sql`
-    INSERT INTO sessions (user_id, token_hash, expires_at)
+    INSERT INTO sessions (user_id, token_hash, expires_at, via)
     VALUES (${row.id}, ${createHash("sha256").update(token).digest()},
-            now() + make_interval(hours => ${options.sessionHours ?? 12}))`;
+            now() + make_interval(hours => ${options.sessionHours ?? 12}), 'oidc')`;
   return {
     ok: true,
     token,

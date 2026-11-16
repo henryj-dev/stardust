@@ -14,6 +14,7 @@ export const TABLE_SCOPES: Readonly<Record<string, CoreTableScope>> = {
   project_members: "global-auth",
   sign_in_failures: "global-auth",
   oidc_logins: "global-auth",
+  account_links: "global-auth",
   // Definitions and history every region shares.
   projects: "global",
   audit_events: "global",

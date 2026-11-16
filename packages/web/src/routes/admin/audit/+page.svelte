@@ -21,5 +21,5 @@ let { data } = $props();
   {#if data.problem}
     <p role="alert" data-audit-problem>{data.problem}</p>
   {/if}
-  <AuditTable events={data.events} older={data.older} showProject={true} />
+  <AuditTable linkEvents events={data.events} older={data.older} showProject={true} />
 </main>

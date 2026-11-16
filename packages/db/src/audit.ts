@@ -150,6 +150,13 @@ export async function listAudit(sql: Sql, q: AuditQuery = {}): Promise<{ events:
   };
 }
 
+/** One event by id, or null. */
+export async function getAuditEvent(sql: Sql, id: string): Promise<AuditEvent | null> {
+  if (!/^[0-9]{1,18}$/.test(id)) return null;
+  const { events } = await listAudit(sql, { before: String(BigInt(id) + 1n), limit: 1 });
+  return events[0]?.id === id ? events[0] : null;
+}
+
 /** Removes events older than `retentionDays`; 0 keeps them all. Returns how many went. */
 export async function purgeAudit(sql: Sql, retentionDays: number): Promise<number> {
   if (!Number.isInteger(retentionDays) || retentionDays < 0)

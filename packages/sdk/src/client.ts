@@ -208,6 +208,26 @@ export interface PluginClient {
   send<T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T>;
 }
 
+export interface UserView {
+  id: string;
+  username: string;
+  displayName: string;
+  isAdmin: boolean;
+  disabled: boolean;
+  hasPassword: boolean;
+  oidc: { issuer: string; subject: string } | null;
+  roles: Array<{ projectId: string; role: "maintainer" | "viewer" }>;
+}
+
+export interface SessionInfo {
+  id: string;
+  via: "password" | "oidc";
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  current: boolean;
+}
+
 export interface Client {
   health(): Promise<{ status: string; version: string }>;
   /** Signs in with a username and password. Wrong credentials and lockout are results, not errors. */
@@ -290,6 +310,25 @@ export interface Client {
   changeEnv(projectId: string, layer: string, change: EnvChangeInput): Promise<EnvChangeResult>;
   /** The whole audit log, newest first (administrators). An ApiError carries the reason for a bad filter. */
   audit(filter?: AuditFilter): Promise<AuditPage>;
+  /** One audit event (administrators); ApiError 404 when unknown. */
+  auditEvent(id: string): Promise<AuditEventView>;
+  /** Every account, with roles (administrators). */
+  users(): Promise<UserView[]>;
+  /** Creates an account; without a password, invite it with a link. Administrators. */
+  createUser(input: { username: string; displayName?: string; isAdmin?: boolean; password?: string }): Promise<void>;
+  /** Changes an account (administrators). ApiError 409 when it would leave no administrator. */
+  updateUser(username: string, change: { isAdmin?: boolean; disabled?: boolean; displayName?: string }): Promise<void>;
+  /** A one-time link for someone to set their password. The token is shown only here. Administrators. */
+  issueLink(username: string, purpose: "invite" | "reset"): Promise<{ token: string; path: string; expiresAt: string }>;
+  /** Ends every session and API token of an account (administrators). */
+  endAllSessions(username: string): Promise<{ sessions: number; tokens: number }>;
+  /** Sets a password through a one-time link; needs no sign-in. */
+  useLink(token: string, password: string): Promise<{ username: string }>;
+  /** Changes one's own password; other sessions and API tokens end. */
+  changePassword(current: string, password: string): Promise<void>;
+  /** One's own sessions; `current` is the one asking. */
+  sessions(): Promise<SessionInfo[]>;
+  endSession(id: string): Promise<void>;
   /** One project's audit log (its maintainers and administrators). */
   projectAudit(projectId: string, filter?: Omit<AuditFilter, "project">): Promise<AuditPage>;
 }
@@ -521,6 +560,52 @@ export function createClient(options: ClientOptions): Client {
         throw new ApiError(res.status, error || `PATCH ${path} failed: ${res.status}`);
       }
       return (await res.json()) as EnvChangeResult;
+    },
+    async auditEvent(id) {
+      return (await (await get(`/api/v1/audit/${encodeURIComponent(id)}`)).json()) as AuditEventView;
+    },
+    async users() {
+      return ((await (await get("/api/v1/users")).json()) as { users: UserView[] }).users;
+    },
+    async createUser(input) {
+      await post("/api/v1/users", input);
+    },
+    async updateUser(username, change) {
+      const path = `/api/v1/users/${encodeURIComponent(username)}`;
+      const res = await doFetch(`${base}${path}`, {
+        method: "PATCH",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify(change),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `PATCH ${path} failed: ${res.status}`);
+      }
+    },
+    async issueLink(username, purpose) {
+      return (await post(`/api/v1/users/${encodeURIComponent(username)}/links`, { purpose })) as {
+        token: string;
+        path: string;
+        expiresAt: string;
+      };
+    },
+    async endAllSessions(username) {
+      return (await post(`/api/v1/users/${encodeURIComponent(username)}/sessions/end`, {})) as {
+        sessions: number;
+        tokens: number;
+      };
+    },
+    async useLink(token, password) {
+      return (await post("/api/v1/auth/link", { token, password })) as { username: string };
+    },
+    async changePassword(current, password) {
+      await post("/api/v1/account/password", { current, password });
+    },
+    async sessions() {
+      return ((await (await get("/api/v1/account/sessions")).json()) as { sessions: SessionInfo[] }).sessions;
+    },
+    async endSession(id) {
+      await get(`/api/v1/account/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
     },
     audit(filter = {}) {
       return read<AuditPage>(`/api/v1/audit${queryOf({ ...filter })}`);

@@ -20,6 +20,8 @@ export type {
   RollbackResult,
   RunSummary,
   RunView,
+  SessionInfo,
   SessionUser,
+  UserView,
 } from "./client.ts";
 export { ApiError, createClient } from "./client.ts";
