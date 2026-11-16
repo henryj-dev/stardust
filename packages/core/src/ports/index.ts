@@ -11,6 +11,7 @@ import type { SecretCipher } from "./cipher.ts";
 import type { Database } from "./database.ts";
 import type { IdentityProvider } from "./identity.ts";
 import type { KubeStreamClient } from "./kube.ts";
+import type { LogSource } from "./logs.ts";
 import type { ProjectCatalog } from "./projects.ts";
 import type { DeployRepo } from "./repo.ts";
 import type { SourceHost } from "./source.ts";
@@ -33,6 +34,8 @@ export interface Ports {
   cipher: SecretCipher;
   builder: Builder;
   identity: IdentityProvider;
+  /** Pod log sources by name, e.g. `kube` (live) and `loki` (history). */
+  logs: Record<string, LogSource>;
 }
 
 export type PortName = keyof Ports;
@@ -49,20 +52,22 @@ export const PORT_NAMES: readonly PortName[] = [
   "cipher",
   "builder",
   "identity",
+  "logs",
 ];
 
 /**
  * Ports that more than one plugin may provide at once, each under its own
  * name (two DNS providers, say). Their value in `Ports` is a record keyed by
- * instance name. None exist yet.
+ * instance name.
  */
-export const MULTI_PORTS: ReadonlySet<PortName> = new Set<PortName>();
+export const MULTI_PORTS: ReadonlySet<PortName> = new Set<PortName>(["logs"]);
 
 export * from "./builder.ts";
 export * from "./cipher.ts";
 export * from "./database.ts";
 export * from "./identity.ts";
 export * from "./kube.ts";
+export * from "./logs.ts";
 export * from "./projects.ts";
 export * from "./repo.ts";
 export * from "./source.ts";

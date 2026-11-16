@@ -29,6 +29,18 @@ const probe = definePlugin({
       audit: "probe.poke",
       handle: async () => ({ status: 200, body: {} }),
     },
+    {
+      method: "GET",
+      path: "/projects/:project/log",
+      permission: "probe:view",
+      handle: async () => ({
+        status: 200,
+        stream: (async function* () {
+          yield new TextEncoder().encode("<b>one</b>\n");
+          yield new TextEncoder().encode("two\n");
+        })(),
+      }),
+    },
   ],
 });
 
@@ -72,4 +84,18 @@ it("checks the caller's role in the route's project", async () => {
     await Promise.all(["admin", "maint", "viewer", "outsider"].map((who) => status(who, "POST"))),
     [200, 200, 403, 404],
   );
+});
+
+it("streams a plugin's text as plain text that is never sniffed", async () => {
+  const sections = { probe: {} };
+  const features = buildFeatures(createPluginRegistry([probe]).resolve(sections), sections, {}, quiet, "test");
+  const app = createApp(
+    { version: "t" },
+    { sql: db.sql, resolveTarget: async () => ({ ref: "", sha: "" }), features, log: quiet },
+  );
+  const res = await app.request("/api/v1/plugins/probe/projects/demo/log", { headers: as.viewer ?? {} });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+  assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(await res.text(), "<b>one</b>\ntwo\n");
 });

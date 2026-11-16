@@ -84,6 +84,28 @@ export function mountFeatures(app: Hono<Env>, features: readonly Feature[], opti
             ...(response.audit?.detail ? { detail: response.audit.detail } : {}),
           });
         }
+        if (response.stream) {
+          const source = response.stream;
+          const stream = new ReadableStream<Uint8Array>({
+            async start(controller) {
+              try {
+                for await (const chunk of source) controller.enqueue(chunk);
+              } catch {
+                // The client left or the source ended: end the response either way.
+              } finally {
+                controller.close();
+              }
+            },
+          });
+          return new Response(stream, {
+            status: response.status,
+            headers: {
+              "content-type": "text/plain; charset=utf-8",
+              "x-content-type-options": "nosniff",
+              "cache-control": "no-store",
+            },
+          });
+        }
         if (response.status === 204 || response.body === undefined) return c.body(null, response.status as 204);
         return c.json(response.body as object, response.status as 200);
       });

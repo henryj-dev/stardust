@@ -27,6 +27,9 @@ A feature plugin may also declare, all checked when it is defined or mounted:
 - `migrations()`: its own tables, named `<plugin>_*`;
 - `capabilities`: what the dashboard may show, `<plugin>.<what>`.
 
+A route may answer with `stream` instead of a JSON body: plain text sent as it
+comes (a followed log), with `nosniff`, ended by the request's signal.
+
 Shared machinery in core, so each plugin does not grow its own:
 
 - **sagas** (`defineSaga`, `startSaga`, `runSaga`, the `sagas` port): work in
@@ -55,6 +58,8 @@ plugins compiled in (enforced by `only-bundle-loads-plugins`), and
 | `builder-buildkit` | `builder`                                            | `kube` |
 | `gitops-git`       | `deployRepo`                                         |        |
 | `identity-oidc`    | `identity`                                           |        |
+| `logs-kube`        | `logs` (`kube`, live)                                | `kube` |
+| `logs-loki`        | `logs` (`loki`, history)                             |        |
 | `runtime`          | (feature: requires `kube`, `deployRepo`, `projects`) |        |
 | `secrets-sops-age` | `cipher`                                             |        |
 | `source-github`    | `source`                                             |        |

@@ -68,7 +68,12 @@ const short = (digest: string) => digest.replace(/^sha256:/, "").slice(0, 12);
             <tbody>
               {#each w.pods as p (p.name)}
                 <tr data-pod={p.name}>
-                  <td><code>{p.name}</code></td>
+                  <td>
+                    <code>{p.name}</code>
+                    {#if data.can.logs}
+                      · <a href={`/projects/${encodeURIComponent(data.projectId)}/components/${encodeURIComponent(data.component)}/pods/${encodeURIComponent(p.name)}`}>log</a>
+                    {/if}
+                  </td>
                   <td>{p.phase}</td>
                   <td>{p.ready ? "yes" : "no"}</td>
                   <td>{p.restarts}</td>

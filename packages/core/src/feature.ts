@@ -58,6 +58,11 @@ export interface RouteResponse {
   status: number;
   body?: unknown;
   /**
+   * Instead of a JSON body: text sent as it comes, such as a followed log.
+   * Always plain text, never sniffed; the request's signal ends it.
+   */
+  stream?: AsyncIterable<Uint8Array>;
+  /**
    * Recorded with the route's audit action when the request changed
    * something (not GET, status below 400). Names only, never values.
    */

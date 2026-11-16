@@ -201,6 +201,8 @@ export interface RollbackResult {
 
 export interface PluginClient {
   get<T>(path: string): Promise<T>;
+  /** The raw response of a GET, whatever its status, so a caller can relay a stream such as a log. */
+  raw(path: string, signal?: AbortSignal): Promise<Response>;
   send<T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T>;
 }
 
@@ -363,6 +365,8 @@ export function createClient(options: ClientOptions): Client {
       };
       return {
         get: async <T>(path: string) => (await call("GET", path)) as T,
+        raw: (path: string, signal?: AbortSignal) =>
+          doFetch(`${base}${root}${path}`, { headers: headers(), ...(signal ? { signal } : {}) }),
         send: async <T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) =>
           (await call(method, path, body)) as T,
       };
