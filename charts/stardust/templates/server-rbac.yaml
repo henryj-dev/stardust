@@ -87,4 +87,8 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "stardust.fullname" $ }}-server
     namespace: {{ $.Release.Namespace }}
+  # The worker follows the restore-check Jobs it is told about.
+  - kind: ServiceAccount
+    name: {{ include "stardust.fullname" $ }}-worker
+    namespace: {{ $.Release.Namespace }}
 {{- end }}

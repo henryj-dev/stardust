@@ -89,3 +89,8 @@ affinity:
 {{- define "stardust.serverReadsCluster" -}}
 {{- if or (and .Values.builds.enabled .Values.builds.logs) .Values.runtime.namespaces .Values.databases.namespaces -}}true{{- end -}}
 {{- end }}
+
+{{- /* The worker talks to the cluster for builds, and to follow the database jobs (restore checks) it asked for. */}}
+{{- define "stardust.workerReadsCluster" -}}
+{{- if or .Values.builds.enabled .Values.databases.namespaces -}}true{{- end -}}
+{{- end }}

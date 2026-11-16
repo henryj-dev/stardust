@@ -150,6 +150,15 @@ if [ "$dbroles" = "6" ] && [ "$dbverbs" = 'verbs:["get","list"]' ] && [ "$dbres"
 else
   bad databases-roles-read-only "expected a read-only Role without secrets in each of two namespaces (got $dbroles names, verbs: $dbverbs, secrets rules: $dbres)"
 fi
+# The worker follows restore checks: it gets its own account, even without builds, bound to the same read-only Roles.
+wk="$(render --set 'databases.namespaces={databases}' --set builds.enabled=false)"
+if grep -q "name: t-stardust-worker$" <<<"$wk" \
+  && [ "$(awk '/kind: RoleBinding/{b=1} b&&/name: t-stardust-worker$/{n++} /^---/{b=0} END{print n+0}' <<<"$wk")" -ge 1 ] \
+  && awk '/kind: Deployment/{d=1} d&&/name: t-stardust-worker$/{w=1} w&&/serviceAccountName: t-stardust-worker/{f=1} /^---/{d=0;w=0} END{exit !f}' <<<"$wk"; then
+  pass databases-worker-follows-checks
+else
+  bad databases-worker-follows-checks "expected the worker to have its own account bound to the databases Roles"
+fi
 if render --set 'databases.namespaces={databases}' | docker run --rm -i "$KUBECONFORM" -strict -summary -kubernetes-version 1.30.0 - >/dev/null 2>&1; then
   pass databases-kubeconform
 else

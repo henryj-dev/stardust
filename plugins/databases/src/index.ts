@@ -502,6 +502,9 @@ export function databasesFeature(ctx: FeatureContext) {
       } else if (res.status === 404 && now.getTime() - new Date(c.requested_at).getTime() > CHECK_APPEARS_MS) {
         status = "failed";
         detail = "the Job never appeared: is the GitOps controller applying the databases root?";
+      } else if (res.status !== 404) {
+        // Most often the worker may not read Jobs there: say so instead of waiting forever.
+        ctx.log.warn("cannot follow a restore check", { job: c.job, namespace: c.namespace, status: res.status });
       }
       if (!status) continue;
       await commit(
