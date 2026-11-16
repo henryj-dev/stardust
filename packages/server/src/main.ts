@@ -111,6 +111,7 @@ if (ports.source) {
     globalSql,
     auth,
     resolveTarget: (repo, target) => (ports.source as NonNullable<Ports["source"]>).resolveTarget(repo, target),
+    ...(ports.source.access ? { repoAccess: ports.source.access.bind(ports.source) } : {}),
     ...(ports.identity ? { oidc: ports.identity } : {}),
     ...(ports.deployRepo ? { deployRepo: ports.deployRepo } : {}),
     ...(ports.store ? { store: ports.store } : {}),

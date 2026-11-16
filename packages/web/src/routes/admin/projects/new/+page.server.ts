@@ -2,6 +2,7 @@ import { fail } from "@sveltejs/kit";
 import { requireClient } from "$lib/server/api";
 import { emptyComponent, type ProjectFields, readFields } from "$lib/server/project-form";
 import { findProject, requireAdmin, saveProject } from "$lib/server/project-save";
+import { checkAccess } from "$lib/server/source-access";
 import type { Actions, PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = ({ locals, url }) => {
@@ -12,7 +13,16 @@ export const load: PageServerLoad = ({ locals, url }) => {
 };
 
 export const actions: Actions = {
-  default: async ({ locals, request, url }) => {
+  // Asks about the repository as typed, keeping what else was typed; nothing is created.
+  check: async ({ locals, request, url }) => {
+    const client = requireClient(locals, url);
+    requireAdmin(locals);
+    const form = await request.formData();
+    const id = typeof form.get("id") === "string" ? String(form.get("id")).trim() : "";
+    const fields = readFields(form, id);
+    return { fields, errors: [], access: await checkAccess(client, fields.githubRepo) };
+  },
+  create: async ({ locals, request, url }) => {
     const client = requireClient(locals, url);
     requireAdmin(locals);
     const form = await request.formData();

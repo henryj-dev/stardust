@@ -1,13 +1,23 @@
 <script lang="ts">
 import { untrack } from "svelte";
 import { type ComponentFields, emptyComponent, type ProjectFields } from "$lib/project-fields";
+import { type AccessView, accessNote } from "$lib/source-access";
 
 let {
   fields,
   errors,
   creating,
   action,
-}: { fields: ProjectFields; errors: string[]; creating: boolean; action?: string } = $props();
+  access = null,
+}: {
+  fields: ProjectFields;
+  errors: string[];
+  creating: boolean;
+  action?: string;
+  access?: AccessView | null;
+} = $props();
+// What stardust can do with the repository, when it was asked.
+const note = $derived(access ? accessNote(access) : null);
 
 const copy = (f: ProjectFields): ComponentFields[] => f.components.map((c) => ({ ...c }));
 // Filled before the first render so the rows are in the server's HTML (the form works without JavaScript),
@@ -45,6 +55,10 @@ $effect(() => {
     Repository
     <input name="githubRepo" value={fields.githubRepo} placeholder="owner/name" autocomplete="off" />
   </label>
+  <button type="submit" formaction="?/check" formnovalidate data-check-access>Check access</button>
+  {#if note}
+    <p data-access={note.warn ? "warn" : "ok"} role={note.warn ? "alert" : "status"}>{note.text}</p>
+  {/if}
 
   <fieldset>
     <legend>Components</legend>

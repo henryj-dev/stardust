@@ -278,3 +278,24 @@ it("a refused token list is an error with the server's reason", async () => {
   });
   await assert.rejects(client.listTokens(), { status: 401, message: "not signed in" });
 });
+
+it("asks whether a repository is readable, passing on the server's reason", async () => {
+  const asked: string[] = [];
+  const client = createClient({
+    baseUrl: "http://api.test",
+    token: "t0k",
+    fetch: async (input) => {
+      asked.push(String(input));
+      return String(input).includes("bad")
+        ? Response.json({ error: "repo must be owner/name" }, { status: 400 })
+        : Response.json({ repo: "acme/web", readable: "app", installation: "selected" });
+    },
+  });
+  assert.deepEqual(await client.sourceAccess("acme/web"), {
+    repo: "acme/web",
+    readable: "app",
+    installation: "selected",
+  });
+  assert.equal(asked[0], "http://api.test/api/v1/source/access?repo=acme%2Fweb");
+  await assert.rejects(client.sourceAccess("bad"), (err: Error) => err.message === "repo must be owner/name");
+});

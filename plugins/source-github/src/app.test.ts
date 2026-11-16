@@ -78,3 +78,26 @@ it("resolves commits with the repository's own token, and says a private reposit
   assert.deepEqual(await resolve("acme/private-app", {}), { ref: "refs/heads/main", sha: SHA });
   await assert.rejects(resolve("acme/hidden", {}), /install the GitHub App on it/);
 });
+
+it("says how the App reads a repository: installed on it, public, or not at all", async () => {
+  const app = githubApp({ appId: 42, privateKey: PEM, apiBaseUrl: "https://api.github.test", fetch: fakeGitHub() });
+  assert.deepEqual(await app.access("acme/private-app"), { readable: "app", installation: "selected" });
+  assert.deepEqual(await app.access("acme/open"), { readable: "public" });
+  assert.deepEqual(await app.access("acme/hidden"), { readable: "none" });
+});
+
+it("says when the App is installed on all of the owner's repositories", async () => {
+  const base = fakeGitHub();
+  const everywhere = (async (input: string | URL | Request, init?: RequestInit) =>
+    new URL(String(input)).pathname === "/repos/acme/private-app/installation"
+      ? Response.json({ id: 77, repository_selection: "all" })
+      : base(input, init)) as typeof fetch;
+  const app = githubApp({ appId: 42, privateKey: PEM, apiBaseUrl: "https://api.github.test", fetch: everywhere });
+  assert.deepEqual(await app.access("acme/private-app"), { readable: "app", installation: "all" });
+});
+
+it("does not take a failing GitHub for a repository it cannot read", async () => {
+  const down = (async () => new Response("{}", { status: 503 })) as typeof fetch;
+  const app = githubApp({ appId: 42, privateKey: PEM, apiBaseUrl: "https://api.github.test", fetch: down });
+  await assert.rejects(app.access("acme/private-app"), /503/);
+});

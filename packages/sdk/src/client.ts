@@ -24,6 +24,18 @@ export interface ClientOptions {
   readonly regions?: RegionOptions;
 }
 
+/**
+ * Whether stardust can read a repository: `public` (anyone can), `app` (the
+ * GitHub App is installed on it), `token` (the configured token reads it) or
+ * `none`. With the App, `installation` says whether it covers all of the
+ * owner's repositories or only the ones chosen.
+ */
+export interface RepoAccess {
+  repo: string;
+  readable: "public" | "app" | "token" | "none";
+  installation?: "all" | "selected";
+}
+
 /** One entry of the audit log: who did what. Details name things, never secret values. */
 export interface AuditEventView {
   id: string;
@@ -286,6 +298,8 @@ export interface Client {
   session(): Promise<SessionUser | null>;
   /** The enabled plugins and what each adds, so a dashboard shows only what this server has. */
   capabilities(): Promise<Capabilities>;
+  /** Whether stardust can read a repository (`owner/name`), and how. Administrators only. */
+  sourceAccess(repo: string): Promise<RepoAccess>;
   /**
    * A plugin's own API, under /api/v1/plugins/<name>. An ApiError carries the
    * server's reason; 404 also means the plugin is not enabled.
@@ -527,6 +541,15 @@ export function createClient(options: ClientOptions): Client {
     },
     async capabilities() {
       return (await (await get("/api/v1/capabilities")).json()) as Capabilities;
+    },
+    async sourceAccess(repo) {
+      const path = `/api/v1/source/access?repo=${encodeURIComponent(repo)}`;
+      const res = await doFetch(`${base}${path}`, { headers: headers() });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `GET ${path} failed: ${res.status}`);
+      }
+      return (await res.json()) as RepoAccess;
     },
     async authMethods() {
       return (await (await get("/api/v1/auth/methods")).json()) as {
