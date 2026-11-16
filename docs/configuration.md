@@ -325,6 +325,36 @@ broker cannot be reached at all; any answer from the broker (a 403 above all)
 is final. Each fallback bypasses the allowlist and is logged as a warning:
 leave `apiKey` out to rule fallbacks out.
 
+### `instances`
+
+Cloud instances from `/instances`, on a `compute` account (`cloud-vultr`).
+Creating runs in the background as a saga the worker resumes: the instance,
+then (with `dns`) its public record when the hostname is in the zone and an
+internal record for its private address, the reverse name of its address
+(only for a public record, so that it resolves back), and finally its user
+data is cleared, since cloud-init can carry bootstrap secrets. A create that
+fails after the instance exists leaves it for you: deleting needs a person.
+
+Deleting takes two steps from someone who signed in recently: repeat the
+hostname to get a ticket for that one instance (five minutes, used once),
+then delete with it. Its DNS records go with it. Protected hosts are never
+deleted.
+
+```yaml
+instances:
+  account: vultr # optional
+  sshKeys: [ops] # key names in the account
+  cloudInit: | # optional; {{hostname}} is filled in
+    #cloud-config
+  dns: # optional
+    provider: cloudflare
+    zone: example.com
+    internalSuffix: internal.example.com
+  protected:
+    prefixes: [db-]
+    exact: [gateway.example.com]
+```
+
 ### `databases`
 
 PostgreSQL for your applications, through the deploy repository: administrators

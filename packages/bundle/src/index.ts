@@ -13,6 +13,7 @@ import { plugin as dnsParallax } from "@stardust/plugin-dns-parallax";
 import { plugin as domains } from "@stardust/plugin-domains";
 import { plugin as gitopsGit } from "@stardust/plugin-gitops-git";
 import { plugin as identityOidc } from "@stardust/plugin-identity-oidc";
+import { plugin as instances } from "@stardust/plugin-instances";
 import { plugin as logsKube } from "@stardust/plugin-logs-kube";
 import { plugin as logsLoki } from "@stardust/plugin-logs-loki";
 import { plugin as nodes } from "@stardust/plugin-nodes";
@@ -32,6 +33,7 @@ export const bundledPlugins: readonly Plugin[] = [
   domains,
   gitopsGit,
   identityOidc,
+  instances,
   logsKube,
   logsLoki,
   nodes,

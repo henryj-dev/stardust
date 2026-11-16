@@ -128,6 +128,17 @@ describe("assemble", () => {
     });
   });
 
+  it("builds a port a feature uses when it is configured, and starts without it when it is not", async () => {
+    const feature = definePlugin({
+      manifest: { name: "uses-source", description: "u" },
+      validateConfig: () => [],
+      uses: ["source"],
+    });
+    const source = provider("source-a", ["source"], () => ({ source: fakeSource }));
+    assert.equal((await run([feature, source.plugin], [])).source, fakeSource, "wanted because the feature uses it");
+    assert.equal((await run([feature], [])).source, undefined, "and no error without it");
+  });
+
   it("refuses two plugins providing the same port", async () => {
     const a = provider("source-a", ["source"], () => ({ source: fakeSource }));
     const b = provider("source-b", ["source"], () => ({ source: fakeSource }));

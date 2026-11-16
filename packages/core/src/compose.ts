@@ -78,7 +78,8 @@ export async function assemble(options: AssembleOptions): Promise<Partial<Ports>
 
   // What to build: providers of wanted ports, then whatever those need, and so on.
   const wanted = new Set<PortName>(options.want);
-  for (const plugin of options.plugins) for (const port of plugin.requires ?? []) wanted.add(port);
+  for (const plugin of options.plugins)
+    for (const port of [...(plugin.requires ?? []), ...(plugin.uses ?? [])]) wanted.add(port);
   const chosen = new Set<Plugin>();
   let grew = true;
   while (grew) {
