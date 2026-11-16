@@ -51,6 +51,8 @@ export interface DatabaseSpec {
 
 /** An instance as the renders need it: where it is, how to reach it, whose password opens it. */
 export interface DatabaseTarget {
+  /** What stardust calls it, unique across namespaces: its dumps are stored under this name. */
+  name: string;
   ref: DatabaseRef;
   /** Host name inside the cluster, e.g. <service>.<namespace>.svc */
   host: string;
@@ -81,8 +83,20 @@ export interface BackupPlan {
   /** Dumps are encrypted to this age recipient before they leave the pod. */
   recipient: string;
   retentionHours: number;
-  /** One dump per target, named by the target's `ref.name`. */
+  /** One dump per target, stored under the target's `name`. */
   targets: DatabaseTarget[];
+}
+
+/** Restoring the newest dump of one instance into a throwaway server, and comparing fingerprints. */
+export interface RestoreCheck {
+  /** The Job's name and namespace. */
+  name: string;
+  namespace: string;
+  storage: BackupPlan["storage"];
+  /** Whose dumps: the backed-up target's `name`. */
+  source: string;
+  /** The age identity that decrypts the dumps. Keep it in a namespace of its own. */
+  identity: SecretKeyRef;
 }
 
 export interface DatabaseProvider {
@@ -105,8 +119,10 @@ export interface DatabaseProvider {
   renderInstance(spec: DatabaseSpec): Record<string, string>;
   /** A Job that creates or updates the application's role and database; running it twice changes nothing. */
   renderAppGrant(target: DatabaseTarget, grant: AppGrant): Record<string, string>;
-  /** A CronJob that dumps every target, encrypts, uploads, re-reads the size, and prunes. */
+  /** A CronJob that fingerprints and dumps every target, encrypts, uploads, re-reads the size, and prunes. */
   renderBackup(plan: BackupPlan): Record<string, string>;
+  /** A Job that succeeds only when the newest dump restores to the fingerprint taken with it. */
+  renderRestoreCheck(check: RestoreCheck): Record<string, string>;
 }
 
 const LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
@@ -165,12 +181,37 @@ export function backupPlanProblems(plan: BackupPlan): string[] {
   if (plan.targets.length === 0) problems.push("there must be something to back up");
   const seen = new Set<string>();
   for (const t of plan.targets) {
-    if (!isKubeName(t.ref.name) || !isKubeName(t.superuser.name)) problems.push(`${t.ref.name}: names must be names`);
-    if (!/^[a-z0-9.-]+$/.test(t.host)) problems.push(`${t.ref.name}: host must be a host name`);
-    if (!/^[A-Za-z0-9._-]+$/.test(t.superuser.key)) problems.push(`${t.ref.name}: the secret key must be a key name`);
-    if (seen.has(t.ref.name))
-      problems.push(`${t.ref.name}: two targets with one name would overwrite each other's dumps`);
-    seen.add(t.ref.name);
+    if (!isKubeName(t.name) || !isKubeName(t.ref.name) || !isKubeName(t.superuser.name)) {
+      problems.push(`${t.name}: names must be names`);
+    }
+    if (!/^[a-z0-9.-]+$/.test(t.host)) problems.push(`${t.name}: host must be a host name`);
+    if (!/^[A-Za-z0-9._-]+$/.test(t.superuser.key)) problems.push(`${t.name}: the secret key must be a key name`);
+    if (seen.has(t.name)) problems.push(`${t.name}: two targets with one name would overwrite each other's dumps`);
+    seen.add(t.name);
   }
+  return problems;
+}
+
+/** Why a restore check cannot be rendered, or nothing. */
+export function restoreCheckProblems(check: RestoreCheck): string[] {
+  const problems = backupPlanProblems({
+    name: check.name,
+    namespace: check.namespace,
+    schedule: "0 0 * * *",
+    storage: check.storage,
+    recipient: `age1${"q".repeat(58)}`,
+    retentionHours: 24,
+    targets: [
+      {
+        name: check.source,
+        ref: { namespace: check.namespace, name: check.source },
+        host: "h",
+        superuser: { name: "s", key: "k" },
+      },
+    ],
+  });
+  if (!isKubeName(check.source)) problems.push("source must be a name");
+  if (!isKubeName(check.identity.name) || !/^[A-Za-z0-9._-]+$/.test(check.identity.key))
+    problems.push("identity must name a Secret and key");
   return problems;
 }

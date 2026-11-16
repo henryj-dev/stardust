@@ -7,7 +7,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseAllDocuments } from "yaml";
-import type { AppGrant, BackupPlan, DatabaseProvider, DatabaseSpec, DatabaseTarget } from "../databases.ts";
+import type {
+  AppGrant,
+  BackupPlan,
+  DatabaseProvider,
+  DatabaseSpec,
+  DatabaseTarget,
+  RestoreCheck,
+} from "../databases.ts";
 
 const PASSWORD_LIKE = "s3cr3t-value-that-must-not-appear";
 
@@ -30,6 +37,7 @@ export function databaseProviderContract(name: string, make: () => Promise<Datab
       ...over,
     });
     const target = (p: DatabaseProvider): DatabaseTarget => ({
+      name: "orders",
       ref: { namespace: p.capabilities.namespace, name: "orders" },
       host: `orders.${p.capabilities.namespace}.svc`,
       superuser: p.superuserSecret("orders"),
@@ -48,7 +56,12 @@ export function databaseProviderContract(name: string, make: () => Promise<Datab
       retentionHours: 168,
       targets: [
         target(p),
-        { ...target(p), ref: { namespace: p.capabilities.namespace, name: "billing" }, host: "billing.svc" },
+        {
+          ...target(p),
+          name: "billing",
+          ref: { namespace: p.capabilities.namespace, name: "billing" },
+          host: "billing.svc",
+        },
       ],
       ...over,
     });
@@ -106,6 +119,13 @@ export function databaseProviderContract(name: string, make: () => Promise<Datab
 
     it("renders a backup covering every target once, and refuses plans that would not run safely", async () => {
       const p = await make();
+      const sameWorkload = plan(p, {
+        targets: [
+          { ...target(p), name: "idp-a", ref: { namespace: "a", name: "idp" } },
+          { ...target(p), name: "idp-b", ref: { namespace: "b", name: "idp" } },
+        ],
+      });
+      assert.doesNotThrow(() => p.renderBackup(sameWorkload), "one workload name in two namespaces, under two names");
       const files = p.renderBackup(plan(p));
       const all = docs(files);
       assert.deepEqual(
@@ -124,6 +144,27 @@ export function databaseProviderContract(name: string, make: () => Promise<Datab
         { retentionHours: 1 },
       ]) {
         assert.throws(() => p.renderBackup(plan(p, bad as Partial<BackupPlan>)), JSON.stringify(bad));
+      }
+    });
+
+    it("renders a restore check as one Job that reads the identity and storage by reference", async () => {
+      const p = await make();
+      const check: RestoreCheck = {
+        name: "orders-check",
+        namespace: p.capabilities.namespace,
+        storage: { endpoint: "https://s3.example.com", bucket: "backups", credentials: "backup-s3", prefix: "pg" },
+        source: "orders",
+        identity: { name: "backup-age", key: "identity" },
+      };
+      const files = p.renderRestoreCheck(check);
+      assert.deepEqual(
+        docs(files).map((d) => d.kind),
+        ["Job"],
+      );
+      const text = Object.values(files).join("\n");
+      assert.ok(text.includes("backup-age") && text.includes("backup-s3"));
+      for (const bad of [{ source: "Orders" }, { identity: { name: "Bad Name", key: "k" } }, { name: "x y" }]) {
+        assert.throws(() => p.renderRestoreCheck({ ...check, ...bad } as RestoreCheck), JSON.stringify(bad));
       }
     });
   });

@@ -16,7 +16,7 @@ let { data, form } = $props();
   {#if form?.error}<p role="alert">{form.error}</p>{:else if form?.ok}<p data-done>Committed.</p>{/if}
 
   <table data-instances>
-    <thead><tr><th>Instance</th><th>Where</th><th>Version</th><th>State</th><th>Grants</th></tr></thead>
+    <thead><tr><th>Instance</th><th>Where</th><th>Version</th><th>State</th><th>Restores</th><th>Grants</th></tr></thead>
     <tbody>
       {#each data.instances as i (i.name)}
         <tr data-instance={i.name}>
@@ -24,6 +24,20 @@ let { data, form } = $props();
           <td><code>{i.host}</code></td>
           <td>{i.version ?? "—"}</td>
           <td>{!i.present ? "not running yet" : i.ready ? "ready" : "not ready"}</td>
+          <td data-check={i.lastCheck?.status ?? "never"}>
+            {#if i.lastCheck}
+              <span title={i.lastCheck.detail ?? ""}>{i.lastCheck.status}</span>
+              <small>{new Date(i.lastCheck.finishedAt ?? i.lastCheck.requestedAt).toLocaleString()}</small>
+            {:else}
+              never checked
+            {/if}
+            {#if data.restoreChecks && i.lastCheck?.status !== "pending"}
+              <form method="POST" action="?/check">
+                <input type="hidden" name="instance" value={i.name} />
+                <button type="submit">Check that it restores</button>
+              </form>
+            {/if}
+          </td>
           <td>
             {#each i.grants as g (g.role)}
               <form method="POST" action="?/revoke">
@@ -38,7 +52,7 @@ let { data, form } = $props();
           </td>
         </tr>
       {:else}
-        <tr><td colspan="5">No instances yet.</td></tr>
+        <tr><td colspan="6">No instances yet.</td></tr>
       {/each}
     </tbody>
   </table>
@@ -83,6 +97,19 @@ let { data, form } = $props();
       <label>Database <input name="database" placeholder="the role's name" /></label>
       <label>Env prefix <input name="envPrefix" placeholder="e.g. ORDERS_" /></label>
       <button type="submit">Grant</button>
+    </form>
+  {/if}
+
+  {#if data.allowDelete && data.instances.length}
+    <h2>Delete an instance</h2>
+    <p>
+      Revoke its grants first. One stardust created also needs a passed restore check in the last day; its manifests go
+      but its volume claim and data stay until you delete them. An adopted instance is only forgotten.
+    </p>
+    <form method="POST" action="?/remove" data-delete>
+      <label>Instance <select name="instance">{#each data.instances as i (i.name)}<option>{i.name}</option>{/each}</select></label>
+      <label>Type its name again <input name="confirm" required autocomplete="off" /></label>
+      <button type="submit">Delete</button>
     </form>
   {/if}
 

@@ -642,6 +642,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     audit,
     roleIn: (userId, projectId) => projectRole(globalSql, userId, projectId),
     log,
+    requireFresh,
   });
 
   app.post("/api/v1/auth/logout", async (c) => {

@@ -16,6 +16,8 @@ export interface MountOptions {
   /** The caller's role in a project, for per-project permissions. */
   roleIn: (userId: string, projectId: string) => Promise<ProjectRole | null>;
   log: Logger;
+  /** Null when the session signed in recently enough; otherwise the 401 to send. */
+  requireFresh?: (c: Context<Env>) => Promise<Response | null>;
 }
 
 const METHODS: Record<Method, "get" | "post" | "put" | "patch" | "delete"> = {
@@ -47,6 +49,12 @@ export function mountFeatures(app: Hono<Env>, features: readonly Feature[], opti
             return c.json({ error: "unknown project" }, 404);
           }
           return c.json({ error: "forbidden" }, 403);
+        }
+        if (route.fresh) {
+          const stale = options.requireFresh
+            ? await options.requireFresh(c)
+            : c.json({ error: "re-authentication is not available" }, 401);
+          if (stale) return stale;
         }
         let body: unknown = null;
         if (route.method !== "GET" && route.method !== "DELETE") {

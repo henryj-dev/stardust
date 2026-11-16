@@ -38,7 +38,7 @@ it("creates the role and database once, idempotently, quoting the password safel
     namespaces: [],
   });
   const files = p.renderAppGrant(
-    { ref: { namespace: "db", name: "x" }, host: env.PGHOST, superuser: { name: "s", key: "k" } },
+    { name: "x", ref: { namespace: "db", name: "x" }, host: env.PGHOST, superuser: { name: "s", key: "k" } },
     { database, role, password: { name: "app-pw", key: "password" } },
   );
   const job = parse(Object.values(files)[0] ?? "") as {

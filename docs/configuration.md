@@ -338,6 +338,30 @@ databases:
 
 Point a GitOps Kustomization (with SOPS decryption) at `root`.
 
+**Restore checks.** Every dump is stored with a fingerprint of its source,
+taken just before it: every database's tables and their exact row counts,
+hashed. "Check that it restores" commits a Job that restores the newest dump
+into a throwaway server inside its own pod and succeeds only if it arrives at
+the same fingerprint; stardust follows the Job, records the result and removes
+it. Writes between the fingerprint and the dump can make an honest dump
+differ, so check a quiet instance or retry. The check decrypts with the age
+identity, so give it a namespace of its own (list it in the chart's
+`databases.namespaces`) with the identity and the storage credentials:
+
+```yaml
+databases:
+  restoreCheck:
+    namespace: db-checks
+    identity: { name: db-backup-age, key: identity }
+  allowDelete: false # the default
+```
+
+**Deleting** is off unless `allowDelete: true`. Then an administrator who
+signed in recently can delete an instance with no grants left, by repeating
+its name. One stardust created also needs a passed restore check in the last
+day; its manifests are removed, but its volume claim and data stay until a
+person deletes them. An adopted instance is only forgotten.
+
 ### `db-statefulset`
 
 Provides the `databases` port for PostgreSQL run as a plain StatefulSet (one
