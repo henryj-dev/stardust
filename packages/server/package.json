@@ -14,11 +14,14 @@
     "@stardust/db": "workspace:*",
     "@stardust/kube": "workspace:*",
     "hono": "^4.13.14",
+    "ws": "8.23.0",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@stardust/plugin-domains": "workspace:*",
     "@stardust/plugin-identity-oidc": "workspace:*",
-    "@stardust/plugin-secrets-sops-age": "workspace:*"
+    "@stardust/plugin-nodes": "workspace:*",
+    "@stardust/plugin-secrets-sops-age": "workspace:*",
+    "@types/ws": "8.18.1"
   }
 }

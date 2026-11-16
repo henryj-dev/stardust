@@ -216,6 +216,9 @@ importers:
       '@stardust/plugin-logs-loki':
         specifier: workspace:*
         version: link:../../plugins/logs-loki
+      '@stardust/plugin-nodes':
+        specifier: workspace:*
+        version: link:../../plugins/nodes
       '@stardust/plugin-runtime':
         specifier: workspace:*
         version: link:../../plugins/runtime
@@ -284,6 +287,9 @@ importers:
       hono:
         specifier: ^4.13.14
         version: 4.13.14
+      ws:
+        specifier: 8.23.0
+        version: 8.23.0
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -294,9 +300,15 @@ importers:
       '@stardust/plugin-identity-oidc':
         specifier: workspace:*
         version: link:../../plugins/identity-oidc
+      '@stardust/plugin-nodes':
+        specifier: workspace:*
+        version: link:../../plugins/nodes
       '@stardust/plugin-secrets-sops-age':
         specifier: workspace:*
         version: link:../../plugins/secrets-sops-age
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
 
   packages/web:
     dependencies:
@@ -397,6 +409,12 @@ importers:
         version: link:../../packages/core
 
   plugins/logs-loki:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  plugins/nodes:
     dependencies:
       '@stardust/core':
         specifier: workspace:*
@@ -768,6 +786,9 @@ packages:
 
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   acorn-jsx-walk@2.0.0:
     resolution: {integrity: sha512-uuo6iJj4D4ygkdzd6jPtcxs8vZgDX9YFIkqczGImoypX2fQ4dVImmu3UzA4ynixCIMTrEOWW+95M2HuBaCEOVA==}
@@ -1266,6 +1287,18 @@ packages:
     engines: {node: ^22.13||^24||>=26}
     hasBin: true
 
+  ws@8.23.0:
+    resolution: {integrity: sha512-wCkmX8QMOrKjgO8HW2WyDbTSGeqkocxgDzS9iR79rEAexty6/2qzilx3Ag8Tqf9ykop3irLKle0MtVn5qjVnoQ==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   yaml@2.9.1:
     resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
     engines: {node: '>= 14.6'}
@@ -1580,6 +1613,10 @@ snapshots:
   '@types/node@26.6.5':
     dependencies:
       undici-types: 8.9.0
+
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 26.6.5
 
   acorn-jsx-walk@2.0.0: {}
 
@@ -1984,6 +2021,8 @@ snapshots:
       vite: 8.3.5(@types/node@26.6.5)(yaml@2.9.1)
 
   watskeburt@6.0.0: {}
+
+  ws@8.23.0: {}
 
   yaml@2.9.1: {}
 

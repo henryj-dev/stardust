@@ -80,6 +80,35 @@ export interface Route {
   handle(request: RouteRequest): Promise<RouteResponse>;
 }
 
+/** Who a socket's credential says is connecting: a plugin's own principal, not a stardust account. */
+export interface SocketPrincipal {
+  /** What the plugin knows the peer as, e.g. a host name. */
+  id: string;
+}
+
+export interface SocketConnection {
+  send(text: string): void;
+  close(code?: number, reason?: string): void;
+}
+
+export interface SocketSession {
+  message(text: string): Promise<void> | void;
+  close(): Promise<void> | void;
+}
+
+/**
+ * A WebSocket under `/api/v1/plugins/<plugin>`, for peers that are not
+ * people (an agent on a host). It does not take a stardust session: the
+ * plugin checks the peer's own credential in `authenticate`, and refuses
+ * by returning null. Every connection is closed when its session says so.
+ */
+export interface SocketRoute {
+  path: string;
+  /** Reads the credential (e.g. a bearer token) from the upgrade request's headers. */
+  authenticate(headers: Headers): Promise<SocketPrincipal | null>;
+  open(principal: SocketPrincipal, connection: SocketConnection): Promise<SocketSession> | SocketSession;
+}
+
 export interface Schedule {
   /** Unique within the plugin; the schedule's full name is `<plugin>.<id>`. */
   id: string;

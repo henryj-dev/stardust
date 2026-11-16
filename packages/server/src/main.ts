@@ -17,6 +17,7 @@ import {
 import { inClusterClient } from "@stardust/kube";
 import { createApp, type Services } from "./app.ts";
 import { RunEvents } from "./events.ts";
+import { attachSockets } from "./sockets.ts";
 
 const configPath = process.env.STARDUST_CONFIG ?? "stardust.yaml";
 
@@ -154,10 +155,12 @@ const app = createApp({ version: process.env.STARDUST_VERSION ?? "dev" }, servic
 const server = serve({ fetch: app.fetch, hostname: config.server.host, port: config.server.port }, (addr) => {
   console.log(`stardust server listening on ${addr.address}:${addr.port}`);
 });
+const closeSockets = attachSockets(server as unknown as import("node:http").Server, features, log);
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
     console.log(`stardust server stopping (${signal})`);
+    closeSockets();
     server.close();
     void sql.end({ timeout: 5 });
   });

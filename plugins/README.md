@@ -59,6 +59,7 @@ plugins compiled in (enforced by `only-bundle-loads-plugins`), and
 | `dns-cloudflare`   | `dns` (`cloudflare`)                                 |        |
 | `dns-parallax`     | `dns` (`parallax`, internal/external views)          |        |
 | `domains`          | (feature: requires `dns`, `globalDatabase`)          |        |
+| `nodes`            | (feature: requires `database`)                       |        |
 | `gitops-git`       | `deployRepo`                                         |        |
 | `identity-oidc`    | `identity`                                           |        |
 | `logs-kube`        | `logs` (`kube`, live)                                | `kube` |
