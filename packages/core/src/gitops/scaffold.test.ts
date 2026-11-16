@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { parseAllDocuments } from "yaml";
+import { parse, parseAllDocuments } from "yaml";
 import { manifestUsesImage, scaffoldComponent } from "./scaffold.ts";
 
 it("finds a manifest that uses the component's image, whatever the registry", () => {
@@ -46,4 +46,34 @@ it("scaffolds a deliverable component: the image a delivery will bump, a Service
     () => scaffoldComponent({ project: "demo", component: "Api", namespace: "demo", imageRepository: "r/x" }),
     /DNS label/,
   );
+});
+
+it("declares the namespace when asked, restricted, listed before what runs in it", () => {
+  const files = scaffoldComponent({
+    project: "pico",
+    component: "push",
+    namespace: "pico",
+    imageRepository: "registry.example.com/pico/push",
+    port: 8788,
+    createNamespace: true,
+  });
+  const ns = parse(files.get("namespace.yaml") ?? "") as {
+    kind: string;
+    metadata: { name: string; labels: Record<string, string> };
+  };
+  assert.equal(ns.kind, "Namespace");
+  assert.equal(ns.metadata.name, "pico");
+  assert.equal(ns.metadata.labels["pod-security.kubernetes.io/enforce"], "restricted");
+  assert.deepEqual((parse(files.get("kustomization.yaml") ?? "") as { resources: string[] }).resources, [
+    "namespace.yaml",
+    "deployment.yaml",
+    "service.yaml",
+  ]);
+  const without = scaffoldComponent({
+    project: "pico",
+    component: "push",
+    namespace: "pico",
+    imageRepository: "registry.example.com/pico/push",
+  });
+  assert.equal(without.has("namespace.yaml"), false);
 });

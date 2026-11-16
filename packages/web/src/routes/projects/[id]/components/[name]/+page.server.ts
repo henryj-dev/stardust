@@ -75,6 +75,7 @@ export const actions: Actions = {
       const result = await client.scaffold(params.id, params.name, {
         namespace: String(form.get("namespace") ?? ""),
         ...(Number.isInteger(port) && port > 0 ? { port } : {}),
+        ...(form.get("createNamespace") === "on" ? { createNamespace: true } : {}),
       });
       return { scaffolded: result };
     } catch (err) {

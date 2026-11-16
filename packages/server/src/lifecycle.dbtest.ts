@@ -65,6 +65,7 @@ describe("a project's life", () => {
       409,
     );
     assert.equal((await call("POST", "/api/v1/projects/shop/runs", {})).status, 201);
+    assert.equal(repo.files()["apps/kustomization.yaml"], "resources:\n  - shop/api\n  - other\n", "already listed");
   });
 
   it("adds, changes and removes one component without touching the others", async () => {

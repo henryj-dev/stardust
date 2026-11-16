@@ -1,5 +1,6 @@
 import {
   type Action,
+  addResource,
   type BuildLogReader,
   buildDecision,
   buildLogKey,
@@ -1030,10 +1031,16 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
         404,
       );
     }
-    const body = (await c.req.json().catch(() => ({}))) as { namespace?: unknown; port?: unknown } | null;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      namespace?: unknown;
+      port?: unknown;
+      createNamespace?: unknown;
+    } | null;
     if (typeof body?.namespace !== "string") return c.json({ error: "namespace is required" }, 400);
     if (body.port !== undefined && typeof body.port !== "number")
       return c.json({ error: "port must be a number" }, 400);
+    if (body.createNamespace !== undefined && typeof body.createNamespace !== "boolean")
+      return c.json({ error: "createNamespace must be true or false" }, 400);
     let files: Map<string, string>;
     try {
       files = scaffoldComponent({
@@ -1042,18 +1049,38 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
         namespace: body.namespace,
         imageRepository: services.images.repository(project.id, component.name),
         ...(typeof body.port === "number" ? { port: body.port } : {}),
+        ...(body.createNamespace === true ? { createNamespace: true } : {}),
       });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }
     let occupied = false;
+    let listedIn: string | null = null;
     const result = await commitWithCas(repo, async (_head, at) => {
       occupied = (await at.list(component.deployDir)).length > 0;
       if (occupied) return null;
-      return {
-        files: new Map([...files].map(([name, text]) => [`${component.deployDir}/${name}`, text])),
-        message: `chore(${project.id}/${component.name}): scaffold manifests`,
-      };
+      const commit = new Map([...files].map(([name, text]) => [`${component.deployDir}/${name}`, text]));
+      // The GitOps controller applies what a kustomization lists: list the new directory in the
+      // nearest one above it, by its path from there, as withdrawing a project removes it.
+      listedIn = null;
+      const parts = component.deployDir.replace(/\/+$/, "").split("/");
+      search: for (let depth = parts.length - 1; depth >= 0; depth--) {
+        const dir = parts.slice(0, depth).join("/");
+        for (const k of ["kustomization.yaml", "kustomization.yml"]) {
+          const path = dir ? `${dir}/${k}` : k;
+          const file = await at.read(path);
+          if (!file) continue;
+          try {
+            const next = addResource(file.content, parts.slice(depth).join("/"));
+            if (next !== file.content) commit.set(path, next);
+            listedIn = path;
+          } catch {
+            // A kustomization without a resources list is not one to add to.
+          }
+          break search;
+        }
+      }
+      return { files: commit, message: `chore(${project.id}/${component.name}): scaffold manifests` };
     });
     if (occupied)
       return c.json({ error: `${component.deployDir} is not empty; stardust does not overwrite manifests` }, 409);
@@ -1063,9 +1090,9 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       action: "project.component.scaffold",
       projectId: project.id,
       target: component.name,
-      detail: { deployDir: component.deployDir, files: [...files.keys()], deployCommit },
+      detail: { deployDir: component.deployDir, files: [...files.keys()], listedIn, deployCommit },
     });
-    return c.json({ deployCommit, files: [...files.keys()].map((f) => `${component.deployDir}/${f}`) }, 201);
+    return c.json({ deployCommit, files: [...files.keys()].map((f) => `${component.deployDir}/${f}`), listedIn }, 201);
   });
 
   // Deletes a project with its runs and memberships (the audit log keeps
