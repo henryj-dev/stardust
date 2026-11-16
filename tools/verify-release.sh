@@ -5,7 +5,8 @@
 #
 # Pulls the chart from GHCR, reads the image digests pinned in it, and checks
 # with cosign that the chart and every pinned image were signed by the release
-# workflow on main. As a control, it also requires verification against a
+# workflow on main. The Vultr broker image is not in the chart (it is a separate
+# trust boundary), so it is checked by its release tag instead. As a control, it also requires verification against a
 # wrong identity to FAIL — otherwise "verified" would not mean anything.
 # Needs helm, cosign and a registry login that can read the packages.
 set -euo pipefail
@@ -62,6 +63,21 @@ for component in server worker web; do
     bad "$component-signature" "$(tail -1 "$work/$component.err")"
   fi
 done
+
+# The Vultr broker, by its release tag: cosign resolves the tag and verifies the
+# digest it points to, and the verified digest is printed for pinning.
+broker="$registry/stardust-vultr-broker"
+if cosign verify "$broker:$version" --certificate-oidc-issuer "$issuer" --certificate-identity "$identity" \
+  >"$work/vultr-broker.json" 2>"$work/vultr-broker.err"; then
+  broker_digest="$(grep -o '"docker-manifest-digest":"sha256:[a-f0-9]\{64\}"' "$work/vultr-broker.json" | head -1 | cut -d'"' -f4)"
+  if [[ "$broker_digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+    ok "vultr-broker-signature $broker_digest"
+  else
+    bad vultr-broker-signature "cosign verified $broker:$version but reported no digest"
+  fi
+else
+  bad vultr-broker-signature "$(tail -1 "$work/vultr-broker.err")"
+fi
 
 if [ "$failures" -ne 0 ]; then
   echo "$failures check(s) failed for $version" >&2

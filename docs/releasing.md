@@ -28,13 +28,15 @@ or configuration and `patch` for fixes.
    `charts/stardust/CHANGELOG.md`.
 2. When you want to release, **merge that pull request.**
 3. The workflow sees a version that has not been released and:
-   1. builds `stardust-server`, `stardust-worker` and `stardust-web` for amd64
-      and arm64, pushes them to GHCR, signs them with cosign and attaches an
+   1. builds `stardust-server`, `stardust-worker`, `stardust-web` and
+      `stardust-vultr-broker` for amd64 and arm64 (the broker after its tests
+      pass), pushes them to GHCR, signs them with cosign and attaches an
       SBOM and build provenance (GitHub-stored attestations are added once the
       repository is public; the free plan does not offer them for private ones);
-   2. writes the image digests into the chart, checks that all three images
-      are pinned, pushes the chart to `oci://ghcr.io/henryj-dev/charts/stardust`
-      and signs it;
+   2. writes the server, worker and web digests into the chart, checks that all
+      three are pinned and that the chart does not reference the broker, pushes
+      the chart to `oci://ghcr.io/henryj-dev/charts/stardust` and signs it. The
+      broker is deployed separately (see `broker/vultr/README.md`);
    3. creates the tag `vX.Y.Z` and a GitHub release with the changelog and
       every digest.
 

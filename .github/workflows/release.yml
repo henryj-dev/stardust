@@ -61,7 +61,7 @@ jobs:
         run: tools/release-plan.sh origin
 
   images:
-    name: image (${{ matrix.target }})
+    name: image (${{ matrix.component || matrix.target }})
     needs: changesets
     if: needs.changesets.outputs.release == 'true'
     runs-on: ubuntu-24.04
@@ -75,8 +75,18 @@ jobs:
       fail-fast: true
       matrix:
         target: [server, worker, web]
+        # The Vultr broker is published with every release but deliberately left
+        # out of the chart: it holds the cloud key and is a separate trust boundary
+        # that operators deploy with their own manifests.
+        include:
+          - component: vultr-broker
+            file: broker/vultr/Dockerfile
+            target: runtime
+            test-target: test
+            build-args: BUILD_SHA=${{ github.sha }}
     env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/stardust-${{ matrix.target }}
+      COMPONENT: ${{ matrix.component || matrix.target }}
+      IMAGE: ghcr.io/${{ github.repository_owner }}/stardust-${{ matrix.component || matrix.target }}
       VERSION: ${{ needs.changesets.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -89,18 +99,33 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Images with a test stage run it first, so a release never ships an image
+      # whose tests fail. The layers it builds are reused by the push below.
+      - if: matrix.test-target
+        name: Run the image's tests
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          target: ${{ matrix.test-target }}
+          platforms: linux/amd64
+          outputs: type=cacheonly
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=${{ env.COMPONENT }}
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
+          file: ${{ matrix.file }}
           target: ${{ matrix.target }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ env.IMAGE }}:${{ env.VERSION }}
-          build-args: VERSION=${{ env.VERSION }}
+          build-args: ${{ matrix.build-args || format('VERSION={0}', env.VERSION) }}
           provenance: mode=max
           sbom: true
-          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-from: type=gha,scope=${{ env.COMPONENT }}
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Sign the image
         env:
@@ -117,11 +142,11 @@ jobs:
       - name: Record the digest
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: mkdir -p digests && echo "$DIGEST" >"digests/${{ matrix.target }}"
+        run: mkdir -p digests && echo "$DIGEST" >"digests/${COMPONENT}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: digest-${{ matrix.target }}
-          path: digests/${{ matrix.target }}
+          name: digest-${{ env.COMPONENT }}
+          path: digests/${{ env.COMPONENT }}
           if-no-files-found: error
 
   chart:
@@ -157,12 +182,22 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # digests/ also holds vultr-broker, which the chart must never reference;
+      # prepare-chart.sh reads only server, worker and web.
       - name: Stamp version and digests into the chart
         run: tools/prepare-chart.sh "$VERSION" digests
       - name: Check that every image is pinned
         run: |
           pinned="$(helm template t charts/stardust --set database.existingSecret=db | grep -c '@sha256:')"
           [ "$pinned" = "3" ] || { echo "expected 3 pinned images, found $pinned"; exit 1; }
+      - name: Check that the chart does not deploy the broker
+        run: |
+          if helm template t charts/stardust --set database.existingSecret=db | grep -n 'vultr-broker'; then
+            echo "the chart must not reference the Vultr broker image"; exit 1
+          fi
+          if grep -n 'vultr-broker' charts/stardust/values.yaml; then
+            echo "values.yaml must not reference the Vultr broker image"; exit 1
+          fi
       - id: push
         name: Push and sign the chart
         env:
@@ -209,7 +244,7 @@ jobs:
             echo "| Artifact | Digest |"
             echo "|---|---|"
             echo "| \`${REGISTRY}/charts/stardust:${VERSION}\` | \`${CHART_DIGEST}\` |"
-            for c in server worker web; do
+            for c in server worker web vultr-broker; do
               echo "| \`${REGISTRY}/stardust-${c}:${VERSION}\` | \`$(cat "digests/$c")\` |"
             done
             echo
@@ -217,6 +252,11 @@ jobs:
             echo
             echo '```sh'
             echo "cosign verify ${REGISTRY}/charts/stardust@${CHART_DIGEST} \\"
+            echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
+            echo "  --certificate-identity https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/heads/main"
+            echo
+            echo "# The Vultr broker is not in the chart; verify it on its own."
+            echo "cosign verify ${REGISTRY}/stardust-vultr-broker@$(cat digests/vultr-broker) \\"
             echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
             echo "  --certificate-identity https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/heads/main"
             echo '```'

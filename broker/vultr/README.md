@@ -79,10 +79,47 @@ The ledger's database role needs only `SELECT, INSERT, UPDATE, DELETE` on
   database. Blocking every other egress is the point.
 - Replicas are safe to add: the ledger is shared, so a ticket cannot be used twice.
 
-Build the image from the repository root:
+## Image
+
+Every release publishes the broker for `linux/amd64` and `linux/arm64`, built by the same
+release workflow as the other stardust images, signed with cosign (keyless) and attested:
+
+```
+ghcr.io/henryj-dev/stardust-vultr-broker:<version>
+```
+
+The release workflow runs the broker's tests (the `test` stage) before it pushes, so a
+published image has passed them. The image is **not** part of the Helm chart and never will
+be: the broker holds the Vultr key and is a separate trust boundary, so deploy it with your
+own manifests, in its own namespace if you can.
+
+**Pin it by digest.** A tag can be moved; a digest cannot. Each GitHub release lists the
+broker's digest in its Artifacts table. You can also resolve and verify a tag in one step:
+`cosign verify` (below) prints the digest it verified. Reference the image by that digest:
+
+```yaml
+image: ghcr.io/henryj-dev/stardust-vultr-broker:<version>@sha256:<digest>
+```
+
+**Verify the signature** before deploying a new digest:
 
 ```bash
-docker build -f broker/vultr/Dockerfile .
+cosign verify ghcr.io/henryj-dev/stardust-vultr-broker@sha256:<digest> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/henryj-dev/stardust/\.github/workflows/release\.yml@refs/heads/main$'
+```
+
+An admission or GitOps verifier (for example Flux's OCI verification or a cosign policy)
+should use the same issuer and identity regexp. The regexp is anchored: it accepts only the
+release workflow on `main`, not other workflows, branches or forks. The build provenance
+attestation can be checked with
+`gh attestation verify oci://ghcr.io/henryj-dev/stardust-vultr-broker@sha256:<digest> --repo henryj-dev/stardust`.
+
+To build the image yourself, from the repository root:
+
+```bash
+docker build -f broker/vultr/Dockerfile --target test .   # the tests
+docker build -f broker/vultr/Dockerfile .                 # the runtime image
 ```
 
 ## Audit log
