@@ -30,12 +30,18 @@ import {
   type AuditQuery,
   apiTokenFor,
   authenticate,
+  beginTotp,
   cancelJob,
   changePassword,
+  checkPassword,
+  checkSecondFactor,
+  confirmTotp,
   createApiToken,
+  createSession,
   createUser,
   deleteProject,
   endAllSessions,
+  endChallenge,
   endSession,
   getAuditEvent,
   getProject,
@@ -48,20 +54,26 @@ import {
   listRuns,
   listSessions,
   listUsers,
+  markReauthenticated,
+  newRecoveryCodesFor,
   type Project,
   ProjectError,
   projectRole,
   putProject,
   recordAudit,
+  removeTotp,
   revokeApiToken,
   type Sql,
   savePendingLogin,
+  sessionFreshness,
   setProjectRole,
-  signIn,
   signInWithIdentity,
   signOut,
+  startChallenge,
   startRun,
+  takeChallengeTry,
   takePendingLogin,
+  totpStatus,
   type User,
   type UserChange,
   updateUser,
@@ -97,6 +109,8 @@ export interface Services {
   env?: EnvEditor;
   /** Sign-in through an OpenID provider. Without it only passwords work. */
   oidc?: IdentityProvider;
+  /** How people sign in: local accounts and their second step, and how recent a sign-in must be. */
+  auth?: AuthPolicy;
   /** Where a component's builds are pushed, for scaffolding its manifests. Optional. */
   images?: ImageNaming;
   /** Kept build logs, served once the cluster has cleaned a build up. Optional. */
@@ -109,6 +123,20 @@ export interface Services {
   heartbeatMs?: number;
   log?: Logger;
 }
+
+export interface AuthPolicy {
+  /** Username-and-password sign-in. Off: single sign-on only (an operator can still reset a password on the host). */
+  localEnabled: boolean;
+  totp: "off" | "optional" | "required";
+  /** Seals TOTP secrets in the database. */
+  totpKey?: string;
+  /** How recent a sign-in must be for actions that cannot be undone. */
+  reauthMinutes: number;
+  /** Shown in authenticator apps. */
+  issuer: string;
+}
+
+const DEFAULT_AUTH: AuthPolicy = { localEnabled: true, totp: "optional", reauthMinutes: 10, issuer: "stardust" };
 
 const silent: Logger = { debug() {}, info() {}, warn() {}, error() {} };
 
@@ -125,6 +153,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   // write to a global table use the global one; the rest read locally.
   const { sql } = services;
   const globalSql = services.globalSql ?? sql;
+  const authPolicy = services.auth ?? DEFAULT_AUTH;
   const log = services.log ?? silent;
 
   // Adds an audit event; also for requests that have no session yet (signing in).
@@ -143,11 +172,12 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   );
 
   app.post("/api/v1/auth/login", async (c) => {
+    if (!authPolicy.localEnabled) return c.json({ error: "password sign-in is off: use single sign-on" }, 403);
     const body = (await c.req.json().catch(() => null)) as { username?: unknown; password?: unknown } | null;
     if (typeof body?.username !== "string" || typeof body.password !== "string") {
       return c.json({ error: "username and password are required" }, 400);
     }
-    const result = await signIn(globalSql, body.username, body.password);
+    const result = await checkPassword(globalSql, body.username, body.password);
     if (!result.ok) {
       // Only an existing username is logged: people type passwords into the username field.
       log.warn("sign-in refused", {
@@ -163,13 +193,50 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
         ? c.json({ error: "too many failed attempts; try again later" }, 429)
         : c.json({ error: "invalid username or password" }, 401);
     }
+    // The password was right; with TOTP set up, the session waits for the code.
+    if (authPolicy.totp !== "off" && (await totpStatus(globalSql, result.user.id)).enrolled) {
+      return c.json({ secondFactor: "totp", challenge: await startChallenge(globalSql, result.user.id) });
+    }
+    const token = await createSession(globalSql, result.user.id, "password");
     log.info("signed in", { username: result.user.username });
     await auditAnonymous(c, {
       action: "auth.login",
       actor: { kind: "user", userId: result.user.id, name: result.user.username },
       detail: { via: "password" },
     });
-    return c.json({ token: result.token, user: result.user });
+    return c.json({ token, user: result.user });
+  });
+
+  // The second step: the challenge from the password step and a TOTP or recovery code.
+  app.post("/api/v1/auth/login/totp", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { challenge?: unknown; code?: unknown } | null;
+    if (typeof body?.challenge !== "string" || typeof body.code !== "string") {
+      return c.json({ error: "challenge and code are required" }, 400);
+    }
+    const userId = await takeChallengeTry(globalSql, body.challenge);
+    if (!userId) return c.json({ error: "this sign-in has expired; start again" }, 401);
+    const kind = await checkSecondFactor(globalSql, userId, body.code, authPolicy.totpKey);
+    const [user] = await globalSql<{ id: string; username: string; display_name: string; is_admin: boolean }[]>`
+      SELECT id, username, display_name, is_admin FROM users WHERE id = ${userId} AND NOT disabled`;
+    if (!kind || !user) {
+      await auditAnonymous(c, {
+        action: "auth.login.failed",
+        actor: { kind: "anonymous", userId: null, name: user?.username ?? null },
+        detail: { via: "password", reason: "second-factor" },
+      });
+      return c.json({ error: "that code is not right" }, 401);
+    }
+    await endChallenge(globalSql, body.challenge);
+    const token = await createSession(globalSql, user.id, "password");
+    await auditAnonymous(c, {
+      action: "auth.login",
+      actor: { kind: "user", userId: user.id, name: user.username },
+      detail: { via: "password", secondFactor: kind },
+    });
+    return c.json({
+      token,
+      user: { id: user.id, username: user.username, displayName: user.display_name, isAdmin: user.is_admin },
+    });
   });
 
   app.get("/api/v1/auth/methods", (c) =>
@@ -275,6 +342,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     "/api/v1/auth/oidc/start",
     "/api/v1/auth/oidc/callback",
     "/api/v1/auth/link",
+    "/api/v1/auth/login/totp",
   ]);
   app.use("/api/v1/*", async (c, next) => {
     if (PUBLIC_PATHS.has(c.req.path)) return next();
@@ -284,8 +352,28 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (!user) return c.json({ error: "unauthorized" }, 401);
     c.set("user", user);
     c.set("token", token);
+    // With TOTP required, a password session without it may only set it up (or leave).
+    if (authPolicy.totp === "required" && !token.startsWith(API_TOKEN_PREFIX) && !SETUP_PATHS.test(c.req.path)) {
+      const fresh = await sessionFreshness(globalSql, token);
+      if (fresh?.via === "password" && !(await totpStatus(globalSql, user.id)).enrolled) {
+        return c.json({ error: "set up two-step sign-in first", totpSetupRequired: true }, 403);
+      }
+    }
     await next();
   });
+
+  /**
+   * Null when the session proved its sign-in recently enough for an action
+   * that cannot be undone; otherwise the 401 to send. API tokens pass: they
+   * are credentials made for automation, not a browser left open.
+   */
+  const requireFresh = async (c: Context<Env>): Promise<Response | null> => {
+    const token = c.get("token");
+    if (token.startsWith(API_TOKEN_PREFIX)) return null;
+    const fresh = await sessionFreshness(globalSql, token);
+    if (fresh && fresh.ageSeconds <= authPolicy.reauthMinutes * 60) return null;
+    return c.json({ error: "confirm it is you first", reauthRequired: true, via: fresh?.via ?? "password" }, 401);
+  };
 
   /** Null when allowed; otherwise the response to send. Unreadable projects are 404, not 403. */
   const deny = async (c: Context<Env>, action: Action, projectId?: string): Promise<Response | null> => {
@@ -314,6 +402,103 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   };
 
   app.get("/api/v1/session", (c) => c.json({ user: c.get("user") }));
+
+  // Two-step sign-in for one's own local account.
+  const localSession = async (c: Context<Env>): Promise<Response | null> => {
+    if (authPolicy.totp === "off") return c.json({ error: "two-step sign-in is off on this server" }, 404);
+    if (c.get("token").startsWith(API_TOKEN_PREFIX)) return c.json({ error: "use a session, not an API token" }, 403);
+    const fresh = await sessionFreshness(globalSql, c.get("token"));
+    if (fresh?.via !== "password") {
+      return c.json({ error: "this session is from single sign-on: its second step is the provider's" }, 409);
+    }
+    return null;
+  };
+
+  app.get("/api/v1/account/totp", async (c) =>
+    c.json({ policy: authPolicy.totp, ...(await totpStatus(globalSql, c.get("user").id)) }),
+  );
+
+  app.post("/api/v1/account/totp/setup", async (c) => {
+    const refused = await localSession(c);
+    if (refused) return refused;
+    const user = c.get("user");
+    const begun = await beginTotp(globalSql, user.id, user.username, authPolicy.issuer, authPolicy.totpKey);
+    if (!begun) return c.json({ error: "two-step sign-in is set up already: turn it off first to start again" }, 409);
+    // The secret is in this answer only, for the authenticator app.
+    return c.json(begun);
+  });
+
+  app.post("/api/v1/account/totp/confirm", async (c) => {
+    const refused = await localSession(c);
+    if (refused) return refused;
+    const body = (await c.req.json().catch(() => null)) as { code?: unknown } | null;
+    if (typeof body?.code !== "string") return c.json({ error: "code is required" }, 400);
+    const codes = await confirmTotp(globalSql, c.get("user").id, body.code, authPolicy.totpKey);
+    if (!codes) return c.json({ error: "that code is not right, or there is nothing to confirm" }, 400);
+    await markReauthenticated(globalSql, c.get("token"));
+    await audit(c, { action: "account.totp.on", target: c.get("user").username });
+    return c.json({ recoveryCodes: codes });
+  });
+
+  app.post("/api/v1/account/totp/recovery-codes", async (c) => {
+    const refused = await localSession(c);
+    if (refused) return refused;
+    const body = (await c.req.json().catch(() => null)) as { code?: unknown } | null;
+    const user = c.get("user");
+    if (
+      typeof body?.code !== "string" ||
+      (await checkSecondFactor(globalSql, user.id, body.code, authPolicy.totpKey)) !== "totp"
+    ) {
+      return c.json({ error: "a current code from your app is required" }, 403);
+    }
+    const codes = await newRecoveryCodesFor(globalSql, user.id);
+    await audit(c, { action: "account.totp.recovery-codes", target: user.username });
+    return c.json({ recoveryCodes: codes });
+  });
+
+  app.delete("/api/v1/account/totp", async (c) => {
+    const refused = await localSession(c);
+    if (refused) return refused;
+    if (authPolicy.totp === "required") return c.json({ error: "two-step sign-in is required on this server" }, 409);
+    const body = (await c.req.json().catch(() => null)) as { code?: unknown } | null;
+    const user = c.get("user");
+    if (
+      typeof body?.code !== "string" ||
+      !(await checkSecondFactor(globalSql, user.id, body.code, authPolicy.totpKey))
+    ) {
+      return c.json({ error: "a current code (or a recovery code) is required" }, 403);
+    }
+    await removeTotp(globalSql, user.id);
+    await audit(c, { action: "account.totp.off", target: user.username });
+    return c.json({ ok: true });
+  });
+
+  // Proving the sign-in again, before an action that cannot be undone. A
+  // password session answers with its code (or its password without TOTP);
+  // a single sign-on session signs in again at the provider.
+  app.post("/api/v1/account/reauth", async (c) => {
+    const user = c.get("user");
+    const fresh = await sessionFreshness(globalSql, c.get("token"));
+    if (!fresh) return c.json({ error: "use a session, not an API token" }, 403);
+    if (fresh.via === "oidc") return c.json({ error: "sign in again through single sign-on", via: "oidc" }, 409);
+    const body = (await c.req.json().catch(() => null)) as { code?: unknown; password?: unknown } | null;
+    const enrolled = authPolicy.totp !== "off" && (await totpStatus(globalSql, user.id)).enrolled;
+    const ok = enrolled
+      ? typeof body?.code === "string" &&
+        (await checkSecondFactor(globalSql, user.id, body.code, authPolicy.totpKey)) !== null
+      : typeof body?.password === "string" && (await checkPassword(globalSql, user.username, body.password)).ok;
+    if (!ok)
+      return c.json(
+        {
+          error: enrolled ? "that code is not right" : "that password is not right",
+          needs: enrolled ? "code" : "password",
+        },
+        403,
+      );
+    await markReauthenticated(globalSql, c.get("token"));
+    await audit(c, { action: "account.reauth", target: user.username });
+    return c.json({ ok: true });
+  });
 
   // One's own account: password and sessions.
   app.post("/api/v1/account/password", async (c) => {
@@ -350,7 +535,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
 
   // An administrator: a one-time link for someone to set their password, or ending everything that acts as them.
   app.post("/api/v1/users/:username/links", async (c) => {
-    const denied = await deny(c, "admin");
+    const denied = (await deny(c, "admin")) ?? (await requireFresh(c));
     if (denied) return denied;
     const body = (await c.req.json().catch(() => null)) as { purpose?: unknown } | null;
     if (body?.purpose !== "invite" && body?.purpose !== "reset")
@@ -376,6 +561,18 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       { token: result.token, path: `/account/link/${result.token}`, expiresAt: result.expiresAt.toISOString() },
       201,
     );
+  });
+
+  // After a lost phone: an administrator turns the person's TOTP off; they set it up again.
+  app.delete("/api/v1/users/:username/totp", async (c) => {
+    const denied = (await deny(c, "admin")) ?? (await requireFresh(c));
+    if (denied) return denied;
+    const username = c.req.param("username");
+    const [user] = await globalSql<{ id: string }[]>`SELECT id FROM users WHERE username = ${username}`;
+    if (!user || !(await removeTotp(globalSql, user.id)))
+      return c.json({ error: "this user has no two-step sign-in" }, 404);
+    await audit(c, { action: "user.totp.reset", target: username });
+    return c.json({ ok: true });
   });
 
   app.post("/api/v1/users/:username/sessions/end", async (c) => {
@@ -706,7 +903,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   // from the deploy repository first, in one commit, so the GitOps
   // controller prunes what they deployed. The body must repeat the id.
   app.delete("/api/v1/projects/:id", async (c) => {
-    const denied = await deny(c, "admin");
+    const denied = (await deny(c, "admin")) ?? (await requireFresh(c));
     if (denied) return denied;
     const project = await getProject(sql, c.req.param("id"));
     if (!project) return c.json({ error: "unknown project" }, 404);
@@ -1225,6 +1422,9 @@ export function auditQuery(params: Record<string, string>): AuditQuery | string 
 // characters git refuses or a URL would need escaping for.
 const REF_NAME = /^(?![-/])(?!.*\.\.)(?!.*\/\/)(?!.*[/.]$)[A-Za-z0-9._/-]{1,200}$/;
 const COMMIT = /^[0-9a-f]{40}$/;
+/** What a password session without TOTP may still do where TOTP is required. */
+const SETUP_PATHS = /^\/api\/v1\/(session|auth\/logout|account\/totp(\/setup|\/confirm)?)$/;
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** The target of a manual run from its request body, or why the body is wrong. */

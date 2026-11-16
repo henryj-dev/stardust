@@ -106,6 +106,15 @@ pull request.
   session (401) and a user without a role (403, or 404 for a project), so a
   new route without a check fails CI (`packages/server/src/app.dbtest.ts`).
 - Projects a user cannot read answer 404, so their names do not leak.
+- Local two-step sign-in: TOTP codes are accepted one step either side of
+  now and each step once (the last used step only moves forward, in one
+  `UPDATE`); recovery codes are stored as hashes and used once; the challenge
+  between password and code lives five minutes and allows five tries. TOTP
+  secrets are sealed with AES-256-GCM under `auth.local.totpKey` when it is
+  set; without it a database dump holds them (passwords stay scrypt hashes).
+- Actions that cannot be undone (deleting a project, issuing a sign-in link,
+  resetting TOTP) need a session that proved its sign-in within
+  `auth.reauthMinutes`, so a browser left signed in is not enough.
 - Plugin routes live under `/api/v1/plugins/<plugin>/` behind the same
   sign-in. A plugin cannot declare a route without one of its own
   permissions (`<plugin>:<verb>`, granted to admins or to anyone signed in),

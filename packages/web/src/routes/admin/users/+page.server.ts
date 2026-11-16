@@ -1,6 +1,7 @@
 import { ApiError } from "@stardust/sdk";
 import { error, fail } from "@sveltejs/kit";
 import { requireClient } from "$lib/server/api";
+import { needsReauth, reauthFrom } from "$lib/server/reauth";
 import type { Actions, PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ locals, url }) => {
@@ -11,11 +12,26 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
 /** The server's reason for a refusal it explains (4xx); anything else is an error page. */
 const refused = (err: unknown) => {
+  if (needsReauth(err)) return fail(401, { error: "Confirm it is you first (below), then try again.", reauth: true });
   if (err instanceof ApiError && err.status < 500) return fail(err.status, { error: err.message });
   throw err;
 };
 
 export const actions: Actions = {
+  reauth: async ({ locals, request, url }) => {
+    const problem = await reauthFrom(requireClient(locals, url), await request.formData());
+    return problem ? fail(403, { error: problem, reauth: true }) : { confirmed: true };
+  },
+  resetTotp: async ({ locals, request, url }) => {
+    const client = requireClient(locals, url);
+    const username = String((await request.formData()).get("username") ?? "");
+    try {
+      await client.resetTotp(username);
+      return { updated: username };
+    } catch (err) {
+      return refused(err);
+    }
+  },
   create: async ({ locals, request, url }) => {
     const client = requireClient(locals, url);
     const form = await request.formData();

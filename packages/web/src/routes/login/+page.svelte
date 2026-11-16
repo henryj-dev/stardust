@@ -8,6 +8,15 @@ let { data, form } = $props();
 
 <main>
   <h1>Sign in</h1>
+  {#if form?.secondFactor}
+    <form method="POST" action={`?/code&next=${encodeURIComponent(data.next)}`} data-second-factor>
+      <label>
+        Code from your authenticator app, or a recovery code
+        <input name="code" autocomplete="one-time-code" inputmode="numeric" required />
+      </label>
+      <button type="submit">Continue</button>
+    </form>
+  {:else}
   {#if data.oidc}
     <form method="POST" action="?/oidc">
       <button type="submit">Sign in with {data.oidc.displayName}</button>
@@ -26,6 +35,7 @@ let { data, form } = $props();
     </label>
     <button type="submit">Sign in</button>
   </form>
+  {/if}
   {#if form?.error ?? data.error}
     <p role="alert">{form?.error ?? data.error}</p>
   {/if}

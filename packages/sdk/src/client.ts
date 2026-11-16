@@ -175,7 +175,16 @@ export interface SessionUser {
 
 export type LoginResult =
   | { ok: true; token: string; user: SessionUser }
-  | { ok: false; reason: "invalid" | "locked"; message: string };
+  /** The password was right; send a TOTP or recovery code with `loginCode(challenge, code)`. */
+  | { ok: false; reason: "second-factor"; challenge: string; message: string }
+  | { ok: false; reason: "invalid" | "locked" | "off"; message: string };
+
+export interface TotpState {
+  policy: "off" | "optional" | "required";
+  enrolled: boolean;
+  pending: boolean;
+  recoveryCodesLeft: number;
+}
 
 /** The enabled plugins, by name, and what each adds (e.g. `runtime.restart`). */
 export interface Capabilities {
@@ -232,6 +241,25 @@ export interface Client {
   health(): Promise<{ status: string; version: string }>;
   /** Signs in with a username and password. Wrong credentials and lockout are results, not errors. */
   login(username: string, password: string): Promise<LoginResult>;
+  /** The second step of a sign-in: the challenge from `login` and a TOTP or recovery code. */
+  loginCode(challenge: string, code: string): Promise<LoginResult>;
+  /** One's own two-step sign-in. */
+  totp(): Promise<TotpState>;
+  /** A new secret for the authenticator app (shown only here); confirm it with a first code. */
+  totpSetup(): Promise<{ secret: string; uri: string }>;
+  /** Confirms the setup; returns ten recovery codes, shown only here. */
+  totpConfirm(code: string): Promise<string[]>;
+  /** New recovery codes (the old ones stop working), after a current code. */
+  totpRecoveryCodes(code: string): Promise<string[]>;
+  /** Turns two-step sign-in off, after a current or recovery code. */
+  totpOff(code: string): Promise<void>;
+  /**
+   * Proves the sign-in again before an action that cannot be undone: a code
+   * with TOTP, the password without. ApiError 409 for a single sign-on session.
+   */
+  reauth(proof: { code?: string; password?: string }): Promise<void>;
+  /** Turns someone's TOTP off after a lost phone (administrators). */
+  resetTotp(username: string): Promise<void>;
   /** Ends the session of the client's token. */
   logout(): Promise<void>;
   /** Which ways of signing in the server offers. */
@@ -393,13 +421,63 @@ export function createClient(options: ClientOptions): Client {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-      if (res.status === 401 || res.status === 429) {
+      if (res.status === 401 || res.status === 429 || res.status === 403) {
         const { error } = (await res.json().catch(() => ({ error: "" }))) as { error: string };
-        return { ok: false, reason: res.status === 429 ? "locked" : "invalid", message: error };
+        return {
+          ok: false,
+          reason: res.status === 429 ? "locked" : res.status === 403 ? "off" : "invalid",
+          message: error,
+        };
       }
       if (!res.ok) throw new ApiError(res.status, `POST /api/v1/auth/login failed: ${res.status}`);
+      const body = (await res.json()) as { token?: string; user?: SessionUser; challenge?: string };
+      if (body.challenge)
+        return { ok: false, reason: "second-factor", challenge: body.challenge, message: "enter a code" };
+      return { ok: true, token: body.token as string, user: body.user as SessionUser };
+    },
+    async loginCode(challenge, code) {
+      const res = await doFetch(`${base}/api/v1/auth/login/totp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ challenge, code }),
+      });
+      if (res.status === 401) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error: string };
+        return { ok: false, reason: "invalid", message: error };
+      }
+      if (!res.ok) throw new ApiError(res.status, `POST /api/v1/auth/login/totp failed: ${res.status}`);
       const body = (await res.json()) as { token: string; user: SessionUser };
       return { ok: true, token: body.token, user: body.user };
+    },
+    async totp() {
+      return (await (await get("/api/v1/account/totp")).json()) as TotpState;
+    },
+    async totpSetup() {
+      return (await post("/api/v1/account/totp/setup", {})) as { secret: string; uri: string };
+    },
+    async totpConfirm(code) {
+      return ((await post("/api/v1/account/totp/confirm", { code })) as { recoveryCodes: string[] }).recoveryCodes;
+    },
+    async totpRecoveryCodes(code) {
+      return ((await post("/api/v1/account/totp/recovery-codes", { code })) as { recoveryCodes: string[] })
+        .recoveryCodes;
+    },
+    async totpOff(code) {
+      const res = await doFetch(`${base}/api/v1/account/totp`, {
+        method: "DELETE",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `DELETE /api/v1/account/totp failed: ${res.status}`);
+      }
+    },
+    async reauth(proof) {
+      await post("/api/v1/account/reauth", proof);
+    },
+    async resetTotp(username) {
+      await get(`/api/v1/users/${encodeURIComponent(username)}/totp`, { method: "DELETE" });
     },
     plugin(name) {
       const root = `/api/v1/plugins/${encodeURIComponent(name)}`;

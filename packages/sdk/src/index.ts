@@ -22,6 +22,7 @@ export type {
   RunView,
   SessionInfo,
   SessionUser,
+  TotpState,
   UserView,
 } from "./client.ts";
 export { ApiError, createClient } from "./client.ts";

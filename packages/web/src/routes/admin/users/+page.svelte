@@ -10,6 +10,14 @@ let { data, form } = $props();
   <h1>Users</h1>
   {#if form?.error}
     <p role="alert" data-users-error>{form.error}</p>
+    {#if form.reauth}
+      <form method="POST" action="?/reauth" data-reauth>
+        <label>Your password, or a code from your app <input name="proof" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Confirm</button>
+      </form>
+    {/if}
+  {:else if form?.confirmed}
+    <p data-confirmed>Confirmed for the next few minutes.</p>
   {:else if form?.link}
     <div data-link>
       <p>Give this link to <strong>{form.link.username}</strong> to set their password. It works once, until {new Date(form.link.expiresAt).toLocaleString()}, and is not shown again:</p>
@@ -50,6 +58,10 @@ let { data, form } = $props();
                 <button type="submit">{u.disabled ? "Enable" : "Disable"}</button>
               </form>
             {/if}
+            <form method="POST" action="?/resetTotp">
+              <input type="hidden" name="username" value={u.username} />
+              <button type="submit" title="After a lost phone">Reset two-step sign-in</button>
+            </form>
             <form method="POST" action="?/endSessions">
               <input type="hidden" name="username" value={u.username} />
               <button type="submit">End sessions</button>

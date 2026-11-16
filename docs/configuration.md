@@ -49,6 +49,27 @@ plugins:
   a link ends every session and API token of the account. People change their
   own password, and see and end their sessions, on `/account`; an
   administrator can end all of someone's sessions and tokens at once.
+- **Two-step sign-in** for local accounts, with any authenticator app (TOTP,
+  RFC 6238) and ten one-time recovery codes, set up on `/account`. A session
+  from single sign-on has no second step here: that is the provider's.
+
+  ```yaml
+  auth:
+    local:
+      enabled: true # false: single sign-on only
+      totp: optional # off | optional | required
+      totpKey: { env: TOTP_KEY } # optional, 32+ characters: seals TOTP secrets in the database
+    reauthMinutes: 10
+  ```
+
+  With `required`, a password session without TOTP can only set it up. Without
+  `totpKey` the secrets are stored as they are (the server says so at start-up).
+  An administrator can turn someone's TOTP off after a lost phone.
+- **Confirming it is you.** Deleting a project, issuing a sign-in link and
+  resetting someone's TOTP need a sign-in from the last `reauthMinutes`: the
+  page asks for the password, or a code when TOTP is on
+  (`POST /api/v1/account/reauth`). API tokens pass; they are credentials made
+  for automation.
 - **Roles** are per project: `maintainer` changes it, `viewer` reads it.
   Administrators do everything. Someone who is not a member gets 404 for a
   project, so project names do not leak.

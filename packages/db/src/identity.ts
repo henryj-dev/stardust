@@ -124,12 +124,16 @@ export type SignInResult =
 /** Longer passwords are refused before hashing: scrypt over megabytes is a cheap way to burn CPU. */
 export const MAX_PASSWORD_LENGTH = 1024;
 
-export async function signIn(
+/**
+ * Checks a username and password with lockout, without starting a session —
+ * for a sign-in that still needs a second step. `signIn` is this plus a session.
+ */
+export async function checkPassword(
   sql: Sql,
   username: string,
   password: string,
   policy: SignInPolicy = DEFAULT_SIGN_IN,
-): Promise<SignInResult> {
+): Promise<{ ok: true; user: User } | { ok: false; reason: "invalid" | "locked"; knownUser: boolean }> {
   // Record the attempt first, then count. Parallel attempts each see at least
   // their own row and all earlier ones, so the k-th attempt counts >= k and at
   // most maxFailures get to the password check — without holding a lock (and
@@ -164,14 +168,38 @@ export async function signIn(
     return { ok: false, reason: "invalid", knownUser: row !== undefined };
   }
   await sql`DELETE FROM sign_in_failures WHERE username = ${username}`;
-  const token = randomBytes(32).toString("base64url");
-  await sql`
-    INSERT INTO sessions (user_id, token_hash, expires_at)
-    VALUES (${row.id}, ${tokenHash(token)}, now() + make_interval(hours => ${policy.sessionHours}))`;
   return {
     ok: true,
-    token,
     user: { id: row.id, username: row.username, displayName: row.display_name, isAdmin: row.is_admin },
+  };
+}
+
+/** Starts a session for a user who has proved who they are. Returns its token, shown once. */
+export async function createSession(
+  sql: Sql,
+  userId: string,
+  via: "password" | "oidc" = "password",
+  hours = DEFAULT_SIGN_IN.sessionHours,
+): Promise<string> {
+  const token = randomBytes(32).toString("base64url");
+  await sql`
+    INSERT INTO sessions (user_id, token_hash, expires_at, via)
+    VALUES (${userId}, ${tokenHash(token)}, now() + make_interval(hours => ${hours}), ${via})`;
+  return token;
+}
+
+export async function signIn(
+  sql: Sql,
+  username: string,
+  password: string,
+  policy: SignInPolicy = DEFAULT_SIGN_IN,
+): Promise<SignInResult> {
+  const checked = await checkPassword(sql, username, password, policy);
+  if (!checked.ok) return checked;
+  return {
+    ok: true,
+    token: await createSession(sql, checked.user.id, "password", policy.sessionHours),
+    user: checked.user,
   };
 }
 

@@ -34,6 +34,25 @@ export const configSchema = z.strictObject({
   database: z.strictObject({
     url: secretRef,
   }),
+  /**
+   * Signing in. Local accounts (username and password) are on unless turned
+   * off; their two-step sign-in (TOTP) is off, optional or required. An OIDC
+   * session's second step is the provider's. `reauthMinutes`: how recent a
+   * sign-in must be for actions that cannot be undone.
+   */
+  auth: z
+    .strictObject({
+      local: z
+        .strictObject({
+          enabled: z.boolean().default(true),
+          totp: z.enum(["off", "optional", "required"]).default("optional"),
+          /** Encrypts the TOTP secrets in the database. Without it they are stored as they are. */
+          totpKey: secretRef.optional(),
+        })
+        .default({ enabled: true, totp: "optional" }),
+      reauthMinutes: z.number().int().min(1).max(1440).default(10),
+    })
+    .default({ local: { enabled: true, totp: "optional" }, reauthMinutes: 10 }),
   /** Jobs across all workers. `maxRunning` caps how many run at once; 0 is no limit. */
   jobs: z
     .strictObject({
@@ -62,7 +81,10 @@ export const configSchema = z.strictObject({
 export type RawConfig = z.infer<typeof configSchema>;
 
 /** Configuration after secret references have been resolved to their values. */
-export type StardustConfig = Omit<RawConfig, "database" | "server"> & {
+export type StardustConfig = Omit<RawConfig, "database" | "server" | "auth"> & {
+  auth: Omit<RawConfig["auth"], "local"> & {
+    local: Omit<RawConfig["auth"]["local"], "totpKey"> & { totpKey?: string };
+  };
   server: Omit<RawConfig["server"], "bootstrapAdmin"> & { bootstrapAdmin?: { username: string; password: string } };
   database: { url: string };
 };

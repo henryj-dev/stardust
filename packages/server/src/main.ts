@@ -83,6 +83,17 @@ if (config.server.bootstrapAdmin) {
     log.info("created the bootstrap administrator", { username });
 }
 
+if (config.auth.local.totp !== "off" && !config.auth.local.totpKey) {
+  log.warn("TOTP secrets are stored unsealed: set auth.local.totpKey to encrypt them in the database");
+}
+const auth = {
+  localEnabled: config.auth.local.enabled,
+  totp: config.auth.local.totp,
+  ...(config.auth.local.totpKey ? { totpKey: config.auth.local.totpKey } : {}),
+  reauthMinutes: config.auth.reauthMinutes,
+  issuer: `stardust (${new URL(config.server.publicUrl).host})`,
+};
+
 let services: Services | undefined;
 if (ports.source) {
   const events = new RunEvents(sql);
@@ -92,6 +103,7 @@ if (ports.source) {
     events,
     sql,
     globalSql,
+    auth,
     resolveTarget: (repo, target) => (ports.source as NonNullable<Ports["source"]>).resolveTarget(repo, target),
     ...(ports.identity ? { oidc: ports.identity } : {}),
     ...(ports.deployRepo ? { deployRepo: ports.deployRepo } : {}),

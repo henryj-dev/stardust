@@ -26,6 +26,10 @@ let { data, form } = $props();
   <form method="POST" action="?/delete" data-delete-project>
     <label>Type <code>{data.fields.id}</code> to confirm <input name="confirm" autocomplete="off" required /></label>
     <label><input type="checkbox" name="withdraw" /> Also remove its manifests from the deploy repository</label>
+    <label>
+      Your password, or a code from your app (when you signed in more than a few minutes ago)
+      <input name="proof" type="password" autocomplete="current-password" />
+    </label>
     <button type="submit">Delete</button>
   </form>
   {#if form && "deleteError" in form}
