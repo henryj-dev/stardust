@@ -21,7 +21,7 @@ import {
   restoreCheckProblems,
 } from "@stardust/core";
 import { stringify } from "yaml";
-import { backupScript, restoreCheckScript } from "./scripts.ts";
+import { checkScript, decryptScript, dumpScript, encryptScript, fetchScript, uploadScript } from "./scripts.ts";
 
 export interface StatefulSetOptions {
   kube: KubeClient;
@@ -53,7 +53,33 @@ interface StatefulSetObject {
 
 const POSTGRES_IMAGE = /(^|\/)(postgres|postgis)(:|@|$)/;
 const MANAGED = { "app.kubernetes.io/managed-by": "stardust" };
-const doc = (o: unknown) => stringify(o, { lineWidth: 0 });
+const doc = (o: unknown) => stringify(o, { lineWidth: 0, aliasDuplicateObjects: false });
+
+/** Official images for the backup steps, pinned by digest (the tag is for people). */
+export const SOPS_IMAGE =
+  "ghcr.io/getsops/sops:v3.13.3-alpine@sha256:ae501277bf742f1662e0f881f43dd8fd6798b489a8058e921dbf6cda597140ea";
+export const AWS_CLI_IMAGE =
+  "docker.io/amazon/aws-cli:2.40.3@sha256:33a16c53ea442e918b58df67301ad76a8fb57082c39f7e78753b898c3f3e87c2";
+
+// Pod Security Admission "restricted" on every pod. uid 70 is postgres in the alpine image.
+const POD_SECURITY = {
+  runAsNonRoot: true,
+  runAsUser: 70,
+  runAsGroup: 70,
+  fsGroup: 70,
+  seccompProfile: { type: "RuntimeDefault" },
+};
+const CONTAINER_SECURITY = { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } };
+const WORK = { name: "work", mountPath: "/work" };
+/** One step: a script in an image's shell, sharing /work. */
+const step = (name: string, image: string, script: string, env: unknown[], mounts: unknown[] = []) => ({
+  name,
+  image,
+  env,
+  command: ["/bin/sh", "-c", script],
+  securityContext: CONTAINER_SECURITY,
+  volumeMounts: [WORK, ...mounts],
+});
 
 /** The major version from an image tag such as `17-alpine` or `16.4`. */
 export function majorOf(image: string): string | null {
@@ -99,6 +125,16 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
     name,
     valueFrom: { secretKeyRef: { name: ref.name, key: ref.key } },
   });
+  /** Object storage for the aws CLI, which needs a writable home. */
+  const storageEnv = (storage: BackupPlan["storage"]) => [
+    { name: "ENDPOINT", value: storage.endpoint },
+    { name: "BUCKET", value: storage.bucket },
+    { name: "PREFIX", value: storage.prefix },
+    { name: "AWS_DEFAULT_REGION", value: "auto" },
+    { name: "HOME", value: "/work" },
+    passwordEnv("AWS_ACCESS_KEY_ID", { name: storage.credentials, key: "access-key-id" }),
+    passwordEnv("AWS_SECRET_ACCESS_KEY", { name: storage.credentials, key: "secret-access-key" }),
+  ];
 
   return {
     engine: "postgres",
@@ -146,8 +182,7 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
           template: {
             metadata: { labels },
             spec: {
-              // The alpine image runs postgres as uid 70.
-              securityContext: { fsGroup: 70, runAsUser: 70, runAsGroup: 70, runAsNonRoot: true },
+              securityContext: POD_SECURITY,
               containers: [
                 {
                   name: "postgres",
@@ -168,7 +203,7 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
                     initialDelaySeconds: 30,
                     periodSeconds: 20,
                   },
-                  securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
+                  securityContext: CONTAINER_SECURITY,
                   volumeMounts: [{ name: "data", mountPath: "/var/lib/postgresql/data" }],
                 },
               ],
@@ -229,7 +264,7 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
           template: {
             spec: {
               restartPolicy: "OnFailure",
-              securityContext: { runAsNonRoot: true, runAsUser: 70, runAsGroup: 70 },
+              securityContext: POD_SECURITY,
               containers: [
                 {
                   name: "grant",
@@ -240,7 +275,7 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
                     passwordEnv("APP_PASSWORD", grant.password),
                   ],
                   command: ["/bin/sh", "-c", script],
-                  securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } },
+                  securityContext: CONTAINER_SECURITY,
                 },
               ],
             },
@@ -253,10 +288,11 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
     renderBackup(plan: BackupPlan) {
       const problems = backupPlanProblems(plan);
       if (problems.length > 0) throw new Error(problems.join("; "));
-      // One list drives the env, the dump calls and the expected count, so a
+      // One list drives the env, the dump calls and the expected counts, so a
       // target cannot be half added and silently skipped.
       const envOf = (i: number) => `PW_${i}`;
-      const script = backupScript(plan.targets.map((t, i) => ({ name: t.name, host: t.host, passwordEnv: envOf(i) })));
+      const names = plan.targets.map((t) => t.name);
+      const dump = dumpScript(plan.targets.map((t, i) => ({ name: t.name, host: t.host, passwordEnv: envOf(i) })));
       const cron = {
         apiVersion: "batch/v1",
         kind: "CronJob",
@@ -275,27 +311,26 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
                 metadata: { labels: { "app.kubernetes.io/name": plan.name, ...MANAGED } },
                 spec: {
                   restartPolicy: "OnFailure",
-                  containers: [
-                    {
-                      name: "backup",
-                      image: pgImage(newest()),
-                      env: [
-                        { name: "ENDPOINT", value: plan.storage.endpoint },
-                        { name: "BUCKET", value: plan.storage.bucket },
-                        { name: "PREFIX", value: plan.storage.prefix },
-                        { name: "RECIPIENT", value: plan.recipient },
-                        { name: "RETENTION_HOURS", value: String(plan.retentionHours) },
-                        { name: "AWS_DEFAULT_REGION", value: "auto" },
-                        passwordEnv("AWS_ACCESS_KEY_ID", { name: plan.storage.credentials, key: "access-key-id" }),
-                        passwordEnv("AWS_SECRET_ACCESS_KEY", {
-                          name: plan.storage.credentials,
-                          key: "secret-access-key",
-                        }),
-                        ...plan.targets.map((t, i) => passwordEnv(envOf(i), t.superuser)),
-                      ],
-                      command: ["/bin/sh", "-c", script],
-                    },
+                  securityContext: POD_SECURITY,
+                  initContainers: [
+                    step(
+                      "dump",
+                      pgImage(newest()),
+                      dump,
+                      plan.targets.map((t, i) => passwordEnv(envOf(i), t.superuser)),
+                    ),
+                    step("encrypt", SOPS_IMAGE, encryptScript(names), [
+                      { name: "RECIPIENT", value: plan.recipient },
+                      { name: "HOME", value: "/work" },
+                    ]),
                   ],
+                  containers: [
+                    step("upload", AWS_CLI_IMAGE, uploadScript(names), [
+                      ...storageEnv(plan.storage),
+                      { name: "RETENTION_HOURS", value: String(plan.retentionHours) },
+                    ]),
+                  ],
+                  volumes: [{ name: "work", emptyDir: {} }],
                 },
               },
             },
@@ -324,25 +359,26 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
             metadata: { labels: { "app.kubernetes.io/name": "db-restore-check", ...MANAGED } },
             spec: {
               restartPolicy: "Never",
+              securityContext: POD_SECURITY,
+              initContainers: [
+                step("fetch", AWS_CLI_IMAGE, fetchScript(), [
+                  ...storageEnv(check.storage),
+                  { name: "SOURCE", value: check.source },
+                ]),
+                // Only this step sees the identity.
+                step(
+                  "decrypt",
+                  SOPS_IMAGE,
+                  decryptScript(),
+                  [
+                    { name: "SOPS_AGE_KEY_FILE", value: "/identity/key" },
+                    { name: "HOME", value: "/work" },
+                  ],
+                  [{ name: "identity", mountPath: "/identity", readOnly: true }],
+                ),
+              ],
               containers: [
-                {
-                  name: "restore-check",
-                  image: pgImage(newest()),
-                  env: [
-                    { name: "ENDPOINT", value: check.storage.endpoint },
-                    { name: "BUCKET", value: check.storage.bucket },
-                    { name: "PREFIX", value: check.storage.prefix },
-                    { name: "SOURCE", value: check.source },
-                    { name: "AWS_DEFAULT_REGION", value: "auto" },
-                    passwordEnv("AWS_ACCESS_KEY_ID", { name: check.storage.credentials, key: "access-key-id" }),
-                    passwordEnv("AWS_SECRET_ACCESS_KEY", { name: check.storage.credentials, key: "secret-access-key" }),
-                  ],
-                  command: ["/bin/sh", "-c", restoreCheckScript()],
-                  volumeMounts: [
-                    { name: "work", mountPath: "/work" },
-                    { name: "identity", mountPath: "/identity", readOnly: true },
-                  ],
-                },
+                step("restore-check", pgImage(newest()), checkScript(), [{ name: "SOURCE", value: check.source }]),
               ],
               volumes: [
                 { name: "work", emptyDir: {} },
@@ -350,7 +386,8 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
                   name: "identity",
                   secret: {
                     secretName: check.identity.name,
-                    defaultMode: 0o400,
+                    // Readable by the pod's group (fsGroup 70), not by others.
+                    defaultMode: 0o440,
                     items: [{ key: check.identity.key, path: "key" }],
                   },
                 },

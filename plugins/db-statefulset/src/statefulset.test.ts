@@ -84,59 +84,188 @@ describe("finding instances", () => {
   });
 });
 
-describe("the rendered scripts", () => {
-  const p = statefulSetPostgres({ kube: fakeKube({}), namespace: "databases", namespaces: [] });
-  const scriptOf = (files: Record<string, string>) => {
-    const o = parse(Object.values(files)[0] ?? "") as { kind: string; spec: Record<string, never> };
-    type Pod = { containers: Array<{ command: string[] }> };
-    const spec = o.spec as unknown as { template: { spec: Pod }; jobTemplate: { spec: { template: { spec: Pod } } } };
-    const pod = o.kind === "CronJob" ? spec.jobTemplate.spec.template.spec : spec.template.spec;
-    return pod.containers[0]?.command[2] ?? "";
+type Container = {
+  name: string;
+  image: string;
+  command?: string[];
+  securityContext?: { allowPrivilegeEscalation?: boolean; capabilities?: { drop?: string[]; add?: string[] } };
+};
+type PodSpec = {
+  securityContext?: Record<string, unknown>;
+  initContainers?: Container[];
+  containers: Container[];
+  volumes?: Array<Record<string, unknown>>;
+};
+
+/** The pod template of a StatefulSet, Job or CronJob, or null. */
+function podOf(o: { kind: string; spec?: Record<string, never> }): PodSpec | null {
+  const spec = o.spec as unknown as {
+    template?: { spec: PodSpec };
+    jobTemplate?: { spec: { template: { spec: PodSpec } } };
   };
+  if (o.kind === "CronJob") return spec.jobTemplate?.spec.template.spec ?? null;
+  if (o.kind === "StatefulSet" || o.kind === "Job") return spec.template?.spec ?? null;
+  return null;
+}
+const docsOf = (files: Record<string, string>) =>
+  Object.values(files).map(
+    (f) => parse(f) as { kind: string; metadata: { name: string }; spec?: Record<string, never> },
+  );
+
+/** Why a pod would not pass Pod Security Admission "restricted" as rendered here, or nothing. */
+function restrictedProblems(pod: PodSpec): string[] {
+  const problems: string[] = [];
+  const sc = pod.securityContext ?? {};
+  if (sc.runAsNonRoot !== true) problems.push("pod: runAsNonRoot is not true");
+  for (const k of ["runAsUser", "runAsGroup", "fsGroup"]) if (sc[k] !== 70) problems.push(`pod: ${k} is not 70`);
+  if ((sc.seccompProfile as { type?: string } | undefined)?.type !== "RuntimeDefault")
+    problems.push("pod: seccompProfile is not RuntimeDefault");
+  for (const k of ["hostNetwork", "hostPID", "hostIPC"])
+    if ((pod as Record<string, unknown>)[k]) problems.push(`pod: ${k}`);
+  const allowed = [
+    "configMap",
+    "csi",
+    "downwardAPI",
+    "emptyDir",
+    "ephemeral",
+    "persistentVolumeClaim",
+    "projected",
+    "secret",
+  ];
+  for (const v of pod.volumes ?? [])
+    for (const k of Object.keys(v))
+      if (k !== "name" && !allowed.includes(k)) problems.push(`volume ${String(v.name)}: ${k} is not allowed`);
+  for (const c of [...(pod.initContainers ?? []), ...pod.containers]) {
+    const csc = c.securityContext ?? {};
+    if (csc.allowPrivilegeEscalation !== false) problems.push(`${c.name}: allowPrivilegeEscalation is not false`);
+    if (!csc.capabilities?.drop?.includes("ALL")) problems.push(`${c.name}: capabilities do not drop ALL`);
+    if ((csc.capabilities?.add ?? []).some((a) => a !== "NET_BIND_SERVICE"))
+      problems.push(`${c.name}: adds capabilities`);
+    for (const k of ["privileged", "runAsUser", "runAsNonRoot"] as const) {
+      const v = (csc as Record<string, unknown>)[k];
+      if (k === "privileged" ? v === true : k === "runAsUser" ? v === 0 : v === false)
+        problems.push(`${c.name}: overrides ${k}`);
+    }
+    // Nothing installed at run time: each step brings its tools in its image.
+    if (/\b(apk|apt-get|yum|dnf|pip)\b/.test((c.command ?? []).join(" ")))
+      problems.push(`${c.name}: installs packages`);
+  }
+  return problems;
+}
+
+describe("the rendered workloads", () => {
+  const p = statefulSetPostgres({ kube: fakeKube({}), namespace: "databases", namespaces: [] });
   const target = {
     name: "orders",
     ref: { namespace: "databases", name: "orders" },
     host: "orders.databases.svc",
     superuser: { name: "orders-superuser", key: "password" },
   };
+  const storage = { endpoint: "https://s3.example.com", bucket: "backups", credentials: "backup-s3", prefix: "pg" };
+  const rendered = {
+    instance: p.renderInstance({
+      name: "orders",
+      version: "17",
+      storage: "10Gi",
+      cpu: "250m",
+      memory: "512Mi",
+    }),
+    grant: p.renderAppGrant(target, {
+      database: "orders",
+      role: "orders_app",
+      password: { name: "pw", key: "password" },
+    }),
+    backup: p.renderBackup({
+      name: "db-backup",
+      namespace: "databases",
+      schedule: "15 3 * * *",
+      storage,
+      recipient: `age1${"q".repeat(58)}`,
+      retentionHours: 168,
+      targets: [
+        target,
+        { ...target, name: "billing", ref: { namespace: "databases", name: "billing" }, host: "billing.databases.svc" },
+      ],
+    }),
+    check: p.renderRestoreCheck({
+      name: "check",
+      namespace: "databases",
+      storage,
+      source: "orders",
+      identity: { name: "age", key: "identity" },
+    }),
+  };
+  const podsOf = (files: Record<string, string>) =>
+    docsOf(files).flatMap((d) => {
+      const pod = podOf(d);
+      return pod ? [pod] : [];
+    });
+  const stepsOf = (files: Record<string, string>) =>
+    podsOf(files).flatMap((pod) => [...(pod.initContainers ?? []), ...pod.containers]);
+  const scriptOf = (files: Record<string, string>, name: string) =>
+    stepsOf(files).find((c) => c.name === name)?.command?.[2] ?? "";
 
-  it("parse as shell", () => {
-    const grant = scriptOf(
-      p.renderAppGrant(target, { database: "orders", role: "orders_app", password: { name: "pw", key: "password" } }),
+  it("pass Pod Security Admission restricted, every pod and container", () => {
+    const kinds: string[] = [];
+    for (const [what, files] of Object.entries(rendered)) {
+      for (const d of docsOf(files)) {
+        const pod = podOf(d);
+        if (!pod) continue;
+        kinds.push(d.kind);
+        assert.deepEqual(restrictedProblems(pod), [], `${what}: ${d.kind} ${d.metadata.name}`);
+      }
+    }
+    assert.deepEqual(kinds.sort(), ["CronJob", "Job", "Job", "StatefulSet"]);
+    // The checker itself catches what the cluster would reject.
+    const bad = restrictedProblems({ containers: [{ name: "x", image: "y", command: ["sh", "-c", "apk add age"] }] });
+    assert.ok(bad.some((b) => /seccompProfile/.test(b)) && bad.some((b) => /installs/.test(b)) && bad.length >= 7);
+  });
+
+  it("run each backup and restore step in one image pinned by digest, sharing /work", () => {
+    const steps = (files: Record<string, string>) => stepsOf(files).map((c) => [c.name, c.image.split(/[:@]/)[0]]);
+    assert.deepEqual(steps(rendered.backup), [
+      ["dump", "postgres"],
+      ["encrypt", "ghcr.io/getsops/sops"],
+      ["upload", "docker.io/amazon/aws-cli"],
+    ]);
+    assert.deepEqual(steps(rendered.check), [
+      ["fetch", "docker.io/amazon/aws-cli"],
+      ["decrypt", "ghcr.io/getsops/sops"],
+      ["restore-check", "postgres"],
+    ]);
+    for (const c of [...stepsOf(rendered.backup), ...stepsOf(rendered.check)]) {
+      if (!c.image.startsWith("postgres:")) assert.match(c.image, /@sha256:[0-9a-f]{64}$/, c.name);
+      assert.ok(
+        (c as { volumeMounts?: Array<{ mountPath: string }> }).volumeMounts?.some((m) => m.mountPath === "/work"),
+        c.name,
+      );
+    }
+    const identity = stepsOf(rendered.check).filter((c) =>
+      (c as { volumeMounts?: Array<{ name: string }> }).volumeMounts?.some((m) => m.name === "identity"),
     );
-    const backup = scriptOf(
-      p.renderBackup({
-        name: "db-backup",
-        namespace: "databases",
-        schedule: "15 3 * * *",
-        storage: { endpoint: "https://s3.example.com", bucket: "backups", credentials: "backup-s3", prefix: "pg" },
-        recipient: `age1${"q".repeat(58)}`,
-        retentionHours: 168,
-        targets: [
-          target,
-          {
-            ...target,
-            name: "billing",
-            ref: { namespace: "databases", name: "billing" },
-            host: "billing.databases.svc",
-          },
-        ],
-      }),
+    assert.deepEqual(
+      identity.map((c) => c.name),
+      ["decrypt"],
+      "only the decrypt step sees the identity",
     );
-    const check = scriptOf(
-      p.renderRestoreCheck({
-        name: "check",
-        namespace: "databases",
-        storage: { endpoint: "https://s3.example.com", bucket: "backups", credentials: "backup-s3", prefix: "pg" },
-        source: "orders",
-        identity: { name: "age", key: "identity" },
-      }),
+  });
+
+  it("parse as shell, and cover every target once", () => {
+    const scripts = [rendered.grant, rendered.backup, rendered.check].flatMap((f) =>
+      stepsOf(f).map((c) => c.command?.[2] ?? ""),
     );
-    for (const script of [grant, backup, check]) {
+    assert.equal(scripts.length, 7);
+    for (const script of scripts) {
       const r = spawnSync("sh", ["-n", "-c", script], { encoding: "utf8" });
       assert.equal(r.status, 0, r.stderr);
     }
-    assert.equal(backup.match(/^dump_one /gm)?.length, 2, "one dump per target");
-    assert.match(backup, /\[ "\$UPLOADED" -eq 2 \]/);
+    assert.equal(scriptOf(rendered.backup, "dump").match(/^dump_one /gm)?.length, 2, "one dump per target");
+    assert.match(scriptOf(rendered.backup, "dump"), /\[ "\$DUMPED" -eq 2 \]/);
+    assert.equal(scriptOf(rendered.backup, "encrypt").match(/^encrypt_one /gm)?.length, 2);
+    assert.match(scriptOf(rendered.backup, "encrypt"), /\[ "\$ENCRYPTED" -eq 2 \]/);
+    assert.equal(scriptOf(rendered.backup, "upload").match(/^upload_one /gm)?.length, 2);
+    assert.match(scriptOf(rendered.backup, "upload"), /\[ "\$UPLOADED" -eq 2 \]/);
+    assert.match(scriptOf(rendered.backup, "upload"), /put "\$BASE\.sql\.gz\.sops\.json"/);
+    assert.match(scriptOf(rendered.check, "fetch"), /\\\.sql\\\.gz\\\.sops\\\.json\$/);
   });
 });

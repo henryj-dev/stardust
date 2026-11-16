@@ -527,8 +527,12 @@ namespaces it is given, reading the superuser password's Secret _name and
 key_ from the pod's `POSTGRES_PASSWORD`, never its value. It renders the
 manifests that the `databases` feature commits: a new instance, a Job that
 creates an application's role and database (safe to run again), and a backup
-CronJob that dumps every instance, encrypts each dump to an age key, uploads
-it to S3-compatible storage, reads the stored size back and prunes old dumps.
+CronJob that dumps every instance, encrypts each dump with SOPS to an age key
+(stored as `.sql.gz.sops.json`), uploads it to S3-compatible storage, reads
+the stored size back and prunes old dumps. Every pod it renders passes Pod
+Security Admission `restricted`, and each backup or restore-check step runs in
+an official image pinned by digest (postgres, SOPS, the AWS CLI) with nothing
+installed at run time.
 
 ```yaml
 db-statefulset:
