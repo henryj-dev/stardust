@@ -261,11 +261,13 @@ export interface Client {
   /** Turns someone's TOTP off after a lost phone (administrators). */
   resetTotp(username: string): Promise<void>;
   /** Ends the session of the client's token. */
-  logout(): Promise<void>;
+  /** Ends the session; for a single sign-on session, where to send the browser to sign out at the provider too. */
+  logout(): Promise<{ redirect?: string }>;
   /** Which ways of signing in the server offers. */
   authMethods(): Promise<{ password: boolean; oidc: { displayName: string } | null }>;
   /** Starts an OpenID sign-in: where to send the browser, and the state to keep for the callback. */
-  oidcStart(): Promise<{ url: string; state: string }>;
+  /** With `reauth`, the provider is asked to sign the person in again (confirming it is them). */
+  oidcStart(options?: { reauth?: boolean }): Promise<{ url: string; state: string }>;
   /** Finishes it with the callback's query string and the state kept since the start. */
   oidcCallback(query: string, state: string): Promise<LoginResult>;
   /** True when the token is accepted. */
@@ -510,8 +512,8 @@ export function createClient(options: ClientOptions): Client {
         oidc: { displayName: string } | null;
       };
     },
-    async oidcStart() {
-      return (await (await get("/api/v1/auth/oidc/start", { method: "POST" })).json()) as {
+    async oidcStart(options = {}) {
+      return (await post("/api/v1/auth/oidc/start", { reauth: options.reauth === true })) as {
         url: string;
         state: string;
       };
@@ -531,7 +533,10 @@ export function createClient(options: ClientOptions): Client {
       return { ok: true, token: body.token, user: body.user };
     },
     async logout() {
-      await get("/api/v1/auth/logout", { method: "POST" });
+      const body = (await (await get("/api/v1/auth/logout", { method: "POST" })).json().catch(() => ({}))) as {
+        redirect?: string;
+      };
+      return body.redirect ? { redirect: body.redirect } : {};
     },
     async checkToken() {
       return (await session()) !== null;

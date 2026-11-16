@@ -1,5 +1,5 @@
 import { fail, redirect } from "@sveltejs/kit";
-import { apiClient, LOGIN_ERROR_COOKIE, OIDC_STATE_COOKIE, setSession } from "$lib/server/api";
+import { apiClient, LOGIN_ERROR_COOKIE, OIDC_NEXT_COOKIE, OIDC_STATE_COOKIE, setSession } from "$lib/server/api";
 import { safeNext } from "$lib/server/safe-next";
 import type { Actions, PageServerLoad } from "./$types";
 
@@ -66,11 +66,21 @@ export const actions: Actions = {
     redirect(303, safeNext(url.searchParams.get("next")));
   },
 
-  oidc: async ({ cookies, url, locals }) => {
-    const { url: providerUrl, state } = await apiClient(undefined, locals).oidcStart();
+  oidc: async ({ cookies, url, locals, request }) => {
+    // `reauth`: confirming it is you, from a page that asked; the provider signs you in again.
+    const reauth = (await request.formData().catch(() => new FormData())).get("reauth") === "1";
+    const { url: providerUrl, state } = await apiClient(undefined, locals).oidcStart({ reauth });
     // Lax, not Strict: the provider sends the browser back with a cross-site
     // navigation, and a Strict cookie would not come along with it.
     cookies.set(OIDC_STATE_COOKIE, state, {
+      path: "/login/oidc",
+      httpOnly: true,
+      sameSite: "lax",
+      secure: url.protocol === "https:",
+      maxAge: 600,
+    });
+    // Where to go back to after the provider: checked to be a local path, as for passwords.
+    cookies.set(OIDC_NEXT_COOKIE, safeNext(url.searchParams.get("next")), {
       path: "/login/oidc",
       httpOnly: true,
       sameSite: "lax",

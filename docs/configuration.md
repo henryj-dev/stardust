@@ -91,6 +91,20 @@ plugins:
       autoCreate: true                  # optional: create an account at first sign-in (default false)
   ```
 
+  Optional `mfa: { requireAmr: [otp] }` refuses a sign-in whose `amr` claim
+  lacks any of the listed values, so the provider's second step is required.
+
+  Sessions follow the provider's both ways. Signing out of stardust sends the
+  browser on to the provider's `end_session_endpoint` (register
+  `<server.publicUrl>/login` as a post-logout redirect URI). For the other
+  way, register the server's
+  `/api/v1/auth/oidc/backchannel-logout` as the back-channel logout URI (it
+  must be reachable from the provider): a signed logout token ends that
+  provider session's stardust sessions, or all of the subject's; each token
+  is accepted once. Confirming it is you, for a single sign-on session,
+  means signing in again at the provider (`prompt=login`, `max_age=0`), and
+  only a sign-in from the last five minutes counts.
+
   Register `<server.publicUrl>/login/oidc/callback` as the redirect URI. The
   flow uses PKCE, a nonce and a one-time state bound to the browser, and the
   ID token's signature is checked against the provider's keys. People are

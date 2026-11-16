@@ -362,6 +362,8 @@ describe("every API route is guarded", () => {
     "POST /api/v1/auth/link",
     // The challenge from the password step is the credential.
     "POST /api/v1/auth/login/totp",
+    // The provider's signed logout token is the credential.
+    "POST /api/v1/auth/oidc/backchannel-logout",
   ]);
   const routes = () => [
     ...new Set(

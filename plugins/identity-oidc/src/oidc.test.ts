@@ -52,7 +52,9 @@ describe("the callback", () => {
         groups: ["dev", 7],
       },
     });
-    assert.deepEqual(who, {
+    const { idToken, ...rest } = who;
+    assert.match(idToken ?? "", /^[\w-]+\.[\w-]+\.[\w-]+$/, "the ID token is kept, for signing out at the provider");
+    assert.deepEqual(rest, {
       issuer: idp.issuer,
       subject: "u-42",
       username: "ada",
@@ -60,7 +62,17 @@ describe("the callback", () => {
       emailVerified: true,
       name: null,
       groups: ["dev"],
+      sid: null,
+      amr: [],
+      authTime: null,
     });
+  });
+
+  it("reads the provider's session, how the person signed in, and when", async () => {
+    const who = await signIn({ claims: { sub: "u-1", sid: "s-9", amr: ["pwd", "otp", 3], auth_time: 1700000000 } });
+    assert.equal(who.sid, "s-9");
+    assert.deepEqual(who.amr, ["pwd", "otp"]);
+    assert.equal(who.authTime, 1700000000);
   });
 
   it("falls back to the email's local part for the username", async () => {

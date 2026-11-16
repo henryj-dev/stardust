@@ -14,6 +14,7 @@ const KEYS = [
   "adminGroups",
   "autoCreate",
   "displayName",
+  "mfa",
 ];
 const strings = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string" && x !== "");
 
@@ -63,6 +64,7 @@ export const plugin = definePlugin({
           redirectUri,
           displayName: (config.displayName as string | undefined) ?? "single sign-on",
           autoCreate: config.autoCreate === true,
+          requireAmr: ((config.mfa as { requireAmr?: string[] } | undefined)?.requireAmr ?? []) as string[],
           rules: {
             ...(config.allowedGroups ? { allowedGroups: config.allowedGroups as string[] } : {}),
             ...(config.adminGroups ? { adminGroups: config.adminGroups as string[] } : {}),
@@ -87,6 +89,15 @@ export const plugin = definePlugin({
     if (s.autoCreate !== undefined && typeof s.autoCreate !== "boolean")
       problems.push("autoCreate must be true or false");
     if (s.displayName !== undefined && typeof s.displayName !== "string") problems.push("displayName must be text");
+    if (s.mfa !== undefined) {
+      const mfa = s.mfa as Record<string, unknown> | null;
+      if (typeof mfa !== "object" || mfa === null) problems.push("mfa must be a mapping");
+      else {
+        for (const key of Object.keys(mfa)) if (key !== "requireAmr") problems.push(`mfa: unknown key "${key}"`);
+        if (mfa.requireAmr !== undefined && !strings(mfa.requireAmr))
+          problems.push("mfa.requireAmr must be a list of amr values, e.g. [otp]");
+      }
+    }
     return problems;
   },
 });

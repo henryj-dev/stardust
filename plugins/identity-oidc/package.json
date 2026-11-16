@@ -9,9 +9,7 @@
   },
   "dependencies": {
     "@stardust/core": "workspace:*",
+    "jose": "6.2.13",
     "openid-client": "6.8.8"
-  },
-  "devDependencies": {
-    "jose": "6.2.13"
   }
 }

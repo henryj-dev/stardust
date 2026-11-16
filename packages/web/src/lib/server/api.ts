@@ -6,6 +6,8 @@ import { STARDUST_API_URL } from "$app/env/private";
 export const SESSION_COOKIE = "stardust_session";
 /** Holds the OpenID state between leaving for the provider and coming back. */
 export const OIDC_STATE_COOKIE = "stardust_oidc_state";
+/** Where to return after signing in at the provider. */
+export const OIDC_NEXT_COOKIE = "stardust_oidc_next";
 /** A sign-in error to show once on the sign-in page. */
 export const LOGIN_ERROR_COOKIE = "stardust_login_error";
 

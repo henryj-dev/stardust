@@ -9,6 +9,8 @@ export interface PendingLogin {
   state: string;
   nonce: string;
   codeVerifier: string;
+  /** Asked the provider to sign the person in again (prompt=login). */
+  reauth?: boolean;
 }
 
 export interface Identity {
@@ -20,12 +22,36 @@ export interface Identity {
   emailVerified: boolean;
   name: string | null;
   groups: string[];
+  /** The provider's session id, for back-channel logout. */
+  sid?: string | null;
+  /** How the person signed in at the provider (`pwd`, `otp`, `mfa` …). */
+  amr?: string[];
+  /** When they last signed in at the provider, seconds since 1970. */
+  authTime?: number | null;
+  /** The ID token, kept to name the session when signing out at the provider. */
+  idToken?: string;
+}
+
+/** What a back-channel logout token says ended at the provider. */
+export interface LogoutNotice {
+  subject: string | null;
+  sid: string | null;
+  /** The token's id, used once. */
+  jti: string;
+  expiresAt: Date;
 }
 
 export interface Oidc {
-  start(): Promise<{ url: string; pending: PendingLogin }>;
+  /** The provider's issuer, as its tokens name it. */
+  readonly issuer: string;
+  /** With `reauth`, the provider is asked to sign the person in again now. */
+  start(options?: { reauth?: boolean }): Promise<{ url: string; pending: PendingLogin }>;
   /** callbackUrl is the full URL the provider redirected to, query included. */
   finish(callbackUrl: string, pending: PendingLogin): Promise<Identity>;
+  /** Where to send the browser to sign out at the provider too; null when it offers no such page. */
+  endSessionUrl(idTokenHint: string | undefined, postLogoutRedirectUri: string): string | null;
+  /** Checks a back-channel logout token (signature, issuer, audience, event); throws when it does not check out. */
+  verifyLogoutToken(token: string): Promise<LogoutNotice>;
 }
 
 export interface AccessRules {
@@ -53,4 +79,6 @@ export interface IdentityProvider {
   rules: AccessRules;
   /** Create an account at first sign-in. */
   autoCreate: boolean;
+  /** `amr` values every sign-in must carry (e.g. `["otp"]`); empty trusts the provider. */
+  requireAmr?: readonly string[];
 }
