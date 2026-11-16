@@ -22,6 +22,7 @@
     "@stardust/plugin-runtime": "workspace:*",
     "@stardust/plugin-secrets-sops-age": "workspace:*",
     "@stardust/plugin-source-github": "workspace:*",
-    "@stardust/plugin-store-s3": "workspace:*"
+    "@stardust/plugin-store-s3": "workspace:*",
+    "@stardust/plugin-target-cf-workers": "workspace:*"
   }
 }

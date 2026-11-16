@@ -10,6 +10,7 @@ import { MemoryRepo, MemoryStore } from "@stardust/core/testing";
 import { claimJob, putProject, startRun } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
 import { createBuilder } from "@stardust/plugin-builder-buildkit";
+import { workersTarget } from "@stardust/plugin-target-cf-workers";
 import { buildHandler } from "./build-handler.ts";
 import { runJob } from "./loop.ts";
 
@@ -216,5 +217,66 @@ describe("buildHandler", () => {
     assert.equal(row?.status, "failed");
     assert.match(String(row?.detail.reason), /no manifest .* references demo\/api/);
     assert.equal(row?.detail.digest, DIGEST, "the digest that was built is still recorded");
+  });
+});
+
+describe("pipeline W", () => {
+  const VERSION = "0f1e2d3c-4b5a-4968-8776-655443322110";
+  const W_DEF = { on: { workflow_dispatch: {} }, jobs: { web: { pipeline: "W" as const, component: "web" } } };
+  before(async () => {
+    await putProject(db.sql, {
+      id: "pico",
+      name: "Pico",
+      githubRepo: "acme/pico",
+      pipelineDef: W_DEF,
+      components: [{ name: "web", pipeline: "W", deployDir: "deploy/pico/web" }],
+      metadata: {},
+    });
+  });
+
+  async function release(log: string, targets: boolean, event = "workflow_dispatch") {
+    const runId = await startRun(db.sql, {
+      projectId: "pico",
+      event,
+      trigger: event === "pull_request" ? "pull_request" : "manual",
+      ref: "refs/heads/main",
+      sha: SHA,
+      def: W_DEF,
+      changedPaths: null,
+    });
+    const job = await claimJob(db.sql, "w", 30_000);
+    assert.ok(job);
+    const { client, created } = kube({ succeeded: 1 }, log);
+    const repo = new MemoryRepo({});
+    const handler = buildHandler({
+      sql: db.sql,
+      builder: { build: () => Promise.reject(new Error("pipeline W never builds an image")) },
+      deployRepo: repo,
+      ...(targets ? { targets: { W: workersTarget(client, { namespace: "builds", tokenSecret: "cloudflare" }) } } : {}),
+      log: quiet,
+      pollMs: 1,
+    });
+    await runJob({ sql: db.sql, workerId: "w", handler, log: quiet, leaseMs: 30_000 }, job);
+    const [row] = await db.sql<{ status: string; detail: Record<string, unknown> }[]>`
+      SELECT status, detail FROM jobs WHERE run_id = ${runId}`;
+    return { row, created, commits: repo.commitCount() };
+  }
+
+  it("releases through the deploy target, records the Worker version, and commits nothing", async () => {
+    const { row, created, commits } = await release(`[stardust-worker-version] ${VERSION}\n`, true);
+    assert.equal(row?.status, "success");
+    assert.equal(row?.detail.version, VERSION);
+    assert.equal(created.length, 1, "one release Job");
+    assert.equal(commits, 0, "a Worker is not in the deploy repository");
+  });
+
+  it("fails without a version, without a target, and never releases a pull request", async () => {
+    assert.equal((await release("[deploy] done\n", true)).row?.status, "failed");
+    const none = await release("", false);
+    assert.equal(none.row?.status, "failed");
+    assert.match(String(none.row?.detail.reason), /no deploy target/);
+    const pr = await release(`[stardust-worker-version] ${VERSION}\n`, true, "pull_request");
+    assert.equal(pr.row?.status, "success");
+    assert.equal(pr.created.length, 0, "nothing was released");
   });
 });

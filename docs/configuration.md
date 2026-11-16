@@ -538,6 +538,34 @@ removed.
 | `C`      | the repository's own Dockerfile         | `context` (default the root), `dockerfile` (default `Dockerfile` in the context) |
 | `N`      | a Node application without a Dockerfile | `context`, `port` (default 3000), `buildEnv`                                     |
 
+Pipeline `W` releases a Cloudflare Worker instead of building an image (fields
+`context` and `buildEnv`); see below.
+
+#### Pipeline W: `target-cf-workers`
+
+Pipeline `W`: a component released as a Cloudflare Worker instead of an image.
+A release Job in the builds namespace clones the commit, installs with the
+lockfile's package manager and runs `build` (with no credentials of any
+kind), then a Wrangler that stardust pins applies the D1 migrations of every
+`d1_databases` binding, uploads secrets with `wrangler secret bulk`, and
+deploys. The job records the Worker's version id. Pull requests are never
+released.
+
+```yaml
+target-cf-workers:
+  namespace: stardust-builds # where release Jobs run
+  tokenSecret: cloudflare-deploy # keys token and account-id
+  cloneSecret: github-clone # optional, for private repositories
+  wranglerVersion: "4.156.0" # optional
+```
+
+The Worker's configuration is yours, not the repository's: keep, in that
+namespace, a ConfigMap `wrangler-<project>-<component>` with key
+`wrangler.jsonc`, and optionally a Secret of the same name with key
+`secrets.json`. The release ignores the repository's own `.env` files and
+Wrangler configs. Paths in `wrangler.jsonc` (`main`, `migrations_dir`) are
+relative to the component's `context`.
+
 A pipeline `N` build installs with pnpm whatever lockfile the app carries
 (install scripts do not run), runs the `build` script, and starts `server.js`
 with node if the app has one, otherwise `build/index.js` (the SvelteKit

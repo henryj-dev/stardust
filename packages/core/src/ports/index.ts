@@ -10,6 +10,7 @@ import type { Builder, ImageNaming } from "./builder.ts";
 import type { SecretCipher } from "./cipher.ts";
 import type { Database } from "./database.ts";
 import type { DatabaseProvider } from "./databases.ts";
+import type { DeployTarget } from "./deploy-target.ts";
 import type { DnsProvider } from "./dns.ts";
 import type { IdentityProvider } from "./identity.ts";
 import type { KubeStreamClient } from "./kube.ts";
@@ -48,6 +49,8 @@ export interface Ports {
   dns: Record<string, DnsProvider>;
   /** Database engines by name, e.g. `statefulset`. */
   databases: Record<string, DatabaseProvider>;
+  /** Releases outside Kubernetes, by pipeline letter, e.g. `W` (Cloudflare Workers). */
+  deployTargets: Record<string, DeployTarget>;
   /** Secret env values on a project's layers, provided by the server. */
   projectEnv: ProjectEnv;
 }
@@ -71,6 +74,7 @@ export const PORT_NAMES: readonly PortName[] = [
   "store",
   "dns",
   "databases",
+  "deployTargets",
   "projectEnv",
 ];
 
@@ -79,12 +83,13 @@ export const PORT_NAMES: readonly PortName[] = [
  * name (two DNS providers, say). Their value in `Ports` is a record keyed by
  * instance name.
  */
-export const MULTI_PORTS: ReadonlySet<PortName> = new Set<PortName>(["logs", "dns", "databases"]);
+export const MULTI_PORTS: ReadonlySet<PortName> = new Set<PortName>(["logs", "dns", "databases", "deployTargets"]);
 
 export * from "./builder.ts";
 export * from "./cipher.ts";
 export * from "./database.ts";
 export * from "./databases.ts";
+export * from "./deploy-target.ts";
 export * from "./dns.ts";
 export * from "./identity.ts";
 export * from "./kube.ts";
