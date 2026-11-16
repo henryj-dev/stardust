@@ -1,5 +1,11 @@
 # stardust
 
+## 0.14.1
+
+### Patch Changes
+
+- [#71](https://github.com/henryj-dev/stardust/pull/71) [`d60c2b1`](https://github.com/henryj-dev/stardust/commit/d60c2b1c9cbc250d2e3f859c43bdf318e50f5958) Thanks [@mack-erel](https://github.com/mack-erel)! - Releases now publish the Vultr broker image, `ghcr.io/henryj-dev/stardust-vultr-broker`, for amd64 and arm64, signed and attested like the other images and listed with its digest in the release notes. Its tests run before it is pushed. The broker stays out of the Helm chart; `broker/vultr/README.md` explains how to pin it by digest and verify its signature.
+
 ## 0.14.0
 
 ### Minor Changes
