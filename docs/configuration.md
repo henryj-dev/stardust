@@ -297,6 +297,33 @@ A parallax write is published by applying its view at the revision the write
 made (a write alone is a draft there); stardust then waits until that view
 serves it.
 
+### `cloud-audit` and `audit-cloudflare`
+
+Cloud providers raise no alert when their configuration changes, so a stolen
+token could change things unnoticed. `cloud-audit` reads every `auditLogs`
+source (`audit-cloudflare` reads a Cloudflare account's log) every 30
+minutes and keeps what its rules find on `/cloud-audit`:
+
+- an automation token acting outside the action types it is for (high);
+- any change to an area you never change through the API, `access_` by
+  default (high);
+- an account token you have not listed (medium);
+- a failed attempt (medium), and a record without an action type (medium:
+  the log's shape may have changed).
+
+Each scan goes on from where the last one ended (five minutes back, a week at
+most); a scan that fails or is cut short says so on the page.
+
+```yaml
+audit-cloudflare:
+  accountId: 0123456789abcdef0123456789abcdef
+  token: { env: CF_AUDIT_TOKEN } # Account: Audit Logs: Read
+cloud-audit:
+  automationTokens: # token id: the action type prefixes it may touch
+    0123456789abcdef0123456789abcdef: [dns_]
+  alwaysAlertPrefixes: [access_] # optional
+```
+
 ### `cloud-vultr`
 
 Provides the `compute` port on Vultr: the catalog (regions, plans, images,

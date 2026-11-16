@@ -1,3 +1,4 @@
+export * from "./audit/detect.ts";
 export * from "./auth/rbac.ts";
 export * from "./auth/totp.ts";
 export * from "./compose.ts";

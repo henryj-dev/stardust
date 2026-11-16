@@ -6,6 +6,7 @@
  */
 import type { GuardStore } from "../guard.ts";
 import type { SagaStore } from "../saga.ts";
+import type { AuditLogSource } from "./audit-logs.ts";
 import type { Builder, ImageNaming } from "./builder.ts";
 import type { SecretCipher } from "./cipher.ts";
 import type { ComputeProvider } from "./compute.ts";
@@ -55,6 +56,8 @@ export interface Ports {
   compute: Record<string, ComputeProvider>;
   /** Systems told about instances coming and going, by name. */
   instanceHooks: Record<string, InstanceHook>;
+  /** Cloud providers' audit logs, by name, e.g. `cloudflare`. */
+  auditLogs: Record<string, AuditLogSource>;
   /** Releases outside Kubernetes, by pipeline letter, e.g. `W` (Cloudflare Workers). */
   deployTargets: Record<string, DeployTarget>;
   /** Secret env values on a project's layers, provided by the server. */
@@ -82,6 +85,7 @@ export const PORT_NAMES: readonly PortName[] = [
   "databases",
   "compute",
   "instanceHooks",
+  "auditLogs",
   "deployTargets",
   "projectEnv",
 ];
@@ -98,8 +102,10 @@ export const MULTI_PORTS: ReadonlySet<PortName> = new Set<PortName>([
   "deployTargets",
   "compute",
   "instanceHooks",
+  "auditLogs",
 ]);
 
+export * from "./audit-logs.ts";
 export * from "./builder.ts";
 export * from "./cipher.ts";
 export * from "./compute.ts";
