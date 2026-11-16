@@ -1,5 +1,11 @@
 # stardust
 
+## 0.16.0
+
+### Minor Changes
+
+- [#77](https://github.com/henryj-dev/stardust/pull/77) [`23249d1`](https://github.com/henryj-dev/stardust/commit/23249d167d455f15839488697711661c4f0d0fc6) Thanks [@mack-erel](https://github.com/mack-erel)! - Creating a component's starter manifests now lists its directory in the nearest `kustomization.yaml` above it, in the same commit, so the GitOps controller applies it; before, the new files sat in the deploy repository and nothing ran until someone listed them by hand. The page says where it was listed, or that no kustomization above could list it. A new "Also create the namespace" option adds a Namespace with the restricted Pod Security standard (removed with the component, so leave it off for a shared namespace). The API takes `createNamespace` and answers `listedIn`.
+
 ## 0.15.0
 
 ### Minor Changes
