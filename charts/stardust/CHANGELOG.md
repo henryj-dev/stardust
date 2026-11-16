@@ -1,5 +1,15 @@
 # stardust
 
+## 0.15.0
+
+### Minor Changes
+
+- [#74](https://github.com/henryj-dev/stardust/pull/74) [`2253304`](https://github.com/henryj-dev/stardust/commit/2253304d3134736d01539a84bec86d3aa2a048e6) Thanks [@mack-erel](https://github.com/mack-erel)! - A value on the env page can now come from a file: a key, a JSON credential or a config file, taken exactly as it is, newlines included. Only UTF-8 text up to 32 KiB is accepted, and not a typed value and a file together. Before this, secrets were typed into a one-line field, so a multi-line key could not be stored at all.
+
+- [#76](https://github.com/henryj-dev/stardust/pull/76) [`df3a2f4`](https://github.com/henryj-dev/stardust/commit/df3a2f49ffc84757e3648f9132c10f5c13b29702) Thanks [@mack-erel](https://github.com/mack-erel)! - A component can read env secrets as files. On its page, choose a secret and a path in the container (`/etc/app/key.pem`), and stardust commits a read-only mount of that key to the component's Deployment, each file on its own path so the rest of the directory stays as it is. Only secrets the component's env Secret has can be mounted; clearing a path removes the file. The API is `GET` and `PUT /api/v1/projects/<id>/components/<name>/files`, for the project's maintainers; the audit log names keys and paths, never values.
+
+- [#73](https://github.com/henryj-dev/stardust/pull/73) [`a23f320`](https://github.com/henryj-dev/stardust/commit/a23f320eb4049eaa8e6b0f03f743d72d06c21400) Thanks [@mack-erel](https://github.com/mack-erel)! - The project form has a "Check access" button that says whether stardust can read the repository: public, through the GitHub App, with the configured token, or not at all. A project's settings show it when they open. It warns when stardust cannot read a repository, which runs would refuse, and when the GitHub App is installed on all of the owner's repositories, so a leaked key would read every one. The check is also `GET /api/v1/source/access?repo=owner/name`, for administrators, and `sourceAccess` in the SDK.
+
 ## 0.14.1
 
 ### Patch Changes
