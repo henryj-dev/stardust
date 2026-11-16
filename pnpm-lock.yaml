@@ -195,6 +195,9 @@ importers:
       '@stardust/plugin-builder-buildkit':
         specifier: workspace:*
         version: link:../../plugins/builder-buildkit
+      '@stardust/plugin-db-statefulset':
+        specifier: workspace:*
+        version: link:../../plugins/db-statefulset
       '@stardust/plugin-dns-cloudflare':
         specifier: workspace:*
         version: link:../../plugins/dns-cloudflare
@@ -365,6 +368,15 @@ importers:
       '@stardust/core':
         specifier: workspace:*
         version: link:../../packages/core
+
+  plugins/db-statefulset:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   plugins/dns-cloudflare:
     dependencies:

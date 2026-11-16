@@ -297,6 +297,28 @@ A parallax write is published by applying its view at the revision the write
 made (a write alone is a draft there); stardust then waits until that view
 serves it.
 
+### `db-statefulset`
+
+Provides the `databases` port for PostgreSQL run as a plain StatefulSet (one
+replica, a volume claim, a Service). It finds instances by image in the
+namespaces it is given, reading the superuser password's Secret _name and
+key_ from the pod's `POSTGRES_PASSWORD`, never its value. It renders the
+manifests that the `databases` feature commits: a new instance, a Job that
+creates an application's role and database (safe to run again), and a backup
+CronJob that dumps every instance, encrypts each dump to an age key, uploads
+it to S3-compatible storage, reads the stored size back and prunes old dumps.
+
+```yaml
+db-statefulset:
+  namespace: stardust-databases # where new instances go
+  namespaces: [apps] # optional: where else to find instances to adopt
+  image: postgres # optional: tags are <version>-alpine
+  versions: ["16", "17"] # optional
+```
+
+List every one of those namespaces in the chart's `databases.namespaces`, so
+the server can read StatefulSets, claims and jobs there.
+
 ### `domains`
 
 Administrators see every zone the DNS providers hold on `/domains`: the

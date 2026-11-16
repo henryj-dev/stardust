@@ -58,6 +58,7 @@ plugins compiled in (enforced by `only-bundle-loads-plugins`), and
 | `builder-buildkit` | `builder`                                            | `kube` |
 | `dns-cloudflare`   | `dns` (`cloudflare`)                                 |        |
 | `dns-parallax`     | `dns` (`parallax`, internal/external views)          |        |
+| `db-statefulset`   | `databases` (needs `kube`)                           |        |
 | `domains`          | (feature: requires `dns`, `globalDatabase`)          |        |
 | `nodes`            | (feature: requires `database`)                       |        |
 | `gitops-git`       | `deployRepo`                                         |        |

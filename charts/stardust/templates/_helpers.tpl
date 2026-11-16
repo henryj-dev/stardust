@@ -85,7 +85,7 @@ affinity:
       key: {{ .Values.database.key }}
 {{- end -}}
 
-{{/* Non-empty when the server reads the Kubernetes API: build logs, or runtime namespaces. */}}
+{{/* Non-empty when the server reads the Kubernetes API: build logs, runtime or database namespaces. */}}
 {{- define "stardust.serverReadsCluster" -}}
-{{- if or (and .Values.builds.enabled .Values.builds.logs) .Values.runtime.namespaces -}}true{{- end -}}
+{{- if or (and .Values.builds.enabled .Values.builds.logs) .Values.runtime.namespaces .Values.databases.namespaces -}}true{{- end -}}
 {{- end }}

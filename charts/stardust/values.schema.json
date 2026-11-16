@@ -233,6 +233,20 @@
           }
         }
       }
+    },
+    "databases": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "namespaces": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+          }
+        }
+      }
     }
   }
 }
