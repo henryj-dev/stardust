@@ -1,5 +1,15 @@
 # stardust
 
+## 0.14.0
+
+### Minor Changes
+
+- [#68](https://github.com/henryj-dev/stardust/pull/68) [`3b31b04`](https://github.com/henryj-dev/stardust/commit/3b31b04d4da16a4afeb0b48da185135aa08aa2a2) Thanks [@mack-erel](https://github.com/mack-erel)! - The Account page now lists your API tokens with when each was made, last used and expires, makes a new one that lasts 1, 7, 30 or 90 days or never, and revokes them, so you no longer have to script a sign-in to get a token. A new token is shown once, with a copy button. Making a token now needs a sign-in from the last few minutes, as deleting a project does, because a token itself passes that check.
+
+### Patch Changes
+
+- [#69](https://github.com/henryj-dev/stardust/pull/69) [`c0494b4`](https://github.com/henryj-dev/stardust/commit/c0494b46f48d3cf3a26e91188f1cc20b53a5c41e) Thanks [@mack-erel](https://github.com/mack-erel)! - Restore checks now finish: the worker, which follows their Jobs, gets its own account bound to the read-only `databases.namespaces` Roles (also when builds are off). Before, it could not read the Jobs and the checks stayed pending; a check it cannot follow is now logged.
+
 ## 0.13.4
 
 ### Patch Changes
