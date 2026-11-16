@@ -1,0 +1,10 @@
+{{- if include "stardust.workerReadsCluster" . }}
+# The worker's own account, with a token: for builds (builds-rbac.yaml) and to
+# follow the database jobs it asked for (server-rbac.yaml). Only Roles.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "stardust.fullname" . }}-worker
+  labels:
+    {{- include "stardust.labels" . | nindent 4 }}
+{{- end }}
