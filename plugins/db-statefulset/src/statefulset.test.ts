@@ -102,7 +102,11 @@ describe("the superuser's role", () => {
       withEnv("secret", [{ name: "POSTGRES_USER", valueFrom: { secretKeyRef: { name: "u", key: "u" } } }, PASSWORD]),
       withEnv("quoted", [{ name: "POSTGRES_USER", value: "Hub-Admin" }, PASSWORD]),
       withEnv("envfrom", [PASSWORD], [{ configMapRef: { name: "pg-env" } }]),
-      withEnv("envfrom-named", [{ name: "POSTGRES_USER", value: "sso_admin" }, PASSWORD], [{ configMapRef: { name: "x" } }]),
+      withEnv(
+        "envfrom-named",
+        [{ name: "POSTGRES_USER", value: "sso_admin" }, PASSWORD],
+        [{ configMapRef: { name: "x" } }],
+      ),
     ],
   });
   const p = statefulSetPostgres({ kube, namespace: "apps", namespaces: [] });
