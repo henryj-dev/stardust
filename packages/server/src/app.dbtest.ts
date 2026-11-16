@@ -198,6 +198,23 @@ describe("API tokens", () => {
     );
   });
 
+  it("are made only from a fresh sign-in, since a token itself passes that check", async () => {
+    const session = await sessionFor("outsider");
+    await db.sql`UPDATE sessions SET created_at = now() - interval '1 hour' WHERE user_id = (SELECT id FROM users WHERE username = 'outsider')`;
+    const stale = await app.request("/api/v1/tokens", post({ name: "late" }, `Bearer ${session}`));
+    assert.equal(stale.status, 401);
+    assert.equal(((await stale.json()) as { reauthRequired: boolean }).reauthRequired, true);
+    const fresh = `Bearer ${await sessionFor("outsider")}`;
+    const made = await app.request("/api/v1/tokens", post({ name: "late" }, fresh));
+    assert.equal(made.status, 201);
+    const { token } = (await made.json()) as { token: string };
+    assert.equal(
+      (await app.request("/api/v1/tokens", post({ name: "from-a-token" }, `Bearer ${token}`))).status,
+      201,
+      "a token makes another without confirming",
+    );
+  });
+
   it("refuses bad names and lifetimes; an expired token does not authenticate", async () => {
     assert.equal((await app.request("/api/v1/tokens", post({ name: "" }, admin.authorization ?? ""))).status, 400);
     assert.equal(

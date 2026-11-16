@@ -238,6 +238,15 @@ export interface SessionInfo {
   current: boolean;
 }
 
+/** One of the caller's API tokens; the secret itself is shown only by `createToken`. */
+export interface ApiTokenView {
+  id: string;
+  name: string;
+  createdAt: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+}
+
 export interface Client {
   health(): Promise<{ status: string; version: string }>;
   /** Signs in with a username and password. Wrong credentials and lockout are results, not errors. */
@@ -360,6 +369,16 @@ export interface Client {
   /** One's own sessions; `current` is the one asking. */
   sessions(): Promise<SessionInfo[]>;
   endSession(id: string): Promise<void>;
+  /** One's own API tokens, oldest first, without their secrets. */
+  listTokens(): Promise<ApiTokenView[]>;
+  /**
+   * Makes an API token that acts with one's roles, ending after `expiresInDays`
+   * (null: never). The secret is in the result only; it is not shown again.
+   * Needs a fresh sign-in (ApiError 401 asking to confirm it is you).
+   */
+  createToken(name: string, expiresInDays: number | null): Promise<{ id: string; token: string }>;
+  /** Revokes one of one's own tokens; ApiError 404 for an unknown one. */
+  revokeToken(id: string): Promise<void>;
   /** One project's audit log (its maintainers and administrators). */
   projectAudit(projectId: string, filter?: Omit<AuditFilter, "project">): Promise<AuditPage>;
 }
@@ -692,6 +711,20 @@ export function createClient(options: ClientOptions): Client {
     },
     async endSession(id) {
       await get(`/api/v1/account/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+    },
+    async listTokens() {
+      return (await read<{ tokens: ApiTokenView[] }>("/api/v1/tokens")).tokens;
+    },
+    async createToken(name, expiresInDays) {
+      return (await post("/api/v1/tokens", { name, expiresInDays })) as { id: string; token: string };
+    },
+    async revokeToken(id) {
+      const path = `/api/v1/tokens/${encodeURIComponent(id)}`;
+      const res = await doFetch(`${base}${path}`, { method: "DELETE", headers: headers() });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `DELETE ${path} failed: ${res.status}`);
+      }
     },
     audit(filter = {}) {
       return read<AuditPage>(`/api/v1/audit${queryOf({ ...filter })}`);

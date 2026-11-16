@@ -104,8 +104,8 @@ web:
   With `required`, a password session without TOTP can only set it up. Without
   `totpKey` the secrets are stored as they are (the server says so at start-up).
   An administrator can turn someone's TOTP off after a lost phone.
-- **Confirming it is you.** Deleting a project, issuing a sign-in link and
-  resetting someone's TOTP need a sign-in from the last `reauthMinutes`: the
+- **Confirming it is you.** Deleting a project, issuing a sign-in link,
+  resetting someone's TOTP and creating an API token need a sign-in from the last `reauthMinutes`: the
   page asks for the password, or a code when TOTP is on
   (`POST /api/v1/account/reauth`). API tokens pass; they are credentials made
   for automation.
@@ -115,7 +115,8 @@ web:
 - **API tokens** (`sdt_…`) are for automation. Create one with
   `POST /api/v1/tokens` `{"name": "ci", "expiresInDays": 90}`; it is shown
   once and acts with your roles. List with `GET /api/v1/tokens`, revoke with
-  `DELETE /api/v1/tokens/<id>`.
+  `DELETE /api/v1/tokens/<id>`. The Account page in the dashboard does the
+  same.
 - **Single sign-on** through any OpenID Connect provider:
 
   ```yaml

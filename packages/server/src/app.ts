@@ -682,7 +682,10 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   // Users manage their own API tokens; a token acts with its user's roles.
   app.get("/api/v1/tokens", async (c) => c.json({ tokens: await listApiTokens(globalSql, c.get("user").id) }));
 
+  // A new token passes the fresh sign-in check itself, so making one needs a fresh sign-in.
   app.post("/api/v1/tokens", async (c) => {
+    const stale = await requireFresh(c);
+    if (stale) return stale;
     const body = (await c.req.json().catch(() => null)) as { name?: unknown; expiresInDays?: unknown } | null;
     const name = typeof body?.name === "string" ? body.name.trim() : "";
     const days = body?.expiresInDays ?? null;
