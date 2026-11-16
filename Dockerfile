@@ -68,6 +68,7 @@ WORKDIR /app
 COPY --from=web-build --chown=node:node /app/packages/web/build ./build
 COPY --from=web-build --chown=node:node /app/packages/web/package.json ./package.json
 COPY --from=web-build --chown=node:node /app/packages/web/server.ts ./server.ts
+COPY --from=web-build --chown=node:node /app/packages/web/socket-relay.ts ./socket-relay.ts
 USER node
 EXPOSE 3000
 CMD ["node", "server.ts"]

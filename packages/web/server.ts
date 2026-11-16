@@ -8,6 +8,7 @@
 // sets on every request, overwriting whatever the client sent.
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import process from "node:process";
+import { relayUpgrade } from "./socket-relay.ts";
 
 const PROTO_HEADER = "x-stardust-origin-proto";
 const HOST_HEADER = "x-stardust-origin-host";
@@ -43,6 +44,8 @@ const server = http.createServer((req, res) => {
     res.end("Not found");
   });
 });
+// Plugin sockets (the node agent's, for one) go on to the API; nothing else is upgraded here.
+server.on("upgrade", relayUpgrade(process.env.STARDUST_API_URL || "http://localhost:8080"));
 server.listen(Number(process.env.PORT ?? 3000), process.env.HOST ?? "0.0.0.0", () => {
   console.log(`stardust web listening on ${process.env.HOST ?? "0.0.0.0"}:${process.env.PORT ?? 3000}`);
 });
