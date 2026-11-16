@@ -34,7 +34,7 @@ RUN node --test "broker/vultr/src/**/*.test.ts"
 FROM base AS prod-deps
 RUN pnpm install --frozen-lockfile --prod --filter @stardust/vultr-broker
 
-FROM ${NODE_IMAGE}
+FROM ${NODE_IMAGE} AS runtime
 ARG BUILD_SHA=unknown
 ENV NODE_ENV=production \
     BUILD_SHA=${BUILD_SHA}
