@@ -1,5 +1,11 @@
 # stardust
 
+## 0.13.4
+
+### Patch Changes
+
+- [#66](https://github.com/henryj-dev/stardust/pull/66) [`cecf0c9`](https://github.com/henryj-dev/stardust/commit/cecf0c9f2c0f1f99c0336cc68fa5872cee2f06dd) Thanks [@mack-erel](https://github.com/mack-erel)! - The `databases` plugin no longer stops the worker from starting where only the server holds the age key: the cipher is needed only to create an instance or grant a role, and those answer 503 in a process without it.
+
 ## 0.13.3
 
 ### Patch Changes
