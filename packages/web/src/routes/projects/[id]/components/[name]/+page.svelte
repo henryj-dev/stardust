@@ -130,13 +130,25 @@ const LANDING: Record<string, string> = {
       <form method="POST" action="?/scaffold">
         <label>Namespace <input name="namespace" required pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?" /></label>
         <label>Port <input name="port" type="number" min="1" max="65535" /></label>
+        <!-- Off for a namespace other things share: withdrawing the component would remove it. -->
+        <label
+          ><input type="checkbox" name="createNamespace" /> Also create the namespace (restricted Pod Security; removed
+          with the component)</label
+        >
         <button type="submit">Create manifests</button>
       </form>
     </details>
     {#if form?.scaffoldError}
       <p role="alert">{form.scaffoldError}</p>
     {:else if form?.scaffolded}
-      <p data-scaffolded>Created {form.scaffolded.files.join(", ")}.</p>
+      <p data-scaffolded>
+        Created {form.scaffolded.files.join(", ")}.
+        {#if form.scaffolded.listedIn}
+          Listed in <code>{form.scaffolded.listedIn}</code>, so it is applied.
+        {:else}
+          No kustomization above the directory lists it: add it where your GitOps controller applies from.
+        {/if}
+      </p>
     {/if}
   {/if}
 

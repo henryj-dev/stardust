@@ -345,8 +345,8 @@ export interface Client {
   scaffold(
     projectId: string,
     component: string,
-    input: { namespace: string; port?: number },
-  ): Promise<{ deployCommit: string | null; files: string[] }>;
+    input: { namespace: string; port?: number; createNamespace?: boolean },
+  ): Promise<{ deployCommit: string | null; files: string[]; listedIn: string | null }>;
   /** Cancels a job that has not finished. ApiError 409 when it already has. */
   cancelJob(projectId: string, runId: string, job: string): Promise<void>;
   /** What was delivered for a component, newest first. */
@@ -672,6 +672,7 @@ export function createClient(options: ClientOptions): Client {
       return (await post(`/api/v1/projects/${p(projectId)}/components/${p(component)}/scaffold`, input)) as {
         deployCommit: string | null;
         files: string[];
+        listedIn: string | null;
       };
     },
     async cancelJob(projectId, runId, job) {

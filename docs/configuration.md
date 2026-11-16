@@ -811,7 +811,12 @@ whose deploy directory is empty, the component's page (or
 `POST …/components/<name>/scaffold` with `{"namespace": …, "port": …}`)
 writes starter manifests: a Deployment using the component's image at the tag
 `pending`, a Service for the port, and a kustomization. It never overwrites a
-directory that has files.
+directory that has files. In the same commit it lists the directory in the
+nearest `kustomization.yaml` above it (by its path from there), so the GitOps
+controller applies it; the answer's `listedIn` names that file, or is null when
+none above has a `resources` list. With `"createNamespace": true` it also
+declares the namespace, enforcing the restricted Pod Security standard; it is
+then removed with the component, so leave it off for a shared namespace.
 
 ### Runs
 

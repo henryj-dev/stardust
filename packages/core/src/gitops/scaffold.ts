@@ -23,6 +23,12 @@ export interface ScaffoldInput {
   imageRepository: string;
   /** The port the app listens on; omit for a workload without a Service. */
   port?: number;
+  /**
+   * Also declare the namespace, enforcing the restricted Pod Security
+   * standard the Deployment meets. Withdrawing the component then removes it,
+   * with everything in it: leave it off for a namespace other things share.
+   */
+  createNamespace?: boolean;
 }
 
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -46,8 +52,21 @@ export function scaffoldComponent(input: ScaffoldInput): Map<string, string> {
     throw new Error("port must be 1-65535");
   }
   const name = input.component;
-  const labels = `app.kubernetes.io/name: ${name}\n        app.kubernetes.io/part-of: ${input.project}`;
   const files = new Map<string, string>();
+  if (input.createNamespace) {
+    files.set(
+      "namespace.yaml",
+      `apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${input.namespace}
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+`,
+    );
+  }
+  const labels = `app.kubernetes.io/name: ${name}\n        app.kubernetes.io/part-of: ${input.project}`;
   files.set(
     "deployment.yaml",
     `apiVersion: apps/v1
