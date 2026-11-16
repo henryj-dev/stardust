@@ -120,6 +120,26 @@ const LANDING: Record<string, string> = {
     {/each}
   {/if}
 
+  {#if data.isAdmin && data.deliveries.length === 0}
+    <details data-scaffold>
+      <summary>No manifests yet? Create starter manifests</summary>
+      <p>
+        A Deployment using this component's image (and a Service for its port) in its deploy directory, which must
+        be empty. A delivery then points it at each build.
+      </p>
+      <form method="POST" action="?/scaffold">
+        <label>Namespace <input name="namespace" required pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?" /></label>
+        <label>Port <input name="port" type="number" min="1" max="65535" /></label>
+        <button type="submit">Create manifests</button>
+      </form>
+    </details>
+    {#if form?.scaffoldError}
+      <p role="alert">{form.scaffoldError}</p>
+    {:else if form?.scaffolded}
+      <p data-scaffolded>Created {form.scaffolded.files.join(", ")}.</p>
+    {/if}
+  {/if}
+
   <h2>Deliveries</h2>
   {#if data.deliveries.length === 0}
     <p>Nothing has been delivered yet.</p>

@@ -43,6 +43,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       runtime,
       runtimeError,
       env,
+      isAdmin: locals.user?.isAdmin === true,
       can: { restart: has("runtime.restart"), scale: has("runtime.scale"), logs: has("runtime.logs") },
     };
   } catch (err) {
@@ -58,6 +59,22 @@ const reason = (err: unknown): { status: number; message: string } => {
 };
 
 export const actions: Actions = {
+  // Starter manifests for an empty deploy directory (administrators; the server checks).
+  scaffold: async ({ locals, params, request, url }) => {
+    const client = requireClient(locals, url);
+    const form = await request.formData();
+    const port = Number(form.get("port"));
+    try {
+      const result = await client.scaffold(params.id, params.name, {
+        namespace: String(form.get("namespace") ?? ""),
+        ...(Number.isInteger(port) && port > 0 ? { port } : {}),
+      });
+      return { scaffolded: result };
+    } catch (err) {
+      const r = reason(err);
+      return fail(r.status, { scaffoldError: r.message });
+    }
+  },
   // Points the component back at an earlier delivery. The server checks write access.
   rollback: async ({ locals, params, request, url }) => {
     const client = requireClient(locals, url);

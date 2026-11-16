@@ -9,6 +9,7 @@ export * from "./gitops/bump.ts";
 export * from "./gitops/cas.ts";
 export * from "./gitops/image-tag.ts";
 export * from "./gitops/kustomization.ts";
+export * from "./gitops/scaffold.ts";
 export * from "./gitops/stamp.ts";
 export * from "./guard.ts";
 export type { Logger } from "./logger.ts";

@@ -2,7 +2,12 @@
 import { untrack } from "svelte";
 import { type ComponentFields, emptyComponent, type ProjectFields } from "$lib/project-fields";
 
-let { fields, errors, creating }: { fields: ProjectFields; errors: string[]; creating: boolean } = $props();
+let {
+  fields,
+  errors,
+  creating,
+  action,
+}: { fields: ProjectFields; errors: string[]; creating: boolean; action?: string } = $props();
 
 const copy = (f: ProjectFields): ComponentFields[] => f.components.map((c) => ({ ...c }));
 // Filled before the first render so the rows are in the server's HTML (the form works without JavaScript),
@@ -22,7 +27,7 @@ $effect(() => {
   </div>
 {/if}
 
-<form method="POST" data-project-form>
+<form method="POST" {action} data-project-form>
   <label>
     Id
     {#if creating}

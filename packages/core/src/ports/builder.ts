@@ -65,3 +65,9 @@ export interface Builder {
   /** The build's log while the builder still has it. */
   logs?: BuildLogReader;
 }
+
+/** The `images` port: where a component's builds are pushed, known without building. */
+export interface ImageNaming {
+  /** `<registry>/<project>/<component>`, without a tag. */
+  repository(projectId: string, component: string): string;
+}

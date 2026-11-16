@@ -338,6 +338,17 @@ Then deliver it by asking for a run, see [Runs](#runs).
 Every manifest in `deployDir` that references
 `<registry>/demo/api:<tag>` is updated to the new build, pinned by digest.
 
+### Deleting a project
+
+An administrator can delete a project from its settings page, or with
+`DELETE /api/v1/projects/<id>` and the body `{"confirm": "<id>"}`. Its runs,
+jobs and memberships are deleted; the audit log keeps its history. With
+`"withdraw": true` its components' manifests are removed from the deploy
+repository first, in one commit, together with the entries that list their
+directories in the kustomizations above them, so the GitOps controller prunes
+what they deployed. Nested directories inside a deploy directory are not
+removed.
+
 ### Components
 
 | Pipeline | Builds                                  | Fields                                                                           |
@@ -374,6 +385,14 @@ The build log names the way taken (`[node-build] install: …`). pnpm is pinned
 }
 ```
 
+Components can also be changed one at a time
+(`PUT`/`DELETE /api/v1/projects/<id>/components/<name>`). For a component
+whose deploy directory is empty, the component's page (or
+`POST …/components/<name>/scaffold` with `{"namespace": …, "port": …}`)
+writes starter manifests: a Deployment using the component's image at the tag
+`pending`, a Service for the port, and a kustomization. It never overwrites a
+directory that has files.
+
 ### Runs
 
 A maintainer of a project (or an administrator) can ask for a commit to be
@@ -389,6 +408,10 @@ The body names at most one of `branch`, `tag` or `sha` (a full commit hash);
 an empty body takes the head of the default branch. A commit given by hash
 must be in the default branch's history. The run records who asked for it.
 Every job of the definition runs, and the result is delivered.
+
+A run is refused before anything is built (409, naming the components) when
+a component's deploy directory has no manifest that uses its image: the build
+could not be delivered.
 
 This is the only way a run starts. A merge, even to a public repository you do
 not control, reaches your cluster only when someone asks for a specific commit,

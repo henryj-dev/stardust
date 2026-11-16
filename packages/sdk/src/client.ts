@@ -250,6 +250,17 @@ export interface Client {
    * An ApiError carries the server's reason (400 bad target, 422 no such ref, 403/404 no access).
    */
   pull(projectId: string, target?: PullTarget): Promise<{ runId: string; ref: string; sha: string }>;
+  /** Deletes a project; `withdraw` also removes its manifests from the deploy repository. Administrators. */
+  deleteProject(id: string, options?: { withdraw?: boolean }): Promise<{ ok: true; deployCommit: string | null }>;
+  /**
+   * Writes starter manifests into a component's empty deploy directory.
+   * ApiError 409 when the directory is not empty. Administrators.
+   */
+  scaffold(
+    projectId: string,
+    component: string,
+    input: { namespace: string; port?: number },
+  ): Promise<{ deployCommit: string | null; files: string[] }>;
   /** Cancels a job that has not finished. ApiError 409 when it already has. */
   cancelJob(projectId: string, runId: string, job: string): Promise<void>;
   /** What was delivered for a component, newest first. */
@@ -451,6 +462,26 @@ export function createClient(options: ClientOptions): Client {
         runId: string;
         ref: string;
         sha: string;
+      };
+    },
+    async deleteProject(id, options = {}) {
+      const path = `/api/v1/projects/${encodeURIComponent(id)}`;
+      const res = await doFetch(`${base}${path}`, {
+        method: "DELETE",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify({ confirm: id, withdraw: options.withdraw === true }),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `DELETE ${path} failed: ${res.status}`);
+      }
+      return (await res.json()) as { ok: true; deployCommit: string | null };
+    },
+    async scaffold(projectId, component, input) {
+      const p = (s: string) => encodeURIComponent(s);
+      return (await post(`/api/v1/projects/${p(projectId)}/components/${p(component)}/scaffold`, input)) as {
+        deployCommit: string | null;
+        files: string[];
       };
     },
     async cancelJob(projectId, runId, job) {

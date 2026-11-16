@@ -4,17 +4,23 @@ import {
   buildLogKey,
   bumpImage,
   can,
+  commitWithCas,
   type DeployRepo,
   decideAccess,
   type Feature,
   type Identity,
   type IdentityProvider,
+  type ImageNaming,
   type Logger,
+  manifestUsesImage,
   type ObjectStore,
+  type PipelineDef,
   PipelineDefError,
   type PullTarget,
   pipelineDefFromComponents,
   type ResolvedTarget,
+  removeResource,
+  scaffoldComponent,
   TargetError,
 } from "@stardust/core";
 import {
@@ -26,6 +32,7 @@ import {
   cancelJob,
   createApiToken,
   createUser,
+  deleteProject,
   getProject,
   latestRuns,
   listApiTokens,
@@ -82,6 +89,8 @@ export interface Services {
   env?: EnvEditor;
   /** Sign-in through an OpenID provider. Without it only passwords work. */
   oidc?: IdentityProvider;
+  /** Where a component's builds are pushed, for scaffolding its manifests. Optional. */
+  images?: ImageNaming;
   /** Kept build logs, served once the cluster has cleaned a build up. Optional. */
   store?: ObjectStore;
   /** The deploy repository, for rolling a component back. Without it rollback answers 404. */
@@ -466,6 +475,178 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     return c.json(await getProject(sql, project.id));
   });
 
+  /** The components a definition builds whose deploy directory has no manifest using their image. */
+  const undeliverable = async (project: Project, def: PipelineDef) => {
+    const repo = services.deployRepo?.repo;
+    if (!repo) return [];
+    const head = await repo.headSha();
+    const named = new Set<string>();
+    for (const job of Object.values(def.jobs)) {
+      if (job.pipeline !== "C" && job.pipeline !== "N") continue;
+      const name = job.component ?? (project.components.length === 1 ? project.components[0]?.name : undefined);
+      if (name) named.add(name);
+    }
+    const out: Array<{ component: string; deployDir: string }> = [];
+    for (const component of project.components.filter((c) => named.has(c.name))) {
+      const files = new Map<string, string>();
+      for (const name of await repo.listDir(component.deployDir, head)) {
+        const file = await repo.readFile(`${component.deployDir}/${name}`, head);
+        if (file) files.set(`${component.deployDir}/${name}`, file.content);
+      }
+      if (!manifestUsesImage(files, project.id, component.name)) {
+        out.push({ component: component.name, deployDir: component.deployDir });
+      }
+    }
+    return out;
+  };
+
+  // Adds or replaces one component of a project, leaving the others as they are.
+  app.put("/api/v1/projects/:id/components/:name", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const project = await getProject(sql, c.req.param("id"));
+    if (!project) return c.json({ error: "unknown project" }, 404);
+    const body = (await c.req.json().catch(() => null)) as Partial<Project["components"][number]> | null;
+    if (!body || typeof body !== "object") return c.json({ error: "body is not JSON" }, 400);
+    const component = { ...body, name: c.req.param("name") } as Project["components"][number];
+    const existed = project.components.some((x) => x.name === component.name);
+    const components = existed
+      ? project.components.map((x) => (x.name === component.name ? component : x))
+      : [...project.components, component];
+    try {
+      await putProject(globalSql, { ...project, components });
+    } catch (err) {
+      if (err instanceof ProjectError || err instanceof PipelineDefError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
+    await audit(c, {
+      action: existed ? "project.component.update" : "project.component.create",
+      projectId: project.id,
+      target: component.name,
+      detail: { pipeline: component.pipeline, deployDir: component.deployDir },
+    });
+    return c.json(await getProject(sql, project.id));
+  });
+
+  app.delete("/api/v1/projects/:id/components/:name", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const project = await getProject(sql, c.req.param("id"));
+    if (!project) return c.json({ error: "unknown project" }, 404);
+    const name = c.req.param("name");
+    if (!project.components.some((x) => x.name === name)) return c.json({ error: "unknown component" }, 404);
+    try {
+      await putProject(globalSql, { ...project, components: project.components.filter((x) => x.name !== name) });
+    } catch (err) {
+      if (err instanceof ProjectError || err instanceof PipelineDefError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
+    await audit(c, { action: "project.component.delete", projectId: project.id, target: name });
+    return c.json({ ok: true });
+  });
+
+  // Writes a minimal set of manifests into a component's empty deploy
+  // directory, so its first delivery has an image to point at.
+  app.post("/api/v1/projects/:id/components/:name/scaffold", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const project = await getProject(sql, c.req.param("id"));
+    const component = project?.components.find((x) => x.name === c.req.param("name"));
+    if (!project || !component) return c.json({ error: "unknown component" }, 404);
+    const repo = services.deployRepo?.repo;
+    if (!repo || !services.images) {
+      return c.json(
+        { error: "scaffolding needs a deploy repository (gitops-git) and a builder (builder-buildkit)" },
+        404,
+      );
+    }
+    const body = (await c.req.json().catch(() => ({}))) as { namespace?: unknown; port?: unknown } | null;
+    if (typeof body?.namespace !== "string") return c.json({ error: "namespace is required" }, 400);
+    if (body.port !== undefined && typeof body.port !== "number")
+      return c.json({ error: "port must be a number" }, 400);
+    let files: Map<string, string>;
+    try {
+      files = scaffoldComponent({
+        project: project.id,
+        component: component.name,
+        namespace: body.namespace,
+        imageRepository: services.images.repository(project.id, component.name),
+        ...(typeof body.port === "number" ? { port: body.port } : {}),
+      });
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    let occupied = false;
+    const result = await commitWithCas(repo, async (_head, at) => {
+      occupied = (await at.list(component.deployDir)).length > 0;
+      if (occupied) return null;
+      return {
+        files: new Map([...files].map(([name, text]) => [`${component.deployDir}/${name}`, text])),
+        message: `chore(${project.id}/${component.name}): scaffold manifests`,
+      };
+    });
+    if (occupied)
+      return c.json({ error: `${component.deployDir} is not empty; stardust does not overwrite manifests` }, 409);
+    if (result.status === "error") return c.json({ error: `deploy repository: ${result.message}` }, 502);
+    const deployCommit = result.status === "committed" ? result.sha : null;
+    await audit(c, {
+      action: "project.component.scaffold",
+      projectId: project.id,
+      target: component.name,
+      detail: { deployDir: component.deployDir, files: [...files.keys()], deployCommit },
+    });
+    return c.json({ deployCommit, files: [...files.keys()].map((f) => `${component.deployDir}/${f}`) }, 201);
+  });
+
+  // Deletes a project with its runs and memberships (the audit log keeps
+  // its history). With `withdraw`, its components' manifests are removed
+  // from the deploy repository first, in one commit, so the GitOps
+  // controller prunes what they deployed. The body must repeat the id.
+  app.delete("/api/v1/projects/:id", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const project = await getProject(sql, c.req.param("id"));
+    if (!project) return c.json({ error: "unknown project" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { confirm?: unknown; withdraw?: unknown } | null;
+    if (body?.confirm !== project.id)
+      return c.json({ error: `repeat the project's id as "confirm" to delete it` }, 400);
+    let deployCommit: string | null = null;
+    if (body.withdraw === true) {
+      const repo = services.deployRepo?.repo;
+      if (!repo) return c.json({ error: "withdrawing needs a deploy repository (gitops-git)" }, 404);
+      const result = await commitWithCas(repo, async (_head, at) => {
+        const files = new Map<string, string | null>();
+        for (const component of project.components) {
+          for (const name of await at.list(component.deployDir)) files.set(`${component.deployDir}/${name}`, null);
+          // Drop the directory from every kustomization above it that lists it, by its path from there.
+          const parts = component.deployDir.split("/");
+          for (let depth = parts.length - 1; depth >= 0; depth--) {
+            const dir = parts.slice(0, depth).join("/");
+            const entry = parts.slice(depth).join("/");
+            for (const k of ["kustomization.yaml", "kustomization.yml"]) {
+              const path = dir ? `${dir}/${k}` : k;
+              const file = files.has(path) ? { content: files.get(path) ?? "" } : await at.read(path);
+              if (!file) continue;
+              const next = removeResource(file.content, entry);
+              if (next !== file.content) files.set(path, next);
+            }
+          }
+        }
+        return files.size === 0 ? null : { files, message: `chore(${project.id}): withdraw manifests` };
+      });
+      if (result.status === "error") return c.json({ error: `deploy repository: ${result.message}` }, 502);
+      if (result.status === "committed") deployCommit = result.sha;
+    }
+    await deleteProject(globalSql, project.id);
+    await audit(c, {
+      action: "project.delete",
+      projectId: project.id,
+      target: project.id,
+      detail: { withdrawn: body.withdraw === true, deployCommit, components: project.components.map((x) => x.name) },
+    });
+    return c.json({ ok: true, deployCommit });
+  });
+
   // Projects the caller may read: all of them for administrators, else their
   // memberships. Each carries its newest run (`lastRun`, without jobs) so a list
   // can show how every project's latest delivery went in one request.
@@ -593,6 +774,18 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
     const target = pullTarget(body ?? {});
     if (typeof target === "string") return c.json({ error: target }, 400);
+    const def = project.pipelineDef ?? pipelineDefFromComponents(project.components);
+    // A build whose image no manifest uses cannot be delivered: say so before building.
+    const missing = await undeliverable(project, def);
+    if (missing.length > 0) {
+      return c.json(
+        {
+          error: `${missing.map((m) => `${m.component} (${m.deployDir})`).join(", ")}: no manifest there uses the component's image; add one, or scaffold it, before building`,
+          components: missing.map((m) => m.component),
+        },
+        409,
+      );
+    }
 
     let resolved: ResolvedTarget;
     try {
@@ -608,7 +801,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       trigger: "manual",
       ref: resolved.ref,
       sha: resolved.sha,
-      def: project.pipelineDef ?? pipelineDefFromComponents(project.components),
+      def,
       changedPaths: null,
       requestedBy: user.username,
     });
