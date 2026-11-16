@@ -201,3 +201,21 @@ describe("delete tickets for the broker", () => {
     assert.equal(sig, createHmac("sha256", "shared").update(`v1.${payload}`).digest("base64url"));
   });
 });
+
+describe("monthly costs", () => {
+  it("prices each instance at its plan, dearest first", async () => {
+    const { computeCosts } = await import("./vultr.ts");
+    const compute = vultrCompute(vultrClient({ apiKey: "key", fetch: fakeVultr().fetchFn }));
+    await compute.create({ label: "a", hostname: "a.example.test", region: "ams", plan: "vc2-1c-1gb", image: "2284" });
+    await compute.create({ label: "b", hostname: "b.example.test", region: "ams", plan: "vc2-2c-4gb", image: "2284" });
+    const report = await computeCosts(compute).monthly();
+    assert.equal(report.currency, "USD");
+    assert.deepEqual(
+      report.lines.map((l) => [l.name, l.monthly]),
+      [
+        ["b.example.test", 20],
+        ["a.example.test", 5],
+      ],
+    );
+  });
+});

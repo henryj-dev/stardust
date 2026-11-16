@@ -3,6 +3,7 @@ import {
   type ComputeCatalog,
   type ComputeInstance,
   type ComputeProvider,
+  type CostSource,
   type CreateInstanceInput,
   createInstanceProblems,
 } from "@stardust/core";
@@ -204,6 +205,22 @@ export function vultrCompute(client: VultrClient, options: VultrComputeOptions =
           }
         : undefined;
       await client.request({ method: "DELETE", path: `/instances/${target}`, ...(headers ? { headers } : {}) });
+    },
+  };
+}
+
+/** Monthly costs of a compute account: each instance at its plan's price. */
+export function computeCosts(compute: ComputeProvider, currency = "USD"): CostSource {
+  return {
+    async monthly() {
+      const [instances, catalog] = await Promise.all([compute.list(), compute.catalog()]);
+      const price = new Map(catalog.plans.map((p) => [p.id, p.monthlyCost]));
+      return {
+        currency,
+        lines: instances
+          .map((i) => ({ name: i.hostname || i.label, detail: i.plan, monthly: price.get(i.plan) ?? 0 }))
+          .sort((a, b) => b.monthly - a.monthly || a.name.localeCompare(b.name)),
+      };
     },
   };
 }
