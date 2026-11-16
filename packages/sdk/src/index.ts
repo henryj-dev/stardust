@@ -1,4 +1,5 @@
 export type {
+  ApiTokenView,
   AuditEventView,
   AuditFilter,
   AuditPage,

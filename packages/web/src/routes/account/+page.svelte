@@ -1,6 +1,13 @@
 <script lang="ts">
 let { data, form } = $props();
 const time = (iso: string) => new Date(iso).toLocaleString();
+const ended = (iso: string) => new Date(iso).getTime() <= Date.now();
+
+let copied = $state(false);
+async function copy(value: string) {
+  await navigator.clipboard.writeText(value);
+  copied = true;
+}
 </script>
 
 <svelte:head>
@@ -82,4 +89,68 @@ const time = (iso: string) => new Date(iso).toLocaleString();
       {/each}
     </tbody>
   </table>
+
+  <h2>API tokens</h2>
+  <p>For scripts and automation. A token acts with your roles until it expires or you revoke it.</p>
+  {#if form?.tokenError}
+    <p role="alert" data-token-error>{form.tokenError}</p>
+    {#if form.reauth}
+      <form method="POST" action="/login?/oidc&next=/account" data-reauth-sso>
+        <input type="hidden" name="reauth" value="1" />
+        <button type="submit">Confirm through single sign-on</button>
+      </form>
+      <form method="POST" action="?/reauth" data-reauth>
+        <label>Your password, or a code from your app <input name="proof" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Confirm</button>
+      </form>
+    {/if}
+  {:else if form?.confirmed}
+    <p data-confirmed>Confirmed for the next few minutes.</p>
+  {:else if form?.revokedToken}
+    <p data-token-revoked>Revoked. It no longer works.</p>
+  {/if}
+  {#if form?.createdToken}
+    <div data-new-token>
+      <p>Your new token <strong>{form.createdToken.name}</strong>. Copy it now: it is not shown again.</p>
+      <p><code data-token-value>{form.createdToken.token}</code></p>
+      <button type="button" onclick={() => form?.createdToken && copy(form.createdToken.token)}>
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  {/if}
+  {#if data.tokens.length === 0}
+    <p data-no-tokens>No tokens.</p>
+  {:else}
+    <table>
+      <thead><tr><th>Name</th><th>Created</th><th>Last used</th><th>Expires</th><th></th></tr></thead>
+      <tbody>
+        {#each data.tokens as t (t.id)}
+          <tr data-token={t.id}>
+            <td>{t.name}</td>
+            <td>{time(t.createdAt)}</td>
+            <td>{t.lastUsedAt ? time(t.lastUsedAt) : "never"}</td>
+            <td>{t.expiresAt ? `${ended(t.expiresAt) ? "ended " : ""}${time(t.expiresAt)}` : "never"}</td>
+            <td>
+              <form method="POST" action="?/revokeToken">
+                <input type="hidden" name="token" value={t.id} />
+                <button type="submit">Revoke</button>
+              </form>
+            </td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  {/if}
+  <form method="POST" action="?/createToken" data-create-token>
+    <label>Name <input name="name" maxlength="100" autocomplete="off" required value={form?.tokenName ?? ""} /></label>
+    <label>
+      Expires after
+      <select name="expiry">
+        {#each data.tokenExpiry.choices as c (c.value)}
+          <option value={c.value} selected={c.value === (form?.tokenExpiry ?? data.tokenExpiry.default)}>{c.label}</option>
+        {/each}
+      </select>
+    </label>
+    <button type="submit">Make a token</button>
+  </form>
 </main>

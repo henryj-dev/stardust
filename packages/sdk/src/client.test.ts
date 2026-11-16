@@ -228,3 +228,53 @@ it("calls a plugin's API under its name and passes on its errors", async () => {
   });
   assert.equal(seen[1]?.body, '{"replicas":"2"}');
 });
+
+it("lists, creates and revokes one's API tokens, passing on the server's reason", async () => {
+  // Built at run time: no token-shaped literal in the source.
+  const secret = ["sdt", "x".repeat(8)].join("_");
+  const seen: Array<{ url: string; method: string; body: unknown }> = [];
+  const client = createClient({
+    baseUrl: "http://api.test",
+    token: "t0k",
+    fetch: async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      seen.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (method === "GET")
+        return Response.json({
+          tokens: [{ id: "a1", name: "ci", createdAt: "2026-01-01T00:00:00Z", expiresAt: null, lastUsedAt: null }],
+        });
+      if (method === "POST") {
+        const { name } = JSON.parse(String(init?.body)) as { name: string };
+        if (name === "taken") return Response.json({ error: 'a token named "taken" exists' }, { status: 409 });
+        return Response.json({ id: "b2", token: secret }, { status: 201 });
+      }
+      if (url.endsWith("/gone")) return Response.json({ error: "unknown token" }, { status: 404 });
+      return Response.json({ ok: true });
+    },
+  });
+  assert.deepEqual(await client.listTokens(), [
+    { id: "a1", name: "ci", createdAt: "2026-01-01T00:00:00Z", expiresAt: null, lastUsedAt: null },
+  ]);
+  assert.deepEqual(seen[0], { url: "http://api.test/api/v1/tokens", method: "GET", body: null });
+  assert.deepEqual(await client.createToken("deploy", 30), { id: "b2", token: secret });
+  assert.deepEqual(seen[1], {
+    url: "http://api.test/api/v1/tokens",
+    method: "POST",
+    body: { name: "deploy", expiresInDays: 30 },
+  });
+  await client.createToken("forever", null);
+  assert.deepEqual(seen[2]?.body, { name: "forever", expiresInDays: null });
+  await assert.rejects(client.createToken("taken", 7), { status: 409, message: 'a token named "taken" exists' });
+  await client.revokeToken("a 1");
+  assert.deepEqual(seen[4], { url: "http://api.test/api/v1/tokens/a%201", method: "DELETE", body: null });
+  await assert.rejects(client.revokeToken("gone"), { status: 404, message: "unknown token" });
+});
+
+it("a refused token list is an error with the server's reason", async () => {
+  const client = createClient({
+    baseUrl: "http://api.test",
+    fetch: async () => Response.json({ error: "not signed in" }, { status: 401 }),
+  });
+  await assert.rejects(client.listTokens(), { status: 401, message: "not signed in" });
+});
