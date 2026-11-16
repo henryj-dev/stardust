@@ -2,6 +2,7 @@ import { ApiError } from "@stardust/sdk";
 import { error, fail } from "@sveltejs/kit";
 import type { RuntimeView } from "$lib/runtime";
 import { requireClient } from "$lib/server/api";
+import { readMounts } from "$lib/server/files-form";
 import type { Actions, PageServerLoad } from "./$types";
 
 interface EnvLanding {
@@ -36,7 +37,13 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
         runtimeError = err instanceof Error ? err.message : String(err);
       }
     }
+    // Without a deploy repository there are no files to show; the rest of the page still works.
+    const files = await client.componentFiles(params.id, params.name).catch((err) => {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    });
     return {
+      files,
       projectId: params.id,
       component: params.name,
       deliveries,
@@ -73,6 +80,17 @@ export const actions: Actions = {
     } catch (err) {
       const r = reason(err);
       return fail(r.status, { scaffoldError: r.message });
+    }
+  },
+  // Env secrets mounted as files: the whole list, as one commit. The server checks write access.
+  files: async ({ locals, params, request, url }) => {
+    const client = requireClient(locals, url);
+    try {
+      const result = await client.setComponentFiles(params.id, params.name, readMounts(await request.formData()));
+      return { filesSaved: result };
+    } catch (err) {
+      const r = reason(err);
+      return fail(r.status, { filesError: r.message });
     }
   },
   // Points the component back at an earlier delivery. The server checks write access.

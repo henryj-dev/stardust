@@ -666,6 +666,17 @@ names are not) is refused, because plain values are committed to Git in
 clear: save it as a secret, or list it in `plainOnPurpose` (the dashboard's
 "The value is public" box) when it really is public.
 
+**Secrets as files.** A program that reads a key or a config file from disk
+can have env secrets mounted instead: on the component's page, pick a secret
+and a path in the container. stardust adds one volume, `stardust-files`, with
+just those keys from the component's env Secret, and mounts each read-only at
+its path (`subPath`, so the rest of the directory is untouched), as one commit
+to the workload's manifest (`PUT /api/v1/projects/<id>/components/<name>/files`
+with `{"mounts": [{"key": "APNS_KEY", "path": "/etc/app/key.p8"}]}`, for
+maintainers). A key the component's env Secret does not have is refused. When
+a secret changes, the env change rolls the workload out, which mounts the new
+file.
+
 With the runtime plugin, a component's page shows whether its env has
 **landed**: committed but not applied yet, applied but still rolling out, or
 running with it — from the env ConfigMap's revision and the workload's pod

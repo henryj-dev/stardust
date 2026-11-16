@@ -140,6 +140,58 @@ const LANDING: Record<string, string> = {
     {/if}
   {/if}
 
+  {#if data.files}
+    <h2>Files</h2>
+    <p>
+      Env secrets this component reads as files, for programs that read a key or a config file from disk. Each one
+      is mounted read-only at its own path. Saving commits the Deployment; it rolls out when it is applied.
+    </p>
+    {#if data.files.secrets.length === 0}
+      <p data-files-none>
+        No env secret reaches this component yet. Add one on the <a href={`${projectHref}/env`}>env page</a> (a file
+        can be its value), then mount it here.
+      </p>
+    {:else}
+      <form method="POST" action="?/files" data-files>
+        <table>
+          <thead><tr><th>Secret</th><th>Path in the container</th></tr></thead>
+          <tbody>
+            {#each [...data.files.mounts, { key: "", path: "" }] as m, i (i)}
+              <tr data-file-row={i}>
+                <td>
+                  <select name={`mounts.${i}.key`} aria-label={`Secret for file ${i + 1}`}>
+                    {#each data.files.secrets as s (s)}
+                      <option value={s} selected={s === m.key}>{s}</option>
+                    {/each}
+                  </select>
+                </td>
+                <td>
+                  <input
+                    name={`mounts.${i}.path`}
+                    value={m.path}
+                    placeholder={i === data.files.mounts.length ? "/etc/app/key.pem (add a file)" : "clear to remove"}
+                    aria-label={`Path for file ${i + 1}`}
+                    autocomplete="off"
+                  />
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+        <button type="submit">Save files</button>
+      </form>
+    {/if}
+    {#if form?.filesError}
+      <p role="alert" data-files-error>{form.filesError}</p>
+    {:else if form?.filesSaved}
+      <p data-files-saved>
+        {form.filesSaved.status === "committed"
+          ? `Committed ${form.filesSaved.deployCommit?.slice(0, 7) ?? ""}: ${form.filesSaved.mounts.length} file(s) mounted.`
+          : "Nothing to change."}
+      </p>
+    {/if}
+  {/if}
+
   <h2>Deliveries</h2>
   {#if data.deliveries.length === 0}
     <p>Nothing has been delivered yet.</p>

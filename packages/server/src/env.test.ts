@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ENV_REVISION_ANNOTATION } from "@stardust/core";
+import { ENV_REVISION_ANNOTATION, setFileMounts } from "@stardust/core";
 import { MemoryRepo } from "@stardust/core/testing";
 import type { Project } from "@stardust/db";
 import { parse } from "yaml";
@@ -106,6 +106,31 @@ describe("env editing", () => {
     // The secret value is in no file in plain text, and not in the commit message.
     for (const [path, text] of Object.entries(files)) assert.ok(!text.includes(CANARY), path);
     assert.ok(!repo.log.join("\n").includes(CANARY));
+  });
+
+  it("rolls out a workload that reads its secrets only as files, so a changed key is mounted", async () => {
+    // No envFrom at all: the workload reads the Secret through the files volume alone.
+    const filesOnly = setFileMounts(deployment("api").replace(/ {10}envFrom:\n(?: {12}- .*\n)+/, ""), {
+      component: "api",
+      secretName: "api-env-secret",
+      mounts: [{ key: "TLS_KEY", path: "/etc/api/tls.key" }],
+    }).text;
+    assert.doesNotMatch(filesOnly, /envFrom/);
+    const { repo, editor } = setup({ "deploy/apps/shop/api/deployment.yaml": filesOnly });
+    const result = await changeEnv(
+      editor,
+      project,
+      "api",
+      { expectedRevision: await revisionOf(editor, "api"), setSecrets: { TLS_KEY: CANARY } },
+      "alice",
+    );
+    assert.deepEqual(result.components[0]?.consumers, ["Deployment/api"]);
+    const stamped = parse(repo.files()["deploy/apps/shop/api/deployment.yaml"] as string);
+    assert.equal(
+      stamped.spec.template.metadata.annotations[ENV_REVISION_ANNOTATION],
+      result.components[0]?.envRevision,
+    );
+    assert.equal(stamped.spec.template.spec.volumes[0].name, "stardust-files", "the env change keeps the mount");
   });
 
   it("reads plain values and secret names, never secret values", async () => {
