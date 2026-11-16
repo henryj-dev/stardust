@@ -3,6 +3,14 @@
  * enabled plugins. The server and the worker call this instead of importing
  * plugin functions, so adding a plugin changes no entry point.
  */
+import {
+  type FeatureContext,
+  type Migration,
+  type Permission,
+  type Route,
+  routeProblems,
+  type Schedule,
+} from "./feature.ts";
 import type { Logger } from "./logger.ts";
 import type { Plugin, PluginContext } from "./plugin.ts";
 import { MULTI_PORTS, type PortName, type Ports } from "./ports/index.ts";
@@ -124,4 +132,56 @@ export async function assemble(options: AssembleOptions): Promise<Partial<Ports>
   }
   if (problems.length > 0) throw new AssemblyError(problems);
   return ports as Partial<Ports>;
+}
+
+/** One enabled plugin's routes, permissions, schedules and the rest, ready to mount. */
+export interface Feature {
+  plugin: string;
+  permissions: readonly Permission[];
+  routes: readonly Route[];
+  schedules: readonly Schedule[];
+  capabilities: readonly string[];
+  migrations: () => Promise<readonly Migration[]>;
+  context: FeatureContext;
+}
+
+const NO_MIGRATIONS = async (): Promise<readonly Migration[]> => [];
+
+/**
+ * Builds every enabled plugin's features once its ports exist, and checks
+ * the routes: each names one of the plugin's permissions, and each change
+ * has an audit action.
+ */
+export function buildFeatures(
+  plugins: readonly Plugin[],
+  sections: Readonly<Record<string, unknown>>,
+  ports: Partial<Ports>,
+  log: Logger,
+): Feature[] {
+  const problems: string[] = [];
+  const out: Feature[] = [];
+  for (const plugin of plugins) {
+    const name = plugin.manifest.name;
+    const context: FeatureContext = {
+      config: (sections[name] ?? {}) as Record<string, unknown>,
+      ports,
+      log,
+    };
+    const permissions = plugin.permissions ?? [];
+    const routes = plugin.routes?.(context) ?? [];
+    for (const problem of routeProblems(name, routes, permissions)) problems.push(`${name}: ${problem}`);
+    out.push({
+      plugin: name,
+      permissions,
+      routes,
+      schedules: plugin.schedules ?? [],
+      capabilities: plugin.capabilities ?? [],
+      migrations: plugin.migrations
+        ? () => (plugin.migrations as () => Promise<readonly Migration[]>)()
+        : NO_MIGRATIONS,
+      context,
+    });
+  }
+  if (problems.length > 0) throw new AssemblyError(problems);
+  return out;
 }

@@ -6,6 +6,15 @@
  * the dependency rules in `.dependency-cruiser.cjs` enforce that.
  */
 
+import {
+  type FeatureContext,
+  type Migration,
+  type Permission,
+  permissionProblems,
+  type Route,
+  type Schedule,
+  scheduleProblems,
+} from "./feature.ts";
 import type { Logger } from "./logger.ts";
 import type { PortName, Ports } from "./ports/index.ts";
 
@@ -54,6 +63,16 @@ export interface Plugin {
   readonly provides?: PortProvider;
   /** Ports this plugin cannot work without. Start-up stops, naming them, when one is missing. */
   readonly requires?: readonly PortName[];
+  /** Permissions its routes check. Every route names one. */
+  readonly permissions?: readonly Permission[];
+  /** API routes, under `/api/v1/plugins/<name>`. Built once the ports exist. */
+  routes?(context: FeatureContext): readonly Route[];
+  /** Work run every so often by one worker at a time. */
+  readonly schedules?: readonly Schedule[];
+  /** Its own tables (named `<name>_*`), applied at start-up after stardust's. */
+  migrations?(): Promise<readonly Migration[]>;
+  /** What it adds, for the dashboard to show: e.g. `runtime.restart`. */
+  readonly capabilities?: readonly string[];
 }
 
 export interface PluginRegistry {
@@ -76,6 +95,11 @@ export function definePlugin(plugin: Plugin): Plugin {
   for (const port of plugin.requires ?? EMPTY) {
     if (provided.includes(port)) throw new Error(`plugin "${name}" requires the port it provides: ${port}`);
   }
+  const problems = [...permissionProblems(name, plugin.permissions ?? []), ...scheduleProblems(plugin.schedules ?? [])];
+  for (const capability of plugin.capabilities ?? []) {
+    if (!capability.startsWith(`${name}.`)) problems.push(`capability "${capability}" must start with ${name}.`);
+  }
+  if (problems.length > 0) throw new Error(`plugin "${name}":\n  ${problems.join("\n  ")}`);
   return plugin;
 }
 

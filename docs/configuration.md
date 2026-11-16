@@ -108,6 +108,13 @@ audit:
 
 ## Plugins
 
+Each key under `plugins:` enables one plugin. `GET /api/v1/capabilities`
+lists the enabled plugins and what each adds; the dashboard uses it to show
+only what this server has. A plugin's own API is under
+`/api/v1/plugins/<plugin>/`, its tables are named `<plugin>_*`, and its
+schedules run on one worker at a time (their last run and error are in the
+`schedule_runs` table).
+
 ### `source-github`
 
 Resolves what a [run](#runs) builds: the head of a branch, a tag, or a

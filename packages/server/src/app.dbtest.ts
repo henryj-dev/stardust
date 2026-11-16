@@ -339,6 +339,8 @@ describe("every API route is guarded", () => {
     "DELETE /api/v1/tokens/:tokenId",
     // Lists only what the caller may read (tested in "reading projects and users").
     "GET /api/v1/projects",
+    // Which plugins are enabled: no data, only what the dashboard may show.
+    "GET /api/v1/capabilities",
   ]);
   const PUBLIC = new Set([
     "POST /api/v1/auth/login",
