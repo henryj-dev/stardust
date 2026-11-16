@@ -180,6 +180,25 @@ export interface Capabilities {
   plugins: Array<{ name: string; capabilities: string[] }>;
 }
 
+/** One delivery of a component: the commit built, the image it pushed, the deploy commit. */
+export interface Delivery {
+  jobId: string;
+  runId: string;
+  sha: string;
+  digest: string;
+  deployCommit: string | null;
+  finishedAt: string;
+}
+
+export interface RollbackResult {
+  /** `up-to-date` when the deploy repository already pointed there. */
+  status: "committed" | "up-to-date";
+  deployCommit: string | null;
+  sha: string;
+  digest: string;
+  job: string;
+}
+
 export interface Client {
   health(): Promise<{ status: string; version: string }>;
   /** Signs in with a username and password. Wrong credentials and lockout are results, not errors. */
@@ -217,6 +236,15 @@ export interface Client {
    * An ApiError carries the server's reason (400 bad target, 422 no such ref, 403/404 no access).
    */
   pull(projectId: string, target?: PullTarget): Promise<{ runId: string; ref: string; sha: string }>;
+  /** Cancels a job that has not finished. ApiError 409 when it already has. */
+  cancelJob(projectId: string, runId: string, job: string): Promise<void>;
+  /** What was delivered for a component, newest first. */
+  deliveries(projectId: string, component: string): Promise<Delivery[]>;
+  /**
+   * Points a component back at an earlier delivery: the one before the latest,
+   * or the one `job` names. ApiError 409 when there is nothing to go back to.
+   */
+  rollback(projectId: string, component: string, job?: string): Promise<RollbackResult>;
   /** Projects the caller may read. */
   projects(): Promise<ProjectListItem[]>;
   /** One project; an ApiError with status 404 when it does not exist or cannot be read. */
@@ -268,6 +296,19 @@ export function createClient(options: ClientOptions): Client {
     const res = await doFetch(`${base}${path}`, { ...init, headers: { ...headers(), ...(init.headers ?? {}) } });
     if (!res.ok) throw new ApiError(res.status, `${init.method ?? "GET"} ${path} failed: ${res.status}`);
     return res;
+  };
+  /** A POST with a JSON body; an ApiError carries the server's reason. */
+  const post = async (path: string, body: unknown): Promise<unknown> => {
+    const res = await doFetch(`${base}${path}`, {
+      method: "POST",
+      headers: { ...headers(), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+      throw new ApiError(res.status, error || `POST ${path} failed: ${res.status}`);
+    }
+    return res.json();
   };
   const session = async (): Promise<SessionUser | null> => {
     try {
@@ -370,17 +411,27 @@ export function createClient(options: ClientOptions): Client {
       });
     },
     async pull(projectId, target = {}) {
-      const path = `/api/v1/projects/${encodeURIComponent(projectId)}/runs`;
-      const res = await doFetch(`${base}${path}`, {
-        method: "POST",
-        headers: { ...headers(), "content-type": "application/json" },
-        body: JSON.stringify(target),
-      });
-      if (!res.ok) {
-        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
-        throw new ApiError(res.status, error || `POST ${path} failed: ${res.status}`);
-      }
-      return (await res.json()) as { runId: string; ref: string; sha: string };
+      return (await post(`/api/v1/projects/${encodeURIComponent(projectId)}/runs`, target)) as {
+        runId: string;
+        ref: string;
+        sha: string;
+      };
+    },
+    async cancelJob(projectId, runId, job) {
+      const p = (s: string) => encodeURIComponent(s);
+      await post(`/api/v1/projects/${p(projectId)}/runs/${p(runId)}/jobs/${p(job)}/cancel`, {});
+    },
+    async deliveries(projectId, component) {
+      const p = (s: string) => encodeURIComponent(s);
+      const res = await get(`/api/v1/projects/${p(projectId)}/components/${p(component)}/deliveries`);
+      return ((await res.json()) as { deliveries: Delivery[] }).deliveries;
+    },
+    async rollback(projectId, component, job) {
+      const p = (s: string) => encodeURIComponent(s);
+      return (await post(
+        `/api/v1/projects/${p(projectId)}/components/${p(component)}/rollback`,
+        job ? { job } : {},
+      )) as RollbackResult;
     },
     events(projectId, signal) {
       return get(`/api/v1/projects/${encodeURIComponent(projectId)}/events`, {

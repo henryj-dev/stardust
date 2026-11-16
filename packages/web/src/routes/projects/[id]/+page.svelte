@@ -39,6 +39,16 @@ $effect(() => {
     <a href={`/projects/${encodeURIComponent(data.projectId)}/env`} data-env-link>Environment</a> ·
     <a href={`/projects/${encodeURIComponent(data.projectId)}/audit`} data-audit-link>Audit log</a>
   </p>
+  {#if data.components.length > 0}
+    <p data-components>
+      Components:
+      {#each data.components as name, i (name)}
+        {i > 0 ? " · " : ""}<a href={`/projects/${encodeURIComponent(data.projectId)}/components/${encodeURIComponent(name)}`}
+          >{name}</a
+        >
+      {/each}
+    </p>
+  {/if}
   <p data-live={live}>{live ? "Live" : "Connecting…"}</p>
   <form method="POST" action="?/pull" data-pull>
     <select name="kind" aria-label="What to pull">

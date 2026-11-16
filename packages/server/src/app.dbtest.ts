@@ -360,7 +360,8 @@ describe("every API route is guarded", () => {
       .replace(":tokenId", "00000000-0000-0000-0000-000000000000")
       .replace(":runId", "00000000-0000-0000-0000-000000000000")
       .replace(":job", "api")
-      .replace(":layer", "_shared");
+      .replace(":layer", "_shared")
+      .replace(":name", "api");
 
   it("the list is not empty and holds the routes we know of", () => {
     const all = routes();

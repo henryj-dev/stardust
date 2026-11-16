@@ -3,7 +3,7 @@ import type { RunView } from "@stardust/sdk";
 import JobLog from "$lib/components/JobLog.svelte";
 import { duration, isActive, jobFacts, keptLogTail } from "$lib/run-view";
 
-let { data } = $props();
+let { data, form } = $props();
 // The newest copy from the live events, until the page loads another run.
 let latest = $state<RunView | null>(null);
 const run = $derived(latest?.id === data.run.id ? latest : data.run);
@@ -61,6 +61,17 @@ const time = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "â€
   {#each run.jobs as job (job.name)}
     <section data-job={job.name} data-status={job.status}>
       <h2>{job.name}: <span data-job-status>{job.status}</span></h2>
+      {#if isActive(job.status)}
+        <form method="POST" action="?/cancel" data-cancel>
+          <input type="hidden" name="job" value={job.name} />
+          <button type="submit">Cancel</button>
+        </form>
+      {/if}
+      {#if form?.cancelled === job.name}
+        <p data-cancelled>Cancelled.</p>
+      {:else if form?.cancelError && form?.job === job.name}
+        <p role="alert" data-cancel-error>{form.cancelError}</p>
+      {/if}
       <dl>
         <dt>Attempt</dt>
         <dd>{job.attempt}</dd>

@@ -6,7 +6,8 @@ import type { Actions, PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ locals, params, url }) => {
   const client = requireClient(locals, url);
-  return { projectId: params.id, runs: await client.runs(params.id) };
+  const [runs, project] = await Promise.all([client.runs(params.id), client.project(params.id)]);
+  return { projectId: params.id, runs, components: project.components.map((c) => c.name) };
 };
 
 export const actions: Actions = {

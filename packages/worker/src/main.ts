@@ -88,5 +88,5 @@ const workerId = `${hostname()}:${process.pid}`;
 console.log(`stardust worker started (${workerId})`);
 startHousekeeping({ sql, globalSql, log, auditRetentionDays: config.audit.retentionDays, signal: stop.signal });
 startSchedules({ sql, features, holder: workerId, log, signal: stop.signal });
-await runWorker({ sql, workerId, handler, log, signal: stop.signal });
+await runWorker({ sql, workerId, handler, log, signal: stop.signal, maxRunning: config.jobs.maxRunning });
 await sql.end({ timeout: 5 });

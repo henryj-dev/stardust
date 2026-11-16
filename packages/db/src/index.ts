@@ -2,6 +2,8 @@ export type { Sql } from "postgres";
 export type { AuditActor, AuditActorKind, AuditEvent, AuditInput, AuditQuery } from "./audit.ts";
 export { AUDIT_ACTION, AuditError, listAudit, MAX_AUDIT_PAGE, purgeAudit, recordAudit } from "./audit.ts";
 export { connect } from "./client.ts";
+export type { Delivery } from "./deliveries.ts";
+export { cancelJob, listDeliveries } from "./deliveries.ts";
 export type {
   ApiToken,
   SignInPolicy,

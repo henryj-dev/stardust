@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Logger } from "@stardust/core";
-import { claimJob, startRun } from "@stardust/db";
+import { cancelJob, claimJob, startRun } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
 import { runJob, runWorker } from "./loop.ts";
 
@@ -92,4 +92,29 @@ it("a lost lease aborts the handler and discards its result", async () => {
   assert.equal(aborted, true, "the handler was not told the lease was lost");
   assert.equal(result, null);
   assert.equal(await statusOf(runId, "slow"), "running", "the discarded result must not be recorded");
+});
+
+it("cancelling a running job stops its handler, and the job stays cancelled", async () => {
+  const runId = await start({ long: { pipeline: "C" } });
+  const job = await claimJob(db.sql, "w4", 30_000);
+  assert.ok(job);
+  let aborted = false;
+  const result = await runJob(
+    {
+      sql: db.sql,
+      workerId: "w4",
+      log: quiet,
+      leaseMs: 150,
+      handler: async (_job, signal) => {
+        assert.equal(await cancelJob(db.sql, runId, "long"), true);
+        for (let i = 0; i < 40 && !signal.aborted; i++) await sleep(25);
+        aborted = signal.aborted;
+        return "success";
+      },
+    },
+    job,
+  );
+  assert.equal(aborted, true, "the build was not told to stop");
+  assert.equal(result, null);
+  assert.equal(await statusOf(runId, "long"), "cancelled");
 });

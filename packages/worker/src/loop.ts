@@ -31,6 +31,8 @@ export interface WorkerOptions {
   idleMs?: number;
   /** Stops the loop after the current job. */
   signal: AbortSignal;
+  /** Jobs that may run at once across all workers; 0 is no limit. */
+  maxRunning?: number;
 }
 
 /** Runs one claimed job to completion. Returns the recorded result, or null if the lease was lost. */
@@ -88,7 +90,7 @@ export async function runWorker(opts: WorkerOptions): Promise<void> {
       if (reclaimed > 0) opts.log.warn("reclaimed jobs with expired leases", { count: reclaimed });
       lastReclaim = Date.now();
     }
-    const job = await claimJob(opts.sql, opts.workerId, leaseMs);
+    const job = await claimJob(opts.sql, opts.workerId, leaseMs, opts.maxRunning ?? 0);
     if (!job) {
       await sleep(idleMs, undefined, { signal: opts.signal }).catch(() => {});
       continue;

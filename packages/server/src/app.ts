@@ -1,7 +1,9 @@
 import {
   type Action,
   type BuildLogReader,
+  bumpImage,
   can,
+  type DeployRepo,
   decideAccess,
   type Feature,
   type Identity,
@@ -19,12 +21,14 @@ import {
   type AuditQuery,
   apiTokenFor,
   authenticate,
+  cancelJob,
   createApiToken,
   createUser,
   getProject,
   latestRuns,
   listApiTokens,
   listAudit,
+  listDeliveries,
   listProjects,
   listRuns,
   listUsers,
@@ -76,6 +80,8 @@ export interface Services {
   env?: EnvEditor;
   /** Sign-in through an OpenID provider. Without it only passwords work. */
   oidc?: IdentityProvider;
+  /** The deploy repository, for rolling a component back. Without it rollback answers 404. */
+  deployRepo?: DeployRepo;
   /** Enabled plugins' routes and capabilities, mounted under /api/v1/plugins. */
   features?: readonly Feature[];
   /** Interval of SSE heartbeats, so proxies keep idle streams open. */
@@ -633,6 +639,89 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (!(await getProject(sql, id))) return c.json({ error: "unknown project" }, 404);
     const run = await findRun(id, c.req.param("runId"));
     return run ? c.json(run) : c.json({ error: "unknown run" }, 404);
+  });
+
+  // Cancels a job that has not finished. A running build is stopped: its
+  // worker loses the lease at the next renewal and deletes the build Job.
+  app.post("/api/v1/projects/:id/runs/:runId/jobs/:job/cancel", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:write", id);
+    if (denied) return denied;
+    if (!(await getProject(sql, id))) return c.json({ error: "unknown project" }, 404);
+    const run = await findRun(id, c.req.param("runId"));
+    if (!run) return c.json({ error: "unknown run" }, 404);
+    const job = c.req.param("job");
+    if (!run.jobs.some((j) => j.name === job)) return c.json({ error: "unknown job" }, 404);
+    if (!(await cancelJob(sql, run.id, job))) return c.json({ error: "the job has already finished" }, 409);
+    await audit(c, { action: "run.job.cancel", projectId: id, target: `${run.id}/${job}` });
+    return c.json({ ok: true });
+  });
+
+  // What was delivered for a component, newest first: what a rollback can return to.
+  app.get("/api/v1/projects/:id/components/:name/deliveries", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:read", id);
+    if (denied) return denied;
+    const project = await getProject(sql, id);
+    const component = project?.components.find((x) => x.name === c.req.param("name"));
+    if (!project || !component) return c.json({ error: "unknown component" }, 404);
+    return c.json({
+      deliveries: await listDeliveries(sql, id, component.name, project.components.length === 1),
+    });
+  });
+
+  // Points a component back at an image it was delivered with before: the one
+  // before the latest delivery, or the delivery `job` names. One commit to the
+  // deploy repository, like a delivery; Flux rolls it out.
+  app.post("/api/v1/projects/:id/components/:name/rollback", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:write", id);
+    if (denied) return denied;
+    const project = await getProject(sql, id);
+    const component = project?.components.find((x) => x.name === c.req.param("name"));
+    if (!project || !component) return c.json({ error: "unknown component" }, 404);
+    const deployRepo = services.deployRepo;
+    if (!deployRepo) return c.json({ error: "rolling back needs a deploy repository (gitops-git)" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { job?: unknown } | null;
+    if (body?.job !== undefined && typeof body.job !== "string") return c.json({ error: "job must be a job id" }, 400);
+    const deliveries = await listDeliveries(sql, id, component.name, project.components.length === 1);
+    const latest = deliveries[0];
+    const target =
+      typeof body?.job === "string"
+        ? deliveries.find((d) => d.jobId === body.job)
+        : deliveries.find((d) => d.digest !== latest?.digest);
+    if (!target) {
+      return c.json(
+        {
+          error:
+            typeof body?.job === "string" ? "no delivery of this component has that job" : "nothing to roll back to",
+        },
+        409,
+      );
+    }
+    const result = await bumpImage(deployRepo.repo, {
+      dir: component.deployDir,
+      project: project.id,
+      component: component.name,
+      sha: target.sha,
+      digest: target.digest,
+      buildRev: target.jobId,
+      ...(deployRepo.buildRevAnnotation ? { buildRevAnnotation: deployRepo.buildRevAnnotation } : {}),
+    });
+    if (result.status === "error") return c.json({ error: `deploy repository: ${result.message}` }, 502);
+    await audit(c, {
+      action: "project.rollback",
+      projectId: id,
+      target: component.name,
+      detail: { toJob: target.jobId, sha: target.sha, deployCommit: result.status === "committed" ? result.sha : null },
+    });
+    return c.json({
+      status: result.status === "committed" ? "committed" : "up-to-date",
+      deployCommit: result.status === "committed" ? result.sha : null,
+      sha: target.sha,
+      digest: target.digest,
+      job: target.jobId,
+    });
   });
 
   // A job's build log, as plain text, read from the build pod while the

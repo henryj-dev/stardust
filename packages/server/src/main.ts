@@ -92,6 +92,7 @@ if (ports.source) {
     globalSql,
     resolveTarget: (repo, target) => (ports.source as NonNullable<Ports["source"]>).resolveTarget(repo, target),
     ...(ports.identity ? { oidc: ports.identity } : {}),
+    ...(ports.deployRepo ? { deployRepo: ports.deployRepo } : {}),
     features,
     ...buildLogServices(),
     ...envServices(),
