@@ -2,7 +2,16 @@ import { hostname } from "node:os";
 import { bundledPlugins } from "@stardust/bundle";
 import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/config";
 import { assemble, buildFeatures, createPluginRegistry, type Feature, type Logger, type Ports } from "@stardust/core";
-import { connect, databasePort, guardStore, migrate, migratePlugin, type Sql, sagaStore } from "@stardust/db";
+import {
+  connect,
+  databasePort,
+  guardStore,
+  migrate,
+  migratePlugin,
+  projectCatalog,
+  type Sql,
+  sagaStore,
+} from "@stardust/db";
 import { inClusterClient } from "@stardust/kube";
 import { buildHandler } from "./build-handler.ts";
 import { startHousekeeping } from "./housekeeping.ts";
@@ -38,6 +47,7 @@ try {
       database: databasePort(sql),
       globalDatabase: databasePort(globalSql),
       sagas: sagaStore(sql),
+      projects: projectCatalog(sql),
       guards: guardStore(sql, globalSql),
       ...(config.plugins["builder-buildkit"] && config.plugins["gitops-git"] ? { kube: inClusterClient() } : {}),
     },

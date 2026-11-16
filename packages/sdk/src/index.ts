@@ -11,6 +11,7 @@ export type {
   EnvLayerView,
   EnvView,
   JobView,
+  PluginClient,
   ProjectComponent,
   ProjectInput,
   ProjectListItem,

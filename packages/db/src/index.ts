@@ -47,6 +47,7 @@ export {
   listProjects,
   listRuns,
   ProjectError,
+  projectCatalog,
   putProject,
   validateProject,
 } from "./projects.ts";

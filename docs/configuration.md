@@ -192,6 +192,28 @@ secrets").
   Include the identity itself.
 - `sopsBinary` (optional): path of `sops`. The server image has it on `PATH`.
 
+### `runtime`
+
+Shows what a component runs, on its page: each Deployment, StatefulSet and
+DaemonSet in the component's deploy directory, its pods (phase, readiness,
+restarts, node, container states) and recent events. Maintainers can restart
+the component and change a workload's replicas or a container's resources.
+
+```yaml
+runtime: {}
+```
+
+Every change is a commit to the deploy repository, applied by the GitOps
+controller, so it is not reverted as drift: a restart writes the pod-template
+annotation `stardust.dev/restarted-at`. Changes are audited as
+`runtime.restart`, `runtime.scale` and `runtime.resources`. The workloads'
+namespace is the one in their manifests, or the kustomization's.
+
+The server reads the cluster with its own service account. List the
+namespaces in the chart's `runtime.namespaces`: each gets a read-only Role
+(workloads, pods, pod logs, events). Viewers of a project see it; maintainers
+change it.
+
 ## Environment and secrets
 
 A project's runtime environment lives in env layers in the deploy repository,

@@ -11,6 +11,7 @@
     "@stardust/plugin-builder-buildkit": "workspace:*",
     "@stardust/plugin-gitops-git": "workspace:*",
     "@stardust/plugin-identity-oidc": "workspace:*",
+    "@stardust/plugin-runtime": "workspace:*",
     "@stardust/plugin-secrets-sops-age": "workspace:*",
     "@stardust/plugin-source-github": "workspace:*"
   }

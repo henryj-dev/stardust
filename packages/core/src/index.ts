@@ -18,5 +18,6 @@ export * from "./pipeline/plan.ts";
 export type { Plugin, PluginContext, PluginManifest, PluginRegistry, PortProvider } from "./plugin.ts";
 export { createPluginRegistry, definePlugin } from "./plugin.ts";
 export * from "./ports/index.ts";
+export * from "./runtime/workloads.ts";
 export * from "./saga.ts";
 export * from "./text.ts";

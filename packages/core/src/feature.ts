@@ -5,11 +5,19 @@
  * unguarded route, a table outside its own names, or a schedule that runs
  * on every replica.
  */
+import { can, type ProjectRole } from "./auth/rbac.ts";
 import type { Logger } from "./logger.ts";
 import type { Ports } from "./ports/index.ts";
 
-/** Who may use a permission. Administrators may use every permission. */
-export type Grant = "admins" | "signed-in";
+/**
+ * Who may use a permission. Administrators may use every permission.
+ * `project-readers` (viewers and maintainers) and `project-writers`
+ * (maintainers) are per project: the route's `:project` parameter names it,
+ * and a project the person cannot read answers 404, as stardust's own do.
+ */
+export type Grant = "admins" | "signed-in" | "project-readers" | "project-writers";
+
+const GRANTS: readonly Grant[] = ["admins", "signed-in", "project-readers", "project-writers"];
 
 export interface Permission {
   /** `<plugin>:<verb>`, e.g. `runtime:restart`. */
@@ -110,8 +118,8 @@ export function permissionProblems(plugin: string, permissions: readonly Permiss
     }
     if (seen.has(p.id)) problems.push(`permission "${p.id}" is declared twice`);
     seen.add(p.id);
-    if (p.grantedTo !== "admins" && p.grantedTo !== "signed-in") {
-      problems.push(`permission "${p.id}" must be granted to admins or signed-in`);
+    if (!GRANTS.includes(p.grantedTo)) {
+      problems.push(`permission "${p.id}" must be granted to ${GRANTS.join(", ")}`);
     }
   }
   return problems;
@@ -119,14 +127,18 @@ export function permissionProblems(plugin: string, permissions: readonly Permiss
 
 export function routeProblems(plugin: string, routes: readonly Route[], permissions: readonly Permission[]): string[] {
   const problems: string[] = [];
-  const declared = new Set(permissions.map((p) => p.id));
+  const declared = new Map(permissions.map((p) => [p.id, p]));
   const seen = new Set<string>();
   for (const r of routes) {
     const name = `${r.method} ${r.path}`;
     if (!r.path.startsWith("/") || r.path.includes("..") || /\s/.test(r.path)) {
       problems.push(`route ${name}: the path must start with / and hold no spaces or ..`);
     }
-    if (!declared.has(r.permission)) problems.push(`route ${name}: permission "${r.permission}" is not declared`);
+    const permission = declared.get(r.permission);
+    if (!permission) problems.push(`route ${name}: permission "${r.permission}" is not declared`);
+    else if (permission.grantedTo.startsWith("project-") && !/(^|\/):project(\/|$)/.test(r.path)) {
+      problems.push(`route ${name}: a per-project permission needs :project in the path`);
+    }
     if (r.method !== "GET") {
       if (!r.audit) problems.push(`route ${name}: a route that changes something needs an audit action`);
       else if (!AUDIT_ACTION.test(r.audit) || !r.audit.startsWith(`${plugin}.`)) {
@@ -184,8 +196,24 @@ export function migrationProblems(plugin: string, migrations: readonly Migration
   return problems;
 }
 
-/** Whether this person may use a permission. Unknown permissions are denied. */
-export function mayUse(user: Pick<RouteUser, "isAdmin">, permission: Permission | undefined): boolean {
+/**
+ * Whether this person may use a permission; for a per-project one, `role` is
+ * their role in the route's project. Unknown permissions are denied.
+ */
+export function mayUse(
+  user: Pick<RouteUser, "isAdmin">,
+  permission: Permission | undefined,
+  role: ProjectRole | null = null,
+): boolean {
   if (!permission) return false;
-  return user.isAdmin || permission.grantedTo === "signed-in";
+  switch (permission.grantedTo) {
+    case "admins":
+      return user.isAdmin;
+    case "signed-in":
+      return true;
+    case "project-readers":
+      return can(user, "project:read", role);
+    case "project-writers":
+      return can(user, "project:write", role);
+  }
 }

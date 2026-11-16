@@ -7,6 +7,7 @@ import type { Plugin } from "@stardust/core";
 import { plugin as builderBuildkit } from "@stardust/plugin-builder-buildkit";
 import { plugin as gitopsGit } from "@stardust/plugin-gitops-git";
 import { plugin as identityOidc } from "@stardust/plugin-identity-oidc";
+import { plugin as runtime } from "@stardust/plugin-runtime";
 import { plugin as secretsSopsAge } from "@stardust/plugin-secrets-sops-age";
 import { plugin as sourceGithub } from "@stardust/plugin-source-github";
 
@@ -14,6 +15,7 @@ export const bundledPlugins: readonly Plugin[] = [
   builderBuildkit,
   gitopsGit,
   identityOidc,
+  runtime,
   secretsSopsAge,
   sourceGithub,
 ];

@@ -11,6 +11,7 @@ import type { SecretCipher } from "./cipher.ts";
 import type { Database } from "./database.ts";
 import type { IdentityProvider } from "./identity.ts";
 import type { KubeStreamClient } from "./kube.ts";
+import type { ProjectCatalog } from "./projects.ts";
 import type { DeployRepo } from "./repo.ts";
 import type { SourceHost } from "./source.ts";
 
@@ -25,6 +26,8 @@ export interface Ports {
   sagas: SagaStore;
   /** Memory for the guards (used tickets, recent reveals). Provided by the composition root. */
   guards: GuardStore;
+  /** Projects and their components, read-only. Provided by the composition root. */
+  projects: ProjectCatalog;
   source: SourceHost;
   deployRepo: DeployRepo;
   cipher: SecretCipher;
@@ -40,6 +43,7 @@ export const PORT_NAMES: readonly PortName[] = [
   "globalDatabase",
   "sagas",
   "guards",
+  "projects",
   "source",
   "deployRepo",
   "cipher",
@@ -59,5 +63,6 @@ export * from "./cipher.ts";
 export * from "./database.ts";
 export * from "./identity.ts";
 export * from "./kube.ts";
+export * from "./projects.ts";
 export * from "./repo.ts";
 export * from "./source.ts";

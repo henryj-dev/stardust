@@ -23,8 +23,23 @@ describe("permissions", () => {
     ]);
     assert.deepEqual(permissionProblems("runtime", [read, read]), ['permission "runtime:read" is declared twice']);
     assert.deepEqual(permissionProblems("runtime", [{ ...read, grantedTo: "everyone" as never }]), [
-      'permission "runtime:read" must be granted to admins or signed-in',
+      'permission "runtime:read" must be granted to admins, signed-in, project-readers, project-writers',
     ]);
+  });
+
+  it("per project: readers are viewers and maintainers, writers are maintainers; admins are both", () => {
+    const view = { id: "runtime:view", description: "v", grantedTo: "project-readers" as const };
+    const op = { id: "runtime:operate", description: "o", grantedTo: "project-writers" as const };
+    const someone = { isAdmin: false };
+    assert.deepEqual(
+      [null, "viewer", "maintainer"].map((role) => mayUse(someone, view, role as never)),
+      [false, true, true],
+    );
+    assert.deepEqual(
+      [null, "viewer", "maintainer"].map((role) => mayUse(someone, op, role as never)),
+      [false, false, true],
+    );
+    assert.equal(mayUse({ isAdmin: true }, op, null), true);
   });
 
   it("admins may use every permission; others only what is granted to signed-in; unknown is denied", () => {
@@ -57,6 +72,17 @@ describe("routes", () => {
     ]);
     assert.deepEqual(routeProblems("runtime", [route({ method: "DELETE", audit: "project.delete" })], [read]), [
       'route DELETE /x: audit action "project.delete" must be runtime.<what>',
+    ]);
+  });
+
+  it("with a per-project permission, name the project in the path", () => {
+    const view = { id: "runtime:view", description: "v", grantedTo: "project-readers" as const };
+    assert.deepEqual(
+      routeProblems("runtime", [route({ path: "/projects/:project/pods", permission: "runtime:view" })], [view]),
+      [],
+    );
+    assert.deepEqual(routeProblems("runtime", [route({ path: "/pods/:id", permission: "runtime:view" })], [view]), [
+      "route GET /pods/:id: a per-project permission needs :project in the path",
     ]);
   });
 
