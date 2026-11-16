@@ -64,3 +64,60 @@ describe("stampPodTemplate", () => {
     assert.throws(() => stampPodTemplate("kind: Deployment\nspec: [unclosed\n", KEY, "r"), /cannot parse/);
   });
 });
+
+describe("stampPodTemplate keeps the file as it was written", () => {
+  const KEY = "stardust.dev/env-revision";
+  const head = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api  # two spaces before this comment
+spec:
+  template:
+`;
+  const tail = `    spec:
+      containers:
+        - name: api
+          args: [--port, "8080"]
+          image: registry.example.com/demo/api:1
+`;
+  const parsed = (text: string) => parseAllDocuments(text).map((d) => d.toJS());
+
+  it("replaces an existing value where it is, and nothing else", () => {
+    const text = `${head}    metadata:
+      annotations:
+        ${KEY}: "old"   # set by stardust
+        other: x
+${tail}`;
+    const out = stampPodTemplate(text, KEY, "new").text;
+    assert.equal(out, text.replace('"old"', '"new"'));
+  });
+
+  it("adds a line to existing annotations", () => {
+    const text = `${head}    metadata:
+      annotations:
+        other: x  # keep
+${tail}`;
+    const out = stampPodTemplate(text, KEY, "r1").text;
+    assert.equal(out, text.replace("other: x  # keep", `other: x  # keep\n        ${KEY}: "r1"`));
+    assert.equal(parsed(out)[0].spec.template.metadata.annotations[KEY], "r1");
+  });
+
+  it("adds annotations to existing metadata, and metadata to a template without it", () => {
+    const withMeta = `${head}    metadata:
+      labels:
+        app: api
+${tail}`;
+    const a = stampPodTemplate(withMeta, KEY, "r2").text;
+    assert.ok(a.includes(`        app: api\n      annotations:\n        ${KEY}: "r2"\n`), a);
+    assert.equal(parsed(a)[0].spec.template.metadata.labels.app, "api");
+
+    const bare = `${head}${tail}`;
+    const b = stampPodTemplate(bare, KEY, "r3").text;
+    assert.equal(parsed(b)[0].spec.template.metadata.annotations[KEY], "r3");
+    assert.deepEqual(parsed(b)[0].spec.template.spec, parsed(bare)[0].spec.template.spec);
+    for (const out of [a, b]) {
+      assert.ok(out.includes("name: api  # two spaces before this comment"));
+      assert.ok(out.includes('args: [--port, "8080"]'), "a flow sequence is not re-spaced");
+    }
+  });
+});

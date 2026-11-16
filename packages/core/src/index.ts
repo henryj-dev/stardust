@@ -3,6 +3,7 @@ export * from "./compose.ts";
 export * from "./env/consumers.ts";
 export * from "./env/merge.ts";
 export * from "./env/render.ts";
+export * from "./env/secret-guard.ts";
 export * from "./feature.ts";
 export * from "./gitops/bump.ts";
 export * from "./gitops/cas.ts";

@@ -33,6 +33,7 @@ import {
   type MergedEnv,
   mergeEnv,
   type PendingCommit,
+  plaintextSecrets,
   type RepoIO,
   renderEnv,
   stampPodTemplate,
@@ -78,6 +79,8 @@ export interface EnvLayerView {
 export interface EnvChange {
   expectedRevision: string;
   set?: Record<string, string>;
+  /** Names in `set` that look like secrets but are public, so they may be committed in plain text. */
+  plainOnPurpose?: string[];
   unset?: string[];
   setSecrets?: Record<string, string>;
   unsetSecrets?: string[];
@@ -168,7 +171,7 @@ export function checkChange(change: unknown): EnvChange {
     throw new EnvInputError("a JSON object is required");
   const c = change as Record<string, unknown>;
   for (const key of Object.keys(c)) {
-    if (!["expectedRevision", "set", "unset", "setSecrets", "unsetSecrets"].includes(key))
+    if (!["expectedRevision", "set", "unset", "setSecrets", "unsetSecrets", "plainOnPurpose"].includes(key))
       throw new EnvInputError(`unknown field "${key}"`);
   }
   if (typeof c.expectedRevision !== "string" || !/^[0-9a-f]{20}$/.test(c.expectedRevision))
@@ -201,7 +204,15 @@ export function checkChange(change: unknown): EnvChange {
     unset: list("unset"),
     setSecrets: map("setSecrets"),
     unsetSecrets: list("unsetSecrets"),
+    ...(c.plainOnPurpose !== undefined ? { plainOnPurpose: list("plainOnPurpose") } : {}),
   };
+  // A plain value is committed to Git as it is: refuse one whose name says it is a secret.
+  const leaking = plaintextSecrets(out.set ?? {}, out.plainOnPurpose);
+  if (leaking.length > 0) {
+    throw new EnvInputError(
+      `${leaking.join(", ")} ${leaking.length === 1 ? "looks" : "look"} like a secret: save ${leaking.length === 1 ? "it" : "them"} as a secret, or list ${leaking.length === 1 ? "it" : "them"} in plainOnPurpose if the value is public`,
+    );
+  }
   const names = [
     ...Object.keys(out.set ?? {}),
     ...(out.unset ?? []),
@@ -361,6 +372,7 @@ async function applyChange(
           component: component.name,
           namespace: await namespaceOf(at, dir),
           revisionKey: editor.revisionKey,
+          ...(editor.root ? { envRoot: editor.root } : {}),
         });
         const cmPath = `${dir}/env.configmap.yaml`;
         if ((await read(cmPath)) !== env.configMapYaml) files.set(cmPath, env.configMapYaml);

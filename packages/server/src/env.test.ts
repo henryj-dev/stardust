@@ -309,6 +309,18 @@ describe("env editing", () => {
 });
 
 describe("checking a change", () => {
+  it("refuses a plain value whose name says it is a secret, unless declared public", () => {
+    const rev = "a".repeat(20);
+    assert.throws(
+      () => checkChange({ expectedRevision: rev, set: { GITHUB_TOKEN: "ghp_x", PORT: "80" } }),
+      /GITHUB_TOKEN looks like a secret: save it as a secret, or list it in plainOnPurpose/,
+    );
+    assert.doesNotThrow(() =>
+      checkChange({ expectedRevision: rev, set: { GITHUB_TOKEN: "public" }, plainOnPurpose: ["GITHUB_TOKEN"] }),
+    );
+    assert.doesNotThrow(() => checkChange({ expectedRevision: rev, setSecrets: { GITHUB_TOKEN: "ghp_x" } }));
+  });
+
   const rev = "a".repeat(20);
   it("accepts names and text values", () => {
     assert.deepEqual(checkChange({ expectedRevision: rev, set: { A_1: "x" }, unsetSecrets: ["B"] }), {

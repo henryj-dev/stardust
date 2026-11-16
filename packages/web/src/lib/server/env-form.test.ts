@@ -41,3 +41,25 @@ describe("env form", () => {
     }
   });
 });
+
+it("passes on that a plain value is public on purpose, only for plain values", () => {
+  const form = (kind: string, pub: boolean) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries({
+      layer: "_shared",
+      revision: "a".repeat(20),
+      name: "PUBLIC_TOKEN_URL",
+      value: "x",
+      kind,
+    }))
+      f.set(k, v);
+    if (pub) f.set("public", "on");
+    return f;
+  };
+  const plain = envFormChange(form("plain", true), "set");
+  assert.ok("change" in plain && plain.change.plainOnPurpose?.[0] === "PUBLIC_TOKEN_URL");
+  const unticked = envFormChange(form("plain", false), "set");
+  assert.ok("change" in unticked && unticked.change.plainOnPurpose === undefined);
+  const secret = envFormChange(form("secret", true), "set");
+  assert.ok("change" in secret && secret.change.plainOnPurpose === undefined);
+});

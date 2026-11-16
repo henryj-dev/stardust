@@ -4,6 +4,11 @@ import type { RuntimeView } from "$lib/runtime";
 import { requireClient } from "$lib/server/api";
 import type { Actions, PageServerLoad } from "./$types";
 
+interface EnvLanding {
+  revision: string | null;
+  landing: Array<{ workload: string; state: string }>;
+}
+
 const runtimePath = (project: string, component: string) =>
   `/projects/${encodeURIComponent(project)}/components/${encodeURIComponent(component)}`;
 
@@ -15,6 +20,12 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       client.capabilities(),
     ]);
     const has = (c: string) => capabilities.plugins.some((p) => p.capabilities.includes(c));
+    const env: EnvLanding | null = has("runtime.env")
+      ? await client
+          .plugin("runtime")
+          .get<EnvLanding>(`${runtimePath(params.id, params.name)}/env`)
+          .catch(() => null)
+      : null;
     let runtime: RuntimeView | null = null;
     let runtimeError: string | null = null;
     if (has("runtime.view")) {
@@ -31,6 +42,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       deliveries,
       runtime,
       runtimeError,
+      env,
       can: { restart: has("runtime.restart"), scale: has("runtime.scale"), logs: has("runtime.logs") },
     };
   } catch (err) {

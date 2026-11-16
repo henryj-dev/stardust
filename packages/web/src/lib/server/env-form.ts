@@ -27,6 +27,13 @@ export function envFormChange(
   return {
     layer,
     name,
-    change: secret ? { expectedRevision, setSecrets: { [name]: value } } : { expectedRevision, set: { [name]: value } },
+    change: secret
+      ? { expectedRevision, setSecrets: { [name]: value } }
+      : {
+          expectedRevision,
+          set: { [name]: value },
+          // The person said this value is public, though its name looks like a secret's.
+          ...(form.get("public") === "on" ? { plainOnPurpose: [name] } : {}),
+        },
   };
 }
