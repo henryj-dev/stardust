@@ -10,3 +10,7 @@
 # them at run time.
 2584680388440a67cc07d0ce4a5742967cbac2a3:packages/core/src/pipeline/redact.test.ts:curl-auth-header:9
 2584680388440a67cc07d0ce4a5742967cbac2a3:packages/core/src/pipeline/redact.test.ts:aws-access-token:10
+
+# The sample WebSocket key from RFC 6455 a socket relay test sent; the test
+# now generates a key at run time.
+7efadf5c2f2a46962e477da0feca346b53ddfec1:packages/web/src/lib/server/socket-relay.test.ts:generic-api-key:51
