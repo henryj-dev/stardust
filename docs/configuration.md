@@ -639,6 +639,9 @@ directory's `kustomization.yaml`. Use them from the workload with `envFrom`.
   Setting values that are already there commits nothing.
 - Names are environment variable names; a value is at most 32 KiB; one name is
   plain or secret within a layer, and setting it as one removes the other.
+- On the env page a value can be given as a file instead of typed (a key, a
+  JSON credential, a config file): UTF-8 text, taken as it is, newlines
+  included.
 - Each change is in the audit log as `env.change`, with the names it touched.
 
 To turn it on, give the server what it writes with:

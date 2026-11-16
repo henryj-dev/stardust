@@ -1,7 +1,7 @@
 import { ApiError, type Client } from "@stardust/sdk";
 import { error, fail } from "@sveltejs/kit";
 import { requireClient } from "$lib/server/api";
-import { envFormChange } from "$lib/server/env-form";
+import { envFormChange, valueFromFile } from "$lib/server/env-form";
 import type { Actions, PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ locals, params, url }) => {
@@ -19,6 +19,14 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 
 /** Runs one change. A failure says why and which name; it never sends a value back to the page. */
 async function apply(client: Client, projectId: string, form: FormData, op: "set" | "unset") {
+  const fromFile = op === "set" ? await valueFromFile(form) : null;
+  if (fromFile) {
+    return fail(400, {
+      layer: String(form.get("layer") ?? ""),
+      name: String(form.get("name") ?? ""),
+      error: fromFile.error,
+    });
+  }
   const parsed = envFormChange(form, op);
   if ("error" in parsed) return fail(400, { layer: parsed.layer, name: parsed.name, error: parsed.error });
   try {
