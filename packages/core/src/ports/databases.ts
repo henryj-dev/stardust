@@ -63,6 +63,11 @@ export interface AppGrant {
   role: string;
   /** The application's password, which the feature seals into the repository. */
   password: SecretKeyRef;
+  /**
+   * Names this version of the grant (e.g. a fingerprint of the password). A
+   * Job cannot change once created, so a new password needs a new Job.
+   */
+  revision?: string;
 }
 
 export interface BackupPlan {
@@ -139,6 +144,8 @@ export function appGrantProblems(grant: AppGrant): string[] {
   if (!isSqlName(grant.role)) problems.push("role must be lowercase letters, digits and underscores");
   if (grant.role === "postgres") problems.push("role must not be the superuser");
   if (!isKubeName(grant.password.name)) problems.push("the password Secret must be a name");
+  if (grant.revision !== undefined && !/^[a-z0-9]{1,12}$/.test(grant.revision))
+    problems.push("revision must be 1 to 12 lowercase letters or digits");
   return problems;
 }
 
