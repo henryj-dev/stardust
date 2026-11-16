@@ -1,5 +1,11 @@
 # stardust
 
+## 0.13.1
+
+### Patch Changes
+
+- [#60](https://github.com/henryj-dev/stardust/pull/60) [`7efadf5`](https://github.com/henryj-dev/stardust/commit/7efadf5c2f2a46962e477da0feca346b53ddfec1) Thanks [@mack-erel](https://github.com/mack-erel)! - Plugin WebSockets now work through the dashboard: the web server hands upgrades under `/api/v1/plugins/<plugin>/` to the API unchanged, so node agents can connect where the dashboard is the only way in. Other upgrades are refused at the dashboard.
+
 ## 0.13.0
 
 ### Minor Changes
