@@ -2,7 +2,56 @@
  * An in-memory deploy repository with the same compare-and-swap rule as a
  * real Git host: a commit lands only on top of the expected head.
  */
+import { createHash } from "node:crypto";
 import type { CommitResult, PendingCommit, RepoFile, RepoIO } from "./ports/repo.ts";
+
+export type { RepoFixture } from "./ports/testing/repo.contract.ts";
+export { repoContract } from "./ports/testing/repo.contract.ts";
+export { guardStoreContract, sagaStoreContract } from "./ports/testing/stores.contract.ts";
+
+import type { GuardStore } from "./guard.ts";
+import type { SagaRecord, SagaStore } from "./saga.ts";
+
+/** Saga records in memory, copied in and out like a database would. */
+export class MemorySagaStore implements SagaStore {
+  readonly records = new Map<string, SagaRecord>();
+  saves = 0;
+  async create(record: SagaRecord): Promise<void> {
+    if (this.records.has(record.id)) throw new Error(`saga ${record.id} exists`);
+    this.records.set(record.id, structuredClone(record));
+  }
+  async load(id: string): Promise<SagaRecord | null> {
+    const record = this.records.get(id);
+    return record ? structuredClone(record) : null;
+  }
+  async save(record: SagaRecord): Promise<void> {
+    this.saves++;
+    this.records.set(record.id, structuredClone(record));
+  }
+}
+
+export class MemoryGuardStore implements GuardStore {
+  private used = new Set<string>();
+  private events = new Map<string, number[]>();
+  now = () => Date.now();
+  async useOnce(scope: string, id: string): Promise<boolean> {
+    const key = `${scope}\0${id}`;
+    if (this.used.has(key)) return false;
+    this.used.add(key);
+    return true;
+  }
+  async count(scope: string, key: string, windowMs: number): Promise<number> {
+    const name = `${scope}\0${key}`;
+    const since = this.now() - windowMs;
+    const kept = (this.events.get(name) ?? []).filter((t) => t > since);
+    kept.push(this.now());
+    this.events.set(name, kept);
+    return kept.length;
+  }
+}
+
+/** Like a Git blob id: the same content has the same sha in every commit. */
+const blobSha = (content: string) => createHash("sha1").update(content).digest("hex");
 
 export class MemoryRepo implements RepoIO {
   private commits: Array<{ sha: string; files: Map<string, string> }> = [];
@@ -49,7 +98,7 @@ export class MemoryRepo implements RepoIO {
 
   async readFile(path: string, ref: string): Promise<RepoFile | null> {
     const content = this.at(ref).files.get(path);
-    return content === undefined ? null : { content, sha: `${ref}:${path}` };
+    return content === undefined ? null : { content, sha: blobSha(content) };
   }
 
   async listDir(path: string, ref: string): Promise<string[]> {

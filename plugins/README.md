@@ -25,6 +25,22 @@ A feature plugin may also declare, all checked when it is defined or mounted:
 - `migrations()`: its own tables, named `<plugin>_*`;
 - `capabilities`: what the dashboard may show, `<plugin>.<what>`.
 
+Shared machinery in core, so each plugin does not grow its own:
+
+- **sagas** (`defineSaga`, `startSaga`, `runSaga`, the `sagas` port): work in
+  named steps against outside systems. Each step is recorded as it finishes;
+  a process that dies resumes where it stopped, and a failed step undoes the
+  finished ones in reverse. Safety steps (a final backup before a delete, say)
+  are steps of the saga, never something an adapter may skip.
+- **guards** (the `guards` port): `issueApproval`/`checkApproval` for a ticket
+  bound to one action on one target, valid briefly and once; `isProtected` for
+  targets that may never be destroyed; `allowReveal` for revealing secrets at
+  most so often.
+- **contract suites** (`@stardust/core/testing`): `repoContract`,
+  `sagaStoreContract`, `guardStoreContract`. A port's fake and every real
+  implementation run the same suite, so a test against the fake says
+  something about the real thing. A new port comes with its suite.
+
 Rules that do no IO (CAS commits, image bumps, env rendering) live in core,
 next to the port they use, so every implementation of a port shares them.
 
