@@ -13,7 +13,8 @@
       "!pnpm-lock.yaml",
       "!tools/fixtures/node-app/lockfiles",
       "!charts/*/templates",
-      "!.changeset"
+      "!.changeset",
+      "!agent/testdata"
     ]
   },
   "formatter": {
