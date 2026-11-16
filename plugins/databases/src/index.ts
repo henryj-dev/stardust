@@ -143,9 +143,18 @@ class Refused extends Error {
 function needs(ctx: FeatureContext) {
   const { database, deployRepo, cipher } = ctx.ports;
   const providers = ctx.ports.databases ?? {};
-  if (!database || !deployRepo || !cipher)
-    throw new Error("databases needs the database, the deploy repository and the cipher");
-  return { db: database, repo: deployRepo.repo, cipher, providers };
+  if (!database || !deployRepo) throw new Error("databases needs the database and the deploy repository");
+  // Only creating and granting seal passwords, and only the server holds the key:
+  // the worker runs the checks schedule without one.
+  const sealer = (): SecretCipher => {
+    if (!cipher)
+      throw new Refused(
+        503,
+        "sealing passwords needs the cipher (secrets-sops-age with its age key), which this process does not have",
+      );
+    return cipher;
+  };
+  return { db: database, repo: deployRepo.repo, sealer, providers };
 }
 
 async function sealed(cipher: SecretCipher, at: BoundRepo, path: string, plain: string): Promise<string> {
@@ -153,7 +162,7 @@ async function sealed(cipher: SecretCipher, at: BoundRepo, path: string, plain: 
 }
 
 export function databasesFeature(ctx: FeatureContext) {
-  const { db, repo, cipher, providers } = needs(ctx);
+  const { db, repo, sealer, providers } = needs(ctx);
   const section = ctx.config as Section;
   const root = (section.root ?? "deploy/databases").replace(/\/+$/, "");
   const all = async (q: Database = db) =>
@@ -224,7 +233,7 @@ export function databasesFeature(ctx: FeatureContext) {
           change.write(
             secretPath,
             await sealed(
-              cipher,
+              sealer(),
               at,
               secretPath,
               secretDocument(superuser.name, ns, { [superuser.key]: newPassword() }),
@@ -309,7 +318,7 @@ export function databasesFeature(ctx: FeatureContext) {
       throw new Refused(400, "role and database must be lowercase letters, digits and underscores");
     if (prefix && !/^[A-Z][A-Z0-9_]*_$/.test(prefix)) throw new Refused(400, "envPrefix must be like ORDERS_");
     const password = newPassword();
-    const revision = createHmac("sha256", cipher.revisionKey).update(password).digest("hex").slice(0, 8);
+    const revision = createHmac("sha256", sealer().revisionKey).update(password).digest("hex").slice(0, 8);
     const secret = { name: grantSecretName(instance.name, role), key: "password" };
     let files: Record<string, string>;
     try {
@@ -348,7 +357,7 @@ export function databasesFeature(ctx: FeatureContext) {
         const secretPath = `${grantDir}/password.secret.enc.yaml`;
         change.write(
           secretPath,
-          await sealed(cipher, at, secretPath, secretDocument(secret.name, instance.namespace, { password })),
+          await sealed(sealer(), at, secretPath, secretDocument(secret.name, instance.namespace, { password })),
         );
         await change.entry(grantDir, "password.secret.enc.yaml", true);
         const stale = (await at.list(grantDir)).filter(
@@ -828,7 +837,7 @@ export const plugin = definePlugin({
     }
     return problems;
   },
-  requires: ["databases", "deployRepo", "cipher", "database"],
+  requires: ["databases", "deployRepo", "database"],
   permissions: [
     { id: "databases:read", description: "See database instances and grants", grantedTo: "admins" },
     { id: "databases:write", description: "Create, adopt and grant databases", grantedTo: "admins" },
