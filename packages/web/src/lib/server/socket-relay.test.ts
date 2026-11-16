@@ -1,5 +1,6 @@
 /** Plugin sockets opened at the dashboard reach the API unchanged; other upgrades stop at the dashboard. */
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import http from "node:http";
 import net from "node:net";
@@ -48,7 +49,7 @@ async function open(path: string, token: string, send?: string, until?: RegExp) 
   const s = net.connect(webPort, "127.0.0.1");
   await once(s, "connect");
   s.write(
-    `GET ${path} HTTP/1.1\r\nHost: dash\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nAuthorization: Bearer ${token}\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n`,
+    `GET ${path} HTTP/1.1\r\nHost: dash\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nAuthorization: Bearer ${token}\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ${randomBytes(16).toString("base64")}\r\n\r\n`,
   );
   let got = "";
   return await new Promise<string>((resolve) => {
