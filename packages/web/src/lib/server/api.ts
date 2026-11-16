@@ -1,7 +1,7 @@
-import { type Client, createClient } from "@stardust/sdk";
+import { type Client, createClient, parseRegions, type RegionOptions } from "@stardust/sdk";
 import type { Cookies } from "@sveltejs/kit";
 import { redirect } from "@sveltejs/kit";
-import { STARDUST_API_URL } from "$app/env/private";
+import { STARDUST_API_URL, STARDUST_HOME_REGION, STARDUST_REGIONS } from "$app/env/private";
 
 export const SESSION_COOKIE = "stardust_session";
 /** Holds the OpenID state between leaving for the provider and coming back. */
@@ -21,10 +21,29 @@ export function setSession(cookies: Cookies, url: URL, token: string): void {
   });
 }
 
+/**
+ * Several regions shown as one (`STARDUST_REGIONS=name=https://…,…`): the
+ * home region is STARDUST_HOME_REGION, reached at STARDUST_API_URL (or the
+ * one listed at that URL, or the first).
+ */
+function regions(): RegionOptions | undefined {
+  const spec = STARDUST_REGIONS;
+  if (!spec) return undefined;
+  const urls = parseRegions(spec);
+  if (STARDUST_HOME_REGION)
+    return { urls: { ...urls, [STARDUST_HOME_REGION]: STARDUST_API_URL }, home: STARDUST_HOME_REGION };
+  const home =
+    Object.entries(urls).find(([, url]) => url.replace(/\/+$/, "") === STARDUST_API_URL.replace(/\/+$/, ""))?.[0] ??
+    Object.keys(urls)[0];
+  return home ? { urls, home } : undefined;
+}
+const REGIONS = regions();
+
 /** A client for the API; with `locals`, it passes on who the browser is, for the audit log. */
 export function apiClient(token?: string, locals?: App.Locals): Client {
   return createClient({
     baseUrl: STARDUST_API_URL,
+    ...(REGIONS ? { regions: REGIONS } : {}),
     ...(token ? { token } : {}),
     ...(locals?.forward ? { forward: locals.forward } : {}),
   });

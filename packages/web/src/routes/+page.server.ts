@@ -19,7 +19,15 @@ export const load: PageServerLoad = async ({ locals, url, parent }) => {
       : Promise.resolve(null),
   ]);
   return {
-    projects: projects.map((p) => ({ id: p.id, name: p.name, githubRepo: p.githubRepo, lastRun: p.lastRun })),
+    projects: projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      githubRepo: p.githubRepo,
+      lastRun: p.lastRun,
+      // With several regions: which one owns it, and whether it answered.
+      region: typeof p.metadata?.region === "string" ? p.metadata.region : null,
+      regionUnreachable: (p as { regionUnreachable?: boolean }).regionUnreachable === true,
+    })),
     costs,
   };
 };

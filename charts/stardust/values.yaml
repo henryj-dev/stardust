@@ -56,6 +56,10 @@ web:
   replicas: 1
   port: 3000
   resources: {}
+  # Several regions shown as one dashboard: region name to that region's API,
+  # e.g. { dev-ams: https://stardust-api.ams.example.com }. Include this
+  # installation's own region; its server stays the home region.
+  regions: {}
 
 # Builds run as Kubernetes Jobs in this namespace. When enabled, the worker
 # gets its own service account with a token and a Role limited to Jobs,

@@ -131,6 +131,15 @@ else
 fi
 if ! grep -q "t-stardust-runtime" <<<"$(render)"; then pass runtime-off-no-role; else bad runtime-off-no-role "a runtime Role exists without namespaces"; fi
 
+# Several regions as one dashboard: the web gets the other regions and its own region's name.
+reg="$(render --set config.region=dev-ams --set-json 'web.regions={"prod-fra":"https://fra.example.com","dev-ams":"https://ams.example.com"}')"
+if grep -q 'value: "dev-ams=https://ams.example.com,prod-fra=https://fra.example.com"' <<<"$reg" && grep -A1 'name: STARDUST_HOME_REGION' <<<"$reg" | grep -q 'value: "dev-ams"' \
+  && ! grep -q STARDUST_REGIONS <<<"$(render)"; then
+  pass web-regions
+else
+  bad web-regions "STARDUST_REGIONS and STARDUST_HOME_REGION are not rendered from web.regions (or appear without it)"
+fi
+
 # The databases plugins: a read-only Role per listed namespace, never Secrets.
 dbr="$(render --set 'databases.namespaces={databases,apps}')"
 dbroles="$(grep -c 'name: t-stardust-databases$' <<<"$dbr")"

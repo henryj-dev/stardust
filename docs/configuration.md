@@ -59,6 +59,22 @@ same database, which is how one region works.
   on in one installation only: a plugin's section in `stardust.yaml` decides,
   so the others simply do not have those routes.
 
+**One dashboard for all of them.** Give the web the other regions (Helm
+`web.regions`, i.e. `STARDUST_REGIONS=name=https://…,…`, with
+`STARDUST_HOME_REGION` set to its own). It keeps no state: the project list
+and other shared things come from its own region, or the next that answers;
+a project's runs, env and changes go to the region that owns it (and a
+change another region refuses is sent on, once, to the owner it names). A
+region that cannot be reached fails what belongs to it, and only that:
+nothing is sent elsewhere instead.
+
+```yaml
+# values.yaml of the dev-ams installation
+web:
+  regions:
+    prod-fra: https://stardust-api.fra.example.com
+```
+
 ## Accounts and access
 
 - **Sign-in** is by username and password (`POST /api/v1/auth/login`). Ten

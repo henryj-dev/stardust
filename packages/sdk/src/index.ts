@@ -26,3 +26,4 @@ export type {
   UserView,
 } from "./client.ts";
 export { ApiError, createClient } from "./client.ts";
+export { parseRegions, type RegionOptions, regionFetch } from "./regions.ts";
