@@ -72,7 +72,7 @@ const confirmRemove = (e: SubmitEvent, name: string) => {
                   <td><em>secret, set</em></td>
                   {#if data.env.canEdit}
                     <td>
-                      <form method="POST" action="?/set">
+                      <form method="POST" action="?/set" enctype="multipart/form-data">
                         <input type="hidden" name="layer" value={layer.layer} />
                         <input type="hidden" name="revision" value={layer.revision} />
                         <input type="hidden" name="name" value={name} />
@@ -83,8 +83,8 @@ const confirmRemove = (e: SubmitEvent, name: string) => {
                           autocomplete="new-password"
                           aria-label={`New value for ${name}`}
                           placeholder="new value"
-                          required
                         />
+                        <input type="file" name="file" aria-label={`Or a file for ${name}`} />
                         <button type="submit">Replace</button>
                       </form>
                       <form method="POST" action="?/unset" onsubmit={(e) => confirmRemove(e, name)}>
@@ -102,7 +102,7 @@ const confirmRemove = (e: SubmitEvent, name: string) => {
           </table>
         {/if}
         {#if data.env.canEdit}
-          <form method="POST" action="?/set" data-env-add>
+          <form method="POST" action="?/set" enctype="multipart/form-data" data-env-add>
             <input type="hidden" name="layer" value={layer.layer} />
             <input type="hidden" name="revision" value={layer.revision} />
             <label>Name <input name="name" required pattern="[A-Za-z_][A-Za-z0-9_]*" autocomplete="off" /></label>
@@ -115,6 +115,8 @@ const confirmRemove = (e: SubmitEvent, name: string) => {
             </label>
             <!-- A password field for both kinds: nothing typed here is echoed or prefilled. -->
             <label>Value <input type="password" name="value" autocomplete="new-password" /></label>
+            <!-- A key, a JSON credential or a config file: its text is the value, newlines and all. -->
+            <label data-env-file>Or a file (UTF-8 text, up to 32 KiB) <input type="file" name="file" /></label>
             <!-- Plain values are committed to Git; one whose name looks secret is refused unless this is ticked. -->
             <label data-env-public
               ><input type="checkbox" name="public" /> The value is public (a plain value whose name looks like a secret's)</label

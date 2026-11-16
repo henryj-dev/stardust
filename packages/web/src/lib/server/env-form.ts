@@ -37,3 +37,29 @@ export function envFormChange(
         },
   };
 }
+
+/** The most a value may be, as the server allows. */
+export const MAX_FILE_VALUE = 32 * 1024;
+
+/**
+ * A value given as a file (a key, a JSON credential, a config file): its text
+ * becomes the form's value, exactly as it is, newlines included. Only UTF-8
+ * text is taken, since values are stored as text, and only one of a typed
+ * value and a file. Without a file the form is left as it is.
+ */
+export async function valueFromFile(form: FormData): Promise<{ error: string } | null> {
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size === 0) return null;
+  if (String(form.get("value") ?? "") !== "") return { error: "Give a value or a file, not both." };
+  if (file.size > MAX_FILE_VALUE) return { error: `${file.name || "The file"} is larger than 32 KiB.` };
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+  } catch {
+    return { error: `${file.name || "The file"} is not UTF-8 text.` };
+  }
+  if (text.includes("\u0000")) return { error: `${file.name || "The file"} is not UTF-8 text.` };
+  form.set("value", text);
+  form.delete("file");
+  return null;
+}
