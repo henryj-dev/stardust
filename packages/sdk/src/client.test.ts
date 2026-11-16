@@ -299,3 +299,35 @@ it("asks whether a repository is readable, passing on the server's reason", asyn
   assert.equal(asked[0], "http://api.test/api/v1/source/access?repo=acme%2Fweb");
   await assert.rejects(client.sourceAccess("bad"), (err: Error) => err.message === "repo must be owner/name");
 });
+
+it("reads and sets a component's files, passing on the server's reason", async () => {
+  const seen: Array<{ url: string; method: string; body: unknown }> = [];
+  const client = createClient({
+    baseUrl: "http://api.test",
+    token: "t0k",
+    fetch: async (input, init) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      seen.push({ url: String(input), method: init?.method ?? "GET", body });
+      if (init?.method !== "PUT") return Response.json({ mounts: [], secrets: ["APNS_KEY"] });
+      if (body.mounts[0]?.key === "NOPE")
+        return Response.json({ error: "NOPE is not a secret push reads" }, { status: 400 });
+      return Response.json({ status: "committed", deployCommit: "abc", mounts: body.mounts });
+    },
+  });
+  assert.deepEqual(await client.componentFiles("pico", "push"), { mounts: [], secrets: ["APNS_KEY"] });
+  const mounts = [{ key: "APNS_KEY", path: "/etc/pico/AuthKey.p8" }];
+  assert.deepEqual(await client.setComponentFiles("pico", "push", mounts), {
+    status: "committed",
+    deployCommit: "abc",
+    mounts,
+  });
+  assert.deepEqual(seen[1], {
+    url: "http://api.test/api/v1/projects/pico/components/push/files",
+    method: "PUT",
+    body: { mounts },
+  });
+  await assert.rejects(
+    client.setComponentFiles("pico", "push", [{ key: "NOPE", path: "/x" }]),
+    (err: Error) => err.message === "NOPE is not a secret push reads",
+  );
+});

@@ -5,10 +5,12 @@ import {
   buildLogKey,
   bumpImage,
   can,
+  checkFileMounts,
   commitWithCas,
   type DeployRepo,
   decideAccess,
   type Feature,
+  type FileMount,
   type Identity,
   type IdentityProvider,
   type ImageNaming,
@@ -94,6 +96,7 @@ import { streamSSE } from "hono/streaming";
 import { changeEnv, checkChange, EnvConflict, type EnvEditor, EnvInputError, readEnv } from "./env.ts";
 import type { RunEvents } from "./events.ts";
 import { mountFeatures } from "./features.ts";
+import { FilesConflict, FilesInputError, readFiles, writeFiles } from "./files.ts";
 
 export interface AppInfo {
   readonly version: string;
@@ -956,6 +959,62 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     } catch (err) {
       return c.json({ error: `source host: ${(err as Error).message}` }, 502);
     }
+  });
+
+  // Env secrets a component reads as files: what it mounts now, and the secrets it could.
+  app.get("/api/v1/projects/:id/components/:name/files", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:read", id);
+    if (denied) return denied;
+    const project = await getProject(sql, id);
+    const component = project?.components.find((x) => x.name === c.req.param("name"));
+    if (!project || !component) return c.json({ error: "unknown component" }, 404);
+    if (!services.deployRepo) return c.json({ error: "files need a deploy repository (gitops-git)" }, 404);
+    try {
+      return c.json(await readFiles(services.deployRepo.repo, component));
+    } catch (err) {
+      return c.json({ error: `deploy repository: ${(err as Error).message}` }, 502);
+    }
+  });
+
+  // Sets the files a component mounts from its env Secret, as one commit. The audit
+  // entry names keys and paths; values never leave the Secret.
+  app.put("/api/v1/projects/:id/components/:name/files", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:write", id);
+    if (denied) return denied;
+    const project = await getProject(sql, id);
+    const component = project?.components.find((x) => x.name === c.req.param("name"));
+    if (!project || !component) return c.json({ error: "unknown component" }, 404);
+    if (!services.deployRepo) return c.json({ error: "files need a deploy repository (gitops-git)" }, 404);
+    let mounts: FileMount[];
+    try {
+      mounts = checkFileMounts(((await c.req.json().catch(() => null)) as { mounts?: unknown } | null)?.mounts);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    let result: Awaited<ReturnType<typeof writeFiles>>;
+    try {
+      result = await writeFiles(services.deployRepo.repo, {
+        project: project.id,
+        component,
+        mounts,
+        by: c.get("user").username,
+      });
+    } catch (err) {
+      if (err instanceof FilesInputError) return c.json({ error: err.message }, 400);
+      if (err instanceof FilesConflict) return c.json({ error: err.message }, 409);
+      return c.json({ error: `deploy repository: ${(err as Error).message}` }, 502);
+    }
+    if (result.status === "committed") {
+      await audit(c, {
+        action: "project.component.files",
+        projectId: project.id,
+        target: component.name,
+        detail: { mounts, deployCommit: result.commit },
+      });
+    }
+    return c.json({ status: result.status, deployCommit: result.commit, mounts });
   });
 
   app.post("/api/v1/projects/:id/components/:name/scaffold", async (c) => {

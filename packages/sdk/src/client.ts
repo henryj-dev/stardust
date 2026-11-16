@@ -36,6 +36,18 @@ export interface RepoAccess {
   installation?: "all" | "selected";
 }
 
+/** An env secret a component reads as a file: the Secret's key, and where it appears in the container. */
+export interface FileMount {
+  key: string;
+  path: string;
+}
+
+/** What a component mounts from its env Secret, and the secrets it could. */
+export interface ComponentFiles {
+  mounts: FileMount[];
+  secrets: string[];
+}
+
 /** One entry of the audit log: who did what. Details name things, never secret values. */
 export interface AuditEventView {
   id: string;
@@ -339,6 +351,17 @@ export interface Client {
   cancelJob(projectId: string, runId: string, job: string): Promise<void>;
   /** What was delivered for a component, newest first. */
   deliveries(projectId: string, component: string): Promise<Delivery[]>;
+  /** The env secrets a component reads as files, and the secrets it could. */
+  componentFiles(projectId: string, component: string): Promise<ComponentFiles>;
+  /**
+   * Sets every file a component mounts from its env Secret (an empty list
+   * removes them), as one commit. ApiError 400 names a key it does not read.
+   */
+  setComponentFiles(
+    projectId: string,
+    component: string,
+    mounts: FileMount[],
+  ): Promise<{ status: "committed" | "no_change"; deployCommit: string | null; mounts: FileMount[] }>;
   /**
    * Points a component back at an earlier delivery: the one before the latest,
    * or the one `job` names. ApiError 409 when there is nothing to go back to.
@@ -654,6 +677,30 @@ export function createClient(options: ClientOptions): Client {
     async cancelJob(projectId, runId, job) {
       const p = (s: string) => encodeURIComponent(s);
       await post(`/api/v1/projects/${p(projectId)}/runs/${p(runId)}/jobs/${p(job)}/cancel`, {});
+    },
+    async componentFiles(projectId, component) {
+      const p = (x: string) => encodeURIComponent(x);
+      return (await (
+        await get(`/api/v1/projects/${p(projectId)}/components/${p(component)}/files`)
+      ).json()) as ComponentFiles;
+    },
+    async setComponentFiles(projectId, component, mounts) {
+      const p = (x: string) => encodeURIComponent(x);
+      const path = `/api/v1/projects/${p(projectId)}/components/${p(component)}/files`;
+      const res = await doFetch(`${base}${path}`, {
+        method: "PUT",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify({ mounts }),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `PUT ${path} failed: ${res.status}`);
+      }
+      return (await res.json()) as {
+        status: "committed" | "no_change";
+        deployCommit: string | null;
+        mounts: FileMount[];
+      };
     },
     async deliveries(projectId, component) {
       const p = (s: string) => encodeURIComponent(s);

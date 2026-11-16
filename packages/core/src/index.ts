@@ -9,6 +9,7 @@ export * from "./env/secret-guard.ts";
 export * from "./feature.ts";
 export * from "./gitops/bump.ts";
 export * from "./gitops/cas.ts";
+export * from "./gitops/files.ts";
 export * from "./gitops/image-tag.ts";
 export * from "./gitops/kustomization.ts";
 export * from "./gitops/scaffold.ts";
