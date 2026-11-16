@@ -22,24 +22,22 @@
  */
 import { createHash } from "node:crypto";
 import {
+  addResource,
+  type BoundRepo,
+  type CasOptions,
+  commitWithCas,
   DEFAULT_ENV_ROOT,
   ENV_REVISION_ANNOTATION,
   envConfigMapName,
   envSecretName,
   type MergedEnv,
   mergeEnv,
-  renderEnv,
-} from "@stardust/core";
-import type { Component, Project } from "@stardust/db";
-import {
-  addResource,
-  type BoundRepo,
-  type CasOptions,
-  commitWithCas,
   type PendingCommit,
   type RepoIO,
+  renderEnv,
   stampPodTemplate,
-} from "@stardust/plugin-gitops-git";
+} from "@stardust/core";
+import type { Component, Project } from "@stardust/db";
 import { Document, isMap, parse, parseAllDocuments, parseDocument } from "yaml";
 
 /** SOPS, as the editor needs it: decrypt a document, and encrypt one unless it decrypts to the same. */

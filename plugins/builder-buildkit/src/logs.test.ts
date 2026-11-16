@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { KubeStreamClient } from "./kube.ts";
+import type { KubeStreamClient } from "@stardust/core";
 import { buildLogReader } from "./logs.ts";
 
 const RUN = "8ee4cd25-dd58-4701-8e08-1e5f5265d22d";

@@ -7,6 +7,7 @@
  * the person is in stardust, and whether they may sign in, is the server's
  * decision from the claims returned here.
  */
+import type { Oidc, PendingLogin } from "@stardust/core";
 import * as client from "openid-client";
 
 export interface OidcOptions {
@@ -22,30 +23,6 @@ export interface OidcOptions {
   groupsClaim?: string;
   /** Tests only: allow an http issuer. */
   allowInsecureRequests?: boolean;
-}
-
-/** What the caller stores (server side) between start and finish. */
-export interface PendingLogin {
-  state: string;
-  nonce: string;
-  codeVerifier: string;
-}
-
-export interface Identity {
-  issuer: string;
-  subject: string;
-  /** preferred_username, else the local part of email; may be absent. */
-  username: string | null;
-  email: string | null;
-  emailVerified: boolean;
-  name: string | null;
-  groups: string[];
-}
-
-export interface Oidc {
-  start(): Promise<{ url: string; pending: PendingLogin }>;
-  /** callbackUrl is the full URL the provider redirected to, query included. */
-  finish(callbackUrl: string, pending: PendingLogin): Promise<Identity>;
 }
 
 export async function createOidc(options: OidcOptions): Promise<Oidc> {
@@ -111,19 +88,4 @@ export async function createOidc(options: OidcOptions): Promise<Oidc> {
       };
     },
   };
-}
-
-export interface AccessRules {
-  /** When set, only members of one of these groups may sign in. */
-  allowedGroups?: readonly string[];
-  /** Members of these groups are administrators. */
-  adminGroups?: readonly string[];
-}
-
-/** Whether this identity may sign in, and as an administrator. */
-export function decideAccess(identity: Identity, rules: AccessRules): { allowed: boolean; isAdmin: boolean } {
-  const inAny = (groups?: readonly string[]) => (groups ?? []).some((g) => identity.groups.includes(g));
-  const isAdmin = inAny(rules.adminGroups);
-  const allowed = rules.allowedGroups === undefined || isAdmin || inAny(rules.allowedGroups);
-  return { allowed, isAdmin };
 }

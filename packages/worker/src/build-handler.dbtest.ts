@@ -5,11 +5,11 @@
  */
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import type { Logger } from "@stardust/core";
+import type { KubeClient, Logger } from "@stardust/core";
+import { MemoryRepo } from "@stardust/core/testing";
 import { claimJob, putProject, startRun } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
-import type { KubeClient } from "@stardust/plugin-builder-buildkit";
-import { MemoryRepo } from "@stardust/plugin-gitops-git/testing";
+import { createBuilder } from "@stardust/plugin-builder-buildkit";
 import { buildHandler } from "./build-handler.ts";
 import { runJob } from "./loop.ts";
 
@@ -83,10 +83,14 @@ async function runOnce(client: KubeClient, repo: MemoryRepo, event = "workflow_d
   assert.ok(job);
   const handler = buildHandler({
     sql: db.sql,
-    kube: client,
-    namespace: "builds",
-    registry: "registry.example.com",
-    builder: { cloneSecret: "clone", pushSecret: "push" },
+    // The real BuildKit builder over a fake Kubernetes API: the handler and the Job it makes, together.
+    builder: createBuilder({
+      kube: { ...client, stream: () => Promise.reject(new Error("no log stream in this test")) },
+      namespace: "builds",
+      registry: "registry.example.com",
+      cloneSecret: "clone",
+      pushSecret: "push",
+    }),
     deployRepo: repo,
     log: quiet,
     pollMs: 1,

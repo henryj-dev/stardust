@@ -15,7 +15,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CommitResult, PendingCommit, RepoFile, RepoIO } from "./repo.ts";
+import type { CommitResult, PendingCommit, RepoFile, RepoIO } from "@stardust/core";
 
 export interface GitCliOptions {
   /** Repository URL: https://… or a local path / file:// URL. */

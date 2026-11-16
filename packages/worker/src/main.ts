@@ -1,9 +1,9 @@
 import { hostname } from "node:os";
+import { bundledPlugins } from "@stardust/bundle";
 import { loadConfig, resolveSecretRef, type StardustConfig } from "@stardust/config";
-import { createPluginRegistry, type Logger } from "@stardust/core";
+import { assemble, createPluginRegistry, type Logger, type Ports } from "@stardust/core";
 import { connect, migrate } from "@stardust/db";
-import { plugin as builderPlugin, inClusterClient } from "@stardust/plugin-builder-buildkit";
-import { GitCliRepo, plugin as gitopsPlugin, installationTokens, repoFromUrl } from "@stardust/plugin-gitops-git";
+import { inClusterClient } from "@stardust/kube";
 import { buildHandler } from "./build-handler.ts";
 import { startHousekeeping } from "./housekeeping.ts";
 import { type JobHandler, runWorker } from "./loop.ts";
@@ -18,12 +18,19 @@ const log: Logger = {
 };
 
 let config: StardustConfig;
+let ports: Partial<Ports>;
 try {
   config = await loadConfig(configPath);
-  const mine = ["builder-buildkit", "gitops-git"];
-  createPluginRegistry([builderPlugin, gitopsPlugin]).resolve(
-    Object.fromEntries(Object.entries(config.plugins).filter(([name]) => mine.includes(name))),
-  );
+  ports = await assemble({
+    plugins: createPluginRegistry(bundledPlugins).resolve(config.plugins),
+    sections: config.plugins,
+    want: ["builder", "deployRepo"],
+    // Builds run as Kubernetes Jobs: a worker that builds runs in the cluster.
+    platform: config.plugins["builder-buildkit"] && config.plugins["gitops-git"] ? { kube: inClusterClient() } : {},
+    resolveSecret: resolveSecretRef,
+    log,
+    publicUrl: config.server.publicUrl,
+  });
 } catch (err) {
   console.error((err as Error).message);
   process.exit(1);
@@ -32,41 +39,13 @@ try {
 const sql = connect(config.database.url, { max: 4 });
 await migrate(sql);
 
-const builder = config.plugins["builder-buildkit"] as Record<string, unknown> | undefined;
-const gitops = config.plugins["gitops-git"] as Record<string, unknown> | undefined;
-
 let handler: JobHandler;
-if (builder && gitops) {
-  const token = gitops.token ? await resolveSecretRef(gitops.token, "plugins.gitops-git.token") : undefined;
-  // A GitHub App instead of a token: installation tokens for the deploy repository, renewed before they expire.
-  const app = gitops.githubApp as { appId: number; privateKey: unknown; apiBaseUrl?: string } | undefined;
-  const appTokens = app
-    ? installationTokens({
-        appId: app.appId,
-        privateKey: await resolveSecretRef(app.privateKey, "plugins.gitops-git.githubApp.privateKey"),
-        repo: repoFromUrl(gitops.url as string) as string,
-        ...(app.apiBaseUrl ? { apiBaseUrl: app.apiBaseUrl } : {}),
-      })
-    : undefined;
+if (ports.builder && ports.deployRepo) {
   handler = buildHandler({
     sql,
-    kube: inClusterClient(),
-    namespace: builder.namespace as string,
-    registry: builder.registry as string,
-    builder: {
-      ...(builder.cloneSecret ? { cloneSecret: builder.cloneSecret as string } : {}),
-      pushSecret: builder.pushSecret as string,
-      ...(builder.gitBaseUrl ? { gitBaseUrl: builder.gitBaseUrl as string } : {}),
-      ...(builder.insecureRegistry === true ? { insecureRegistry: true } : {}),
-      ...(builder.cloneUsername ? { cloneUsername: builder.cloneUsername as string } : {}),
-    },
-    deployRepo: new GitCliRepo({
-      url: gitops.url as string,
-      branch: gitops.branch as string,
-      ...(appTokens ? { token: appTokens } : token ? { token } : {}),
-      ...(gitops.username ? { username: gitops.username as string } : {}),
-    }),
-    ...(gitops.buildRevAnnotation ? { buildRevAnnotation: gitops.buildRevAnnotation as string } : {}),
+    builder: ports.builder,
+    deployRepo: ports.deployRepo.repo,
+    ...(ports.deployRepo.buildRevAnnotation ? { buildRevAnnotation: ports.deployRepo.buildRevAnnotation } : {}),
     log,
   });
 } else {

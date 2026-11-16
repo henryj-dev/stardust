@@ -2,7 +2,7 @@
  * An in-memory deploy repository with the same compare-and-swap rule as a
  * real Git host: a commit lands only on top of the expected head.
  */
-import type { CommitResult, PendingCommit, RepoFile, RepoIO } from "./repo.ts";
+import type { CommitResult, PendingCommit, RepoFile, RepoIO } from "./ports/repo.ts";
 
 export class MemoryRepo implements RepoIO {
   private commits: Array<{ sha: string; files: Map<string, string> }> = [];

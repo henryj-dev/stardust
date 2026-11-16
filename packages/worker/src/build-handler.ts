@@ -4,19 +4,13 @@
  * A job succeeds only when both happened — a pushed image that the deploy
  * repository does not reference has not been delivered.
  */
-import type { Logger } from "@stardust/core";
+import { type Builder, bumpImage, type Logger, type RepoIO } from "@stardust/core";
 import { getProject, type Sql } from "@stardust/db";
-import { type BuilderOptions, buildJob, type KubeClient, runBuild } from "@stardust/plugin-builder-buildkit";
-import { bumpImage, type RepoIO } from "@stardust/plugin-gitops-git";
 import type { HandlerOutcome, JobHandler } from "./loop.ts";
 
 export interface BuildHandlerDeps {
   sql: Sql;
-  kube: KubeClient;
-  namespace: string;
-  /** Registry host and optional path; images are `<registry>/<project>/<component>`. */
-  registry: string;
-  builder: BuilderOptions;
+  builder: Builder;
   deployRepo: RepoIO;
   buildRevAnnotation?: string;
   log: Logger;
@@ -41,13 +35,12 @@ export function buildHandler(deps: BuildHandlerDeps): JobHandler {
     const component = project.components.find((c) => c.name === name);
     if (!component) return failed(`job "${job.name}" names no known component`);
 
-    const manifest = buildJob(
+    const outcome = await deps.builder.build(
       {
         projectId: project.id,
         repo: project.githubRepo,
         sha: job.sha,
         component: component.name,
-        imageRepository: `${deps.registry}/${project.id}/${component.name}`,
         runId: job.runId,
         jobName: job.name,
         ...(component.context ? { context: component.context } : {}),
@@ -62,12 +55,8 @@ export function buildHandler(deps: BuildHandlerDeps): JobHandler {
             ? { dockerfile: component.dockerfile }
             : {}),
       },
-      deps.builder,
+      { signal, ...(deps.pollMs !== undefined ? { pollMs: deps.pollMs } : {}) },
     );
-    const outcome = await runBuild(deps.kube, deps.namespace, manifest, {
-      signal,
-      ...(deps.pollMs !== undefined ? { pollMs: deps.pollMs } : {}),
-    });
     const detail: Record<string, unknown> = { buildJob: outcome.jobName };
     if (outcome.result === "cancelled") return { result: "cancelled", detail };
     if (outcome.result === "failed" || !outcome.digest) {

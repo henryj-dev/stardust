@@ -187,6 +187,27 @@ importers:
 
   charts/stardust: {}
 
+  packages/bundle:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../core
+      '@stardust/plugin-builder-buildkit':
+        specifier: workspace:*
+        version: link:../../plugins/builder-buildkit
+      '@stardust/plugin-gitops-git':
+        specifier: workspace:*
+        version: link:../../plugins/gitops-git
+      '@stardust/plugin-identity-oidc':
+        specifier: workspace:*
+        version: link:../../plugins/identity-oidc
+      '@stardust/plugin-secrets-sops-age':
+        specifier: workspace:*
+        version: link:../../plugins/secrets-sops-age
+      '@stardust/plugin-source-github':
+        specifier: workspace:*
+        version: link:../../plugins/source-github
+
   packages/config:
     dependencies:
       yaml:
@@ -211,6 +232,12 @@ importers:
         specifier: ^3.4.9
         version: 3.4.9
 
+  packages/kube:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/sdk: {}
 
   packages/server:
@@ -218,6 +245,9 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.5
         version: 2.1.5(hono@4.13.14)
+      '@stardust/bundle':
+        specifier: workspace:*
+        version: link:../bundle
       '@stardust/config':
         specifier: workspace:*
         version: link:../config
@@ -227,27 +257,22 @@ importers:
       '@stardust/db':
         specifier: workspace:*
         version: link:../db
-      '@stardust/plugin-builder-buildkit':
+      '@stardust/kube':
         specifier: workspace:*
-        version: link:../../plugins/builder-buildkit
-      '@stardust/plugin-gitops-git':
-        specifier: workspace:*
-        version: link:../../plugins/gitops-git
-      '@stardust/plugin-identity-oidc':
-        specifier: workspace:*
-        version: link:../../plugins/identity-oidc
-      '@stardust/plugin-secrets-sops-age':
-        specifier: workspace:*
-        version: link:../../plugins/secrets-sops-age
-      '@stardust/plugin-source-github':
-        specifier: workspace:*
-        version: link:../../plugins/source-github
+        version: link:../kube
       hono:
         specifier: ^4.13.14
         version: 4.13.14
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
+    devDependencies:
+      '@stardust/plugin-identity-oidc':
+        specifier: workspace:*
+        version: link:../../plugins/identity-oidc
+      '@stardust/plugin-secrets-sops-age':
+        specifier: workspace:*
+        version: link:../../plugins/secrets-sops-age
 
   packages/web:
     dependencies:
@@ -279,6 +304,9 @@ importers:
 
   packages/worker:
     dependencies:
+      '@stardust/bundle':
+        specifier: workspace:*
+        version: link:../bundle
       '@stardust/config':
         specifier: workspace:*
         version: link:../config
@@ -288,12 +316,13 @@ importers:
       '@stardust/db':
         specifier: workspace:*
         version: link:../db
+      '@stardust/kube':
+        specifier: workspace:*
+        version: link:../kube
+    devDependencies:
       '@stardust/plugin-builder-buildkit':
         specifier: workspace:*
         version: link:../../plugins/builder-buildkit
-      '@stardust/plugin-gitops-git':
-        specifier: workspace:*
-        version: link:../../plugins/gitops-git
 
   plugins/builder-buildkit:
     dependencies:
@@ -306,9 +335,6 @@ importers:
       '@stardust/core':
         specifier: workspace:*
         version: link:../../packages/core
-      yaml:
-        specifier: ^2.9.1
-        version: 2.9.1
 
   plugins/identity-oidc:
     dependencies:

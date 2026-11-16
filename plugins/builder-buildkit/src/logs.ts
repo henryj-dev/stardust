@@ -3,24 +3,9 @@
  * the build runs, in full until the finished Job is cleaned up. stardust keeps
  * no copy, so a cleaned-up build has no log.
  */
+
+import type { BuildLogReader, KubeStreamClient } from "@stardust/core";
 import { LABEL_PREFIX } from "./job.ts";
-import type { KubeStreamClient } from "./kube.ts";
-
-export interface BuildLogQuery {
-  runId: string;
-  /** The job's name in the run, as the build pod's label carries it. */
-  jobName: string;
-  /** Keep the response open and send lines as the build prints them. */
-  follow: boolean;
-  signal: AbortSignal;
-}
-
-export type BuildLog =
-  /** No pod: the build has not been created yet, or it was cleaned up. */
-  | { state: "none" }
-  /** The pod exists but the build container has not started (cloning, pulling the image). */
-  | { state: "waiting" }
-  | { state: "open"; pod: string; body: AsyncIterable<Uint8Array> };
 
 export interface BuildLogOptions {
   /** Lines from the end the log starts with. */
@@ -28,8 +13,6 @@ export interface BuildLogOptions {
   /** Bytes after which Kubernetes ends the response, follow or not. */
   limitBytes?: number;
 }
-
-export type BuildLogReader = (query: BuildLogQuery) => Promise<BuildLog>;
 
 // Label values: what Kubernetes accepts, so a query cannot widen the selector.
 const LABEL_VALUE = /^(([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9])$/;

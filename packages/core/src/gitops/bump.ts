@@ -1,6 +1,6 @@
+import type { CommitResult, PendingCommit, RepoIO } from "../ports/repo.ts";
 import { type CasOptions, commitWithCas } from "./cas.ts";
 import { planDirectoryRewrite } from "./image-tag.ts";
-import type { CommitResult, PendingCommit, RepoIO } from "./repo.ts";
 
 export interface BumpImage {
   /** The component's directory in the deploy repository. */

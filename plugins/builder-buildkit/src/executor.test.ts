@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { KubeClient, KubeResponse } from "@stardust/core";
 import { runBuild } from "./executor.ts";
-import type { KubeClient, KubeResponse } from "./kube.ts";
 
 const DIGEST = `sha256:${"e".repeat(64)}`;
 

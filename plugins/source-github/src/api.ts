@@ -1,27 +1,9 @@
+import { type PullTarget, type ResolvedTarget, type SourceHost, TargetError } from "@stardust/core";
+
 const headers = (token: string | undefined): Record<string, string> => ({
   accept: "application/vnd.github+json",
   ...(token ? { authorization: `Bearer ${token}` } : {}),
 });
-
-/** What an operator asks to pull: the default branch, or one branch, tag or commit. */
-export type PullTarget = { branch: string } | { tag: string } | { sha: string } | Record<string, never>;
-
-/** The commit a pull builds, and the ref it is recorded under. */
-export interface ResolvedTarget {
-  ref: string;
-  sha: string;
-}
-
-/** Why a target could not be resolved. `notFound` is the operator's mistake; anything else is the host's. */
-export class TargetError extends Error {
-  readonly notFound: boolean;
-
-  constructor(message: string, notFound: boolean) {
-    super(message);
-    this.name = "TargetError";
-    this.notFound = notFound;
-  }
-}
 
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -33,7 +15,11 @@ const SHA = /^[0-9a-f]{40}$/;
  * this check a hash pushed to someone's fork would build as if it were this
  * repository's. A branch or a tag names a ref of the repository itself.
  */
-export function targetApi(apiBaseUrl: string, token: string | undefined, fetchFn: typeof fetch = fetch) {
+export function targetApi(
+  apiBaseUrl: string,
+  token: string | undefined,
+  fetchFn: typeof fetch = fetch,
+): SourceHost["resolveTarget"] {
   const base = apiBaseUrl.replace(/\/+$/, "");
   const get = async (path: string, what: string): Promise<Record<string, unknown>> => {
     const res = await fetchFn(`${base}/repos/${path}`, {

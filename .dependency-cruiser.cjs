@@ -36,6 +36,14 @@ module.exports = {
       to: { path: "^plugins/", pathNot: "^plugins/$1/" },
     },
     {
+      name: "only-bundle-loads-plugins",
+      comment:
+        "The server and the worker get ports from core's assemble; only packages/bundle lists the plugins. Tests may use a plugin's fakes.",
+      severity: "error",
+      from: { path: "^packages/(?!bundle/)", pathNot: "\\.(test|dbtest|sopstest)\\.ts$" },
+      to: { path: "^plugins/" },
+    },
+    {
       name: "web-only-uses-sdk",
       comment: "The dashboard talks to the API through the generated client only.",
       severity: "error",

@@ -1,4 +1,5 @@
 import { definePlugin } from "@stardust/core";
+import { createBuilder } from "./builder.ts";
 
 export type { BuilderOptions, BuildInput } from "./job.ts";
 export {
@@ -26,6 +27,26 @@ export const plugin = definePlugin({
   manifest: {
     name: "builder-buildkit",
     description: "Builds container images in Kubernetes Jobs with rootless BuildKit.",
+  },
+  provides: {
+    ports: ["builder"],
+    needs: ["kube"],
+    async create({ config, ports }) {
+      const kube = ports.kube;
+      if (!kube) return {};
+      return {
+        builder: createBuilder({
+          kube,
+          namespace: config.namespace as string,
+          registry: config.registry as string,
+          pushSecret: config.pushSecret as string,
+          ...(config.cloneSecret ? { cloneSecret: config.cloneSecret as string } : {}),
+          ...(config.gitBaseUrl ? { gitBaseUrl: config.gitBaseUrl as string } : {}),
+          ...(config.insecureRegistry === true ? { insecureRegistry: true } : {}),
+          ...(config.cloneUsername ? { cloneUsername: config.cloneUsername as string } : {}),
+        }),
+      };
+    },
   },
   validateConfig(section) {
     if (typeof section !== "object" || section === null) return ["must be a mapping"];
@@ -71,9 +92,9 @@ export const plugin = definePlugin({
     return problems;
   },
 });
-export type { BuildOutcome, RunBuildOptions } from "./executor.ts";
+export type { BuildKitBuilderOptions } from "./builder.ts";
+export { createBuilder } from "./builder.ts";
+export type { RunBuildOptions } from "./executor.ts";
 export { runBuild } from "./executor.ts";
-export type { KubeClient, KubeResponse, KubeStreamClient, KubeStreamResponse } from "./kube.ts";
-export { inClusterClient } from "./kube.ts";
-export type { BuildLog, BuildLogOptions, BuildLogQuery, BuildLogReader } from "./logs.ts";
+export type { BuildLogOptions } from "./logs.ts";
 export { buildLogReader } from "./logs.ts";

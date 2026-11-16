@@ -1,3 +1,3 @@
-import { a } from "../../../plugins/a/src/index.ts";
+import { bundle } from "../../bundle/src/index.ts";
 import { core } from "../../core/src/index.ts";
-export const server = core + a;
+export const server = core + bundle.length;

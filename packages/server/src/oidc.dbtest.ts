@@ -5,9 +5,10 @@
  */
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
+import type { AccessRules } from "@stardust/core";
 import { createUser } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
-import { type AccessRules, createOidc } from "@stardust/plugin-identity-oidc";
+import { createOidc } from "@stardust/plugin-identity-oidc";
 import { FakeProvider, type Issued } from "@stardust/plugin-identity-oidc/testing";
 import { createApp } from "./app.ts";
 

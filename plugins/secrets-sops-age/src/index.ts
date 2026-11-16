@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { definePlugin } from "@stardust/core";
+import { decrypt, encryptIfChanged } from "./sops.ts";
 
 export type { SopsOptions } from "./sops.ts";
 export { decrypt, ENCRYPTED_REGEX, encrypt, encryptIfChanged } from "./sops.ts";
@@ -12,6 +15,31 @@ export { decrypt, ENCRYPTED_REGEX, encrypt, encryptIfChanged } from "./sops.ts";
  */
 export const plugin = definePlugin({
   manifest: { name: "secrets-sops-age", description: "Encrypts secrets in Git with SOPS and age." },
+  provides: {
+    ports: ["cipher"],
+    async create({ config, log }) {
+      const options = {
+        ageKeyFile: config.ageKeyFile as string,
+        recipients: config.recipients as string[],
+        ...(config.sopsBinary ? { bin: config.sopsBinary as string } : {}),
+      };
+      let identity: Buffer;
+      try {
+        identity = await readFile(options.ageKeyFile);
+      } catch {
+        log.warn("secrets-sops-age is off: the age identity is not mounted", { ageKeyFile: options.ageKeyFile });
+        return {};
+      }
+      return {
+        cipher: {
+          decrypt: (document) => decrypt(document, options),
+          encryptIfChanged: (current, plain) => encryptIfChanged(current, plain, options),
+          // Derived from the age identity: secret, stable, and nothing more to configure.
+          revisionKey: createHash("sha256").update("stardust env revision\0").update(identity).digest("hex"),
+        },
+      };
+    },
+  },
   validateConfig(section) {
     if (typeof section !== "object" || section === null) return ["must be a mapping"];
     const s = section as Record<string, unknown>;
