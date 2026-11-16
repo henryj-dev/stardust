@@ -22,6 +22,18 @@ export interface SecretKeyRef {
   key: string;
 }
 
+/** The role an instance's superuser signs in as when its pod does not say. */
+export const DEFAULT_SUPERUSER_ROLE = "postgres";
+
+/** The superuser: its password's Secret, and its role when that is not `postgres`. */
+export interface SuperuserRef extends SecretKeyRef {
+  /** The role it signs in as; absent means `postgres`. */
+  role?: string;
+}
+
+/** The role a superuser reference signs in as. */
+export const superuserRole = (s: SuperuserRef): string => s.role ?? DEFAULT_SUPERUSER_ROLE;
+
 export interface DatabaseState {
   ref: DatabaseRef;
   /** The Service that reaches it, when there is one. */
@@ -32,8 +44,11 @@ export interface DatabaseState {
   desiredReplicas: number;
   readyReplicas: number;
   ready: boolean;
-  /** The superuser password's Secret, when the workload reads it from one. */
-  superuser: SecretKeyRef | null;
+  /**
+   * The superuser password's Secret and its role, when the workload reads the
+   * password from a Secret and its role can be known.
+   */
+  superuser: SuperuserRef | null;
 }
 
 /** A new instance. The provider picks the namespace. */
@@ -56,7 +71,7 @@ export interface DatabaseTarget {
   ref: DatabaseRef;
   /** Host name inside the cluster, e.g. <service>.<namespace>.svc */
   host: string;
-  superuser: SecretKeyRef;
+  superuser: SuperuserRef;
 }
 
 /** An application's own role and database on an instance. */
@@ -165,6 +180,19 @@ export function appGrantProblems(grant: AppGrant): string[] {
   return problems;
 }
 
+/** Why a target cannot be rendered against, or nothing. */
+export function targetProblems(t: DatabaseTarget): string[] {
+  const problems: string[] = [];
+  if (!isKubeName(t.name) || !isKubeName(t.ref.name) || !isKubeName(t.superuser.name)) {
+    problems.push(`${t.name}: names must be names`);
+  }
+  if (!/^[a-z0-9.-]+$/.test(t.host)) problems.push(`${t.name}: host must be a host name`);
+  if (!/^[A-Za-z0-9._-]+$/.test(t.superuser.key)) problems.push(`${t.name}: the secret key must be a key name`);
+  if (t.superuser.role !== undefined && !isSqlName(t.superuser.role))
+    problems.push(`${t.name}: the superuser role must be lowercase letters, digits and underscores`);
+  return problems;
+}
+
 /** Why a backup plan cannot be rendered, or nothing. */
 export function backupPlanProblems(plan: BackupPlan): string[] {
   const problems: string[] = [];
@@ -181,11 +209,7 @@ export function backupPlanProblems(plan: BackupPlan): string[] {
   if (plan.targets.length === 0) problems.push("there must be something to back up");
   const seen = new Set<string>();
   for (const t of plan.targets) {
-    if (!isKubeName(t.name) || !isKubeName(t.ref.name) || !isKubeName(t.superuser.name)) {
-      problems.push(`${t.name}: names must be names`);
-    }
-    if (!/^[a-z0-9.-]+$/.test(t.host)) problems.push(`${t.name}: host must be a host name`);
-    if (!/^[A-Za-z0-9._-]+$/.test(t.superuser.key)) problems.push(`${t.name}: the secret key must be a key name`);
+    problems.push(...targetProblems(t));
     if (seen.has(t.name)) problems.push(`${t.name}: two targets with one name would overwrite each other's dumps`);
     seen.add(t.name);
   }

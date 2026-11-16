@@ -49,19 +49,21 @@ const count = (counter: string, n: number, what: string) =>
 
 /**
  * Backup step 1, postgres image: a fingerprint and a gzipped pg_dumpall of
- * each target into /work/<name>.{fingerprint,sql.gz}. Env: each target's
- * password env.
+ * each target into /work/<name>.{fingerprint,sql.gz}, signed in as the
+ * target's superuser role. Env: each target's password and role env.
  */
-export function dumpScript(targets: ReadonlyArray<{ name: string; host: string; passwordEnv: string }>): string {
-  const calls = targets.map((t) => `dump_one ${t.name} ${t.host} "$${t.passwordEnv}"`).join("\n");
+export function dumpScript(
+  targets: ReadonlyArray<{ name: string; host: string; passwordEnv: string; roleEnv: string }>,
+): string {
+  const calls = targets.map((t) => `dump_one ${t.name} ${t.host} "$${t.passwordEnv}" "$${t.roleEnv}"`).join("\n");
   return `set -eu
 set -o pipefail
 DUMPED=0
 ${FINGERPRINT_FUNCTION}
 dump_one() {
-  NAME="$1"; HOST="$2"; export PGPASSWORD="$3"
-  fingerprint "$HOST" postgres > "/work/$NAME.fingerprint"
-  pg_dumpall --clean --if-exists -h "$HOST" -U postgres | gzip -9 > "/work/$NAME.sql.gz"
+  NAME="$1"; HOST="$2"; export PGPASSWORD="$3"; ROLE="$4"
+  fingerprint "$HOST" "$ROLE" > "/work/$NAME.fingerprint"
+  pg_dumpall --clean --if-exists -h "$HOST" -U "$ROLE" | gzip -9 > "/work/$NAME.sql.gz"
   SIZE="$(stat -c%s "/work/$NAME.sql.gz")"
   # A pipe can quietly carry nothing: refuse a dump too small to hold a cluster.
   [ "$SIZE" -gt 1000 ] || { echo "[fail] $NAME: the dump is only $SIZE bytes"; exit 1; }

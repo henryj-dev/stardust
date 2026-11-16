@@ -20,6 +20,7 @@ import {
   listResources,
   type PendingCommit,
   removeResource,
+  type SuperuserRef,
 } from "@stardust/core";
 import { stringify } from "yaml";
 
@@ -29,7 +30,8 @@ export interface ManagedInstance {
   namespace: string;
   workload: string;
   host: string;
-  superuser: { name: string; key: string } | null;
+  /** Its superuser's Secret and role (absent: postgres). */
+  superuser: SuperuserRef | null;
 }
 
 export interface BackupSettings {

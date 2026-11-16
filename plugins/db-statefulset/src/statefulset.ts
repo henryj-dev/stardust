@@ -3,7 +3,8 @@
  * It finds instances by their image in the namespaces it is given (it
  * needs `get`/`list` on statefulsets there, nothing cluster-wide), and
  * reads the superuser Secret's name and key from the pod's
- * POSTGRES_PASSWORD, never the value.
+ * POSTGRES_PASSWORD, never the value, and the superuser's role from its
+ * POSTGRES_USER (absent means `postgres`).
  */
 import {
   type AppGrant,
@@ -15,10 +16,14 @@ import {
   type DatabaseSpec,
   type DatabaseState,
   type DatabaseTarget,
+  DEFAULT_SUPERUSER_ROLE,
   databaseSpecProblems,
+  isSqlName,
   type KubeClient,
   type RestoreCheck,
   restoreCheckProblems,
+  superuserRole,
+  targetProblems,
 } from "@stardust/core";
 import { stringify } from "yaml";
 import { checkScript, decryptScript, dumpScript, encryptScript, fetchScript, uploadScript } from "./scripts.ts";
@@ -43,7 +48,12 @@ interface StatefulSetObject {
       spec?: {
         containers?: Array<{
           image?: string;
-          env?: Array<{ name: string; valueFrom?: { secretKeyRef?: { name?: string; key?: string } } }>;
+          env?: Array<{
+            name: string;
+            value?: string;
+            valueFrom?: { secretKeyRef?: { name?: string; key?: string } };
+          }>;
+          envFrom?: unknown[];
         }>;
       };
     };
@@ -89,11 +99,31 @@ export function majorOf(image: string): string | null {
   return /^(\d+)/.exec(repo.slice(colon + 1))?.[1] ?? null;
 }
 
+type PodContainer = NonNullable<
+  NonNullable<NonNullable<NonNullable<StatefulSetObject["spec"]>["template"]>["spec"]>["containers"]
+>[number];
+
+/**
+ * The superuser's role as the official image sets it: POSTGRES_USER, or
+ * `postgres` when it is absent or empty. Undefined means `postgres`; null
+ * means the manifest does not tell (read from a Secret or a ConfigMap, or
+ * maybe set by envFrom) or it is not a plain identifier.
+ */
+function roleOf(pg: PodContainer): string | undefined | null {
+  const user = pg.env?.find((e) => e.name === "POSTGRES_USER");
+  if (!user) return (pg.envFrom?.length ?? 0) > 0 ? null : undefined;
+  if (user.valueFrom) return null;
+  const role = user.value ?? "";
+  if (role === "" || role === DEFAULT_SUPERUSER_ROLE) return undefined;
+  return isSqlName(role) ? role : null;
+}
+
 function stateOf(o: StatefulSetObject): DatabaseState | null {
   const containers = o.spec?.template?.spec?.containers ?? [];
   const pg = containers.find((c) => POSTGRES_IMAGE.test(c.image ?? ""));
   if (!pg?.image) return null;
   const ref = pg.env?.find((e) => e.name === "POSTGRES_PASSWORD")?.valueFrom?.secretKeyRef;
+  const role = roleOf(pg);
   const desired = o.spec?.replicas ?? 1;
   const ready = o.status?.readyReplicas ?? 0;
   return {
@@ -104,7 +134,11 @@ function stateOf(o: StatefulSetObject): DatabaseState | null {
     desiredReplicas: desired,
     readyReplicas: ready,
     ready: desired > 0 && ready >= desired,
-    superuser: ref?.name && ref.key ? { name: ref.name, key: ref.key } : null,
+    // A role that cannot be known is no one to sign in as: like a password outside a Secret, not adoptable.
+    superuser:
+      ref?.name && ref.key && role !== null
+        ? { name: ref.name, key: ref.key, ...(role !== undefined ? { role } : {}) }
+        : null,
   };
 }
 
@@ -234,7 +268,9 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
     },
 
     renderAppGrant(target: DatabaseTarget, grant: AppGrant) {
-      const problems = appGrantProblems(grant);
+      const su = superuserRole(target.superuser);
+      const problems = [...appGrantProblems(grant), ...targetProblems(target)];
+      if (grant.role === su) problems.push("role must not be the superuser");
       if (problems.length > 0) throw new Error(problems.join("; "));
       const { role, database } = grant;
       // Names are checked to be plain identifiers, so they appear unquoted; the
@@ -242,7 +278,7 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
       // applies to what it reads, not to -c (so those statements go on stdin).
       const script = [
         "set -eu",
-        'q() { psql -v ON_ERROR_STOP=1 -Atq -h "$PGHOST" -U postgres -d postgres "$@"; }',
+        'q() { psql -v ON_ERROR_STOP=1 -Atq -h "$PGHOST" -U "$PGUSER" -d postgres "$@"; }',
         `if [ "$(q -c "SELECT 1 FROM pg_roles WHERE rolname = '${role}'")" = 1 ]; then VERB=ALTER; else VERB=CREATE; fi`,
         `echo "$VERB ROLE ${role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'pw';" | q -v pw="$APP_PASSWORD"`,
         `if [ "$(q -c "SELECT 1 FROM pg_database WHERE datname = '${database}'")" != 1 ]; then`,
@@ -271,6 +307,7 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
                   image: pgImage(newest()),
                   env: [
                     { name: "PGHOST", value: target.host },
+                    { name: "PGUSER", value: su },
                     passwordEnv("PGPASSWORD", target.superuser),
                     passwordEnv("APP_PASSWORD", grant.password),
                   ],
@@ -291,8 +328,11 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
       // One list drives the env, the dump calls and the expected counts, so a
       // target cannot be half added and silently skipped.
       const envOf = (i: number) => `PW_${i}`;
+      const roleEnvOf = (i: number) => `ROLE_${i}`;
       const names = plan.targets.map((t) => t.name);
-      const dump = dumpScript(plan.targets.map((t, i) => ({ name: t.name, host: t.host, passwordEnv: envOf(i) })));
+      const dump = dumpScript(
+        plan.targets.map((t, i) => ({ name: t.name, host: t.host, passwordEnv: envOf(i), roleEnv: roleEnvOf(i) })),
+      );
       const cron = {
         apiVersion: "batch/v1",
         kind: "CronJob",
@@ -317,7 +357,10 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
                       "dump",
                       pgImage(newest()),
                       dump,
-                      plan.targets.map((t, i) => passwordEnv(envOf(i), t.superuser)),
+                      plan.targets.flatMap((t, i) => [
+                        passwordEnv(envOf(i), t.superuser),
+                        { name: roleEnvOf(i), value: superuserRole(t.superuser) },
+                      ]),
                     ),
                     step("encrypt", SOPS_IMAGE, encryptScript(names), [
                       { name: "RECIPIENT", value: plan.recipient },

@@ -147,6 +147,23 @@ export function databaseProviderContract(name: string, make: () => Promise<Datab
       }
     });
 
+    it("signs in as the target's superuser role, and refuses roles that would need quoting", async () => {
+      const p = await make();
+      const owned = (role: string): DatabaseTarget => ({
+        ...target(p),
+        superuser: { ...p.superuserSecret("orders"), role },
+      });
+      const backup = Object.values(p.renderBackup(plan(p, { targets: [owned("app_owner")] }))).join("\n");
+      assert.ok(backup.includes("app_owner"), "the backup names the role");
+      const grantText = Object.values(p.renderAppGrant(owned("app_owner"), grant)).join("\n");
+      assert.ok(grantText.includes("app_owner"), "the grant names the role");
+      for (const bad of ["App", "a-b", "x;drop", "1abc", "a".repeat(64)]) {
+        assert.throws(() => p.renderBackup(plan(p, { targets: [owned(bad)] })), bad);
+        assert.throws(() => p.renderAppGrant(owned(bad), grant), bad);
+      }
+      assert.throws(() => p.renderAppGrant(owned("orders_app"), grant), "the application's role is not the superuser");
+    });
+
     it("renders a restore check as one Job that reads the identity and storage by reference", async () => {
       const p = await make();
       const check: RestoreCheck = {
