@@ -278,6 +278,25 @@ Only a component's own pods can be read: a live pod must match one of its
 workloads' selectors, and a kept one must be named after one of its
 workloads. Logs are sent as plain text and never stored by stardust.
 
+### `dns-cloudflare` and `dns-parallax`
+
+DNS providers, for the features that write records (domains, instances).
+Both can be enabled at once; each is a `dns` port by its name.
+
+```yaml
+dns-cloudflare:
+  token: { env: CLOUDFLARE_DNS_TOKEN } # Zone:Read and DNS:Edit
+  zones: [example.com] # optional: only these
+dns-parallax:
+  apiUrl: https://parallax.example.com
+  token: { env: PARALLAX_TOKEN }
+  views: [internal, external] # optional
+```
+
+A parallax write is published by applying its view at the revision the write
+made (a write alone is a draft there); stardust then waits until that view
+serves it.
+
 ### `store-s3`
 
 Object storage on S3, R2 or MinIO (path-style requests, Signature V4). With

@@ -56,6 +56,8 @@ plugins compiled in (enforced by `only-bundle-loads-plugins`), and
 | Plugin             | Provides                                             | Needs  |
 | ------------------ | ---------------------------------------------------- | ------ |
 | `builder-buildkit` | `builder`                                            | `kube` |
+| `dns-cloudflare`   | `dns` (`cloudflare`)                                 |        |
+| `dns-parallax`     | `dns` (`parallax`, internal/external views)          |        |
 | `gitops-git`       | `deployRepo`                                         |        |
 | `identity-oidc`    | `identity`                                           |        |
 | `logs-kube`        | `logs` (`kube`, live)                                | `kube` |
