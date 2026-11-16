@@ -22,9 +22,10 @@ it("provides the source port, and says once that a retired key is ignored", asyn
   ]);
 });
 
-it("stops start-up for GitHub App credentials, which are not implemented yet", async () => {
-  await assert.rejects(
-    plugin.provides?.create(context({ appId: 1, privateKey: { file: "/k" } })) ?? Promise.resolve(),
-    /plugins.source-github: GitHub App authentication is not implemented yet; use token/,
-  );
+it("with GitHub App credentials, also gives builds a one-time clone token", async () => {
+  const ports = await plugin.provides?.create(context({ appId: 1, privateKey: { file: "/k" } }));
+  assert.equal(typeof ports?.source?.resolveTarget, "function");
+  assert.equal(typeof ports?.source?.cloneToken, "function");
+  const withToken = await plugin.provides?.create(context({ token: { env: "T" } }));
+  assert.equal(withToken?.source?.cloneToken, undefined, "a static token keeps the static clone secret");
 });

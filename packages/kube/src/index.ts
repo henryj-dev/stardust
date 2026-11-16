@@ -56,7 +56,13 @@ export function inClusterClient(): KubeStreamClient {
             headers: {
               authorization: `Bearer ${token.trim()}`,
               accept: "application/json",
-              ...(payload ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } : {}),
+              // A PATCH is a merge patch: Kubernetes refuses one sent as plain JSON.
+              ...(payload
+                ? {
+                    "content-type": method === "PATCH" ? "application/merge-patch+json" : "application/json",
+                    "content-length": Buffer.byteLength(payload),
+                  }
+                : {}),
             },
             timeout: 30_000,
           },

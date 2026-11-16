@@ -8,8 +8,8 @@ metadata:
     {{- include "stardust.labels" . | nindent 4 }}
 ---
 {{- end }}
-# The worker creates build Jobs and reads their pods' logs — in the builds
-# namespace only, and nothing else.
+# The worker creates build Jobs (and each one's one-time clone token Secret)
+# and reads their pods' logs — in the builds namespace only, and nothing else.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -27,7 +27,12 @@ metadata:
 rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
-    verbs: ["create", "get", "list", "watch", "delete"]
+    # patch: a build with a one-time clone token is made suspended and released once its Secret exists.
+    verbs: ["create", "get", "list", "watch", "delete", "patch"]
+  # The one-time clone token of a build, in a Secret owned by its Job (deleted with it). Never read back.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]

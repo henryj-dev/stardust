@@ -173,7 +173,7 @@ no webhooks: nothing is built until someone asks.
 | Key                   |          |                                                                                                   |
 | --------------------- | -------- | ------------------------------------------------------------------------------------------------- |
 | `token`               | optional | Token for the source host's API (a GitHub or Gitea token). Without one, public repositories only. |
-| `appId`, `privateKey` | optional | GitHub App credentials, instead of `token`. _Not implemented yet._                                |
+| `appId`, `privateKey` | optional | GitHub App credentials, instead of `token`: see below.                                            |
 | `apiBaseUrl`          | optional | Defaults to `https://api.github.com`; Gitea: `https://gitea.example.com/api/v1`.                  |
 
 A `webhookSecret` left over from an older configuration is ignored (the
@@ -181,6 +181,22 @@ server logs that it is), so upgrading needs no edit.
 
 Without a token, GitHub's API answers anonymously at a lower rate limit
 (60 requests an hour per address); a manual run uses one to three.
+
+**Private repositories, with a GitHub App.** Give stardust an App of its own,
+with _Contents: read_ and _Metadata: read_ only, installed on the private
+repositories it builds (keep it apart from any App that writes your deploy
+repository, so one leaked key never opens both). Each build then gets a token
+for its repository alone, kept in a Secret owned by the build Job (made
+before the Job runs, deleted with it) and seen by the clone step only. A
+public repository needs no token; a private one the App is not installed on
+is refused, never cloned anonymously. The worker needs `create` on secrets
+and `patch` on jobs in the builds namespace (the chart grants both).
+
+```yaml
+source-github:
+  appId: 123456
+  privateKey: { file: /run/secrets/github-app.pem }
+```
 
 ### `builder-buildkit`
 

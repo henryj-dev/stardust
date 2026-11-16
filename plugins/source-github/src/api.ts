@@ -17,9 +17,24 @@ const SHA = /^[0-9a-f]{40}$/;
  */
 export function targetApi(
   apiBaseUrl: string,
-  token: string | undefined,
+  token: string | undefined | ((repo: string) => Promise<string | null>),
   fetchFn: typeof fetch = fetch,
 ): SourceHost["resolveTarget"] {
+  // A token per repository (a GitHub App's): ask for it, then resolve with it.
+  if (typeof token === "function") {
+    return async (repo, target) => {
+      const given = await token(repo);
+      try {
+        return await targetApi(apiBaseUrl, given ?? undefined, fetchFn)(repo, target);
+      } catch (err) {
+        // Without the App, a private repository looks like no repository at all.
+        if (!given && err instanceof TargetError && err.notFound) {
+          throw new TargetError(`${err.message} (if ${repo} is private, install the GitHub App on it)`, true);
+        }
+        throw err;
+      }
+    };
+  }
   const base = apiBaseUrl.replace(/\/+$/, "");
   const get = async (path: string, what: string): Promise<Record<string, unknown>> => {
     const res = await fetchFn(`${base}/repos/${path}`, {

@@ -10,13 +10,15 @@ import { DIGEST_LINE } from "./job.ts";
 
 export interface RunBuildOptions {
   signal: AbortSignal;
+  /** Runs once the Job exists (e.g. to add what it needs, then release it); a failure deletes the Job. */
+  afterCreate?: (job: { name: string; uid: string }) => Promise<void>;
   pollMs?: number;
   /** Lines of log kept in the outcome. */
   tailLines?: number;
 }
 
 interface JobStatus {
-  metadata?: { name?: string };
+  metadata?: { name?: string; uid?: string };
   status?: {
     succeeded?: number;
     failed?: number;
@@ -44,6 +46,14 @@ export async function runBuild(
   const jobName = created.metadata?.name;
   if (!jobName) throw new Error("created Job has no name");
   const jobPath = `/apis/batch/v1/namespaces/${ns}/jobs/${encodeURIComponent(jobName)}`;
+  if (options.afterCreate) {
+    try {
+      await options.afterCreate({ name: jobName, uid: created.metadata?.uid ?? "" });
+    } catch (err) {
+      await kube.request("DELETE", `${jobPath}?propagationPolicy=Background`);
+      throw err;
+    }
+  }
 
   let result: BuildOutcome["result"] | null = null;
   let reason: string | undefined;

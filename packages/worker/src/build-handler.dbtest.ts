@@ -395,3 +395,68 @@ describe("someone else's code", () => {
     assert.ok(!envOf(allowed.created[0]).includes("GITHUB_TOKEN"), "no clone token for someone else's code");
   });
 });
+
+describe("one-time clone tokens", () => {
+  it("asks the source host for our own builds only, and fails a build it refuses", async () => {
+    const asked: string[] = [];
+    const builds: Array<Record<string, unknown>> = [];
+    const source = {
+      resolveTarget: () => Promise.reject(new Error("unused")),
+      async cloneToken(repo: string) {
+        asked.push(repo);
+        if (repo === "acme/demo") throw new Error("the GitHub App is not installed on acme/demo");
+        return "ghs_x";
+      },
+    };
+    const builder = {
+      async build(req: Record<string, unknown>) {
+        builds.push(req);
+        return { result: "success" as const, jobName: "b", digest: DIGEST, logTail: "" };
+      },
+    };
+    const run = async (projectId: string, def: Record<string, unknown>, sha = SHA) => {
+      await startRun(db.sql, {
+        projectId,
+        event: "workflow_dispatch",
+        trigger: "manual",
+        ref: "refs/heads/main",
+        sha,
+        def: def as never,
+        changedPaths: null,
+      });
+      const job = await claimJob(db.sql, "w", 30_000);
+      assert.ok(job);
+      const handler = buildHandler({
+        sql: db.sql,
+        builder: builder as never,
+        deployRepo: new MemoryRepo({}),
+        source,
+        log: quiet,
+        pollMs: 1,
+      });
+      await runJob({ sql: db.sql, workerId: "w", handler, log: quiet, leaseMs: 30_000 }, job);
+      return (
+        await db.sql<
+          { status: string; detail: Record<string, unknown> }[]
+        >`SELECT status, detail FROM jobs WHERE id = ${job.id}`
+      )[0];
+    };
+    const refused = await run("demo", {
+      on: { workflow_dispatch: {} },
+      jobs: { api: { pipeline: "C", component: "api" } },
+    });
+    assert.equal(refused?.status, "failed");
+    assert.match(String(refused?.detail.reason), /not installed/);
+    assert.equal(builds.length, 0, "nothing was built");
+    await run("web", { on: { workflow_dispatch: {} }, jobs: { site: { pipeline: "N", component: "site" } } });
+    assert.equal(builds.at(-1)?.cloneToken, "ghs_x");
+    const before = asked.length;
+    await run(
+      "counter",
+      { on: { workflow_dispatch: {} }, jobs: { app: { pipeline: "M", component: "app" } } },
+      "1".repeat(40),
+    );
+    assert.equal(asked.length, before, "never for someone else's code");
+    assert.equal(builds.at(-1)?.cloneToken, undefined);
+  });
+});

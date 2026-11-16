@@ -81,11 +81,13 @@ else
   bad builds-server-logs-token "the server does not run with its own token for build logs"
 fi
 role="$(awk '/^kind: Role$/{r=1} /^---/{r=0} r' <<<"$out" | awk '/name: t-stardust-builds$/{r=1} /name: t-stardust-build-logs$/{r=0} r')"
-if grep -q "namespace: ci-builds" <<<"$role" && ! grep -qE 'secrets|"\*"|\*' <<<"$role" \
-  && [ "$(grep -c 'resources:' <<<"$role")" = "3" ]; then
+# Secrets: create only (a build's one-time clone token, owned by its Job); never get, list or watch.
+secret_verbs="$(awk '/resources: \["secrets"\]/{getline; print}' <<<"$role" | tr -d ' ')"
+if grep -q "namespace: ci-builds" <<<"$role" && ! grep -qE '"\*"|\*' <<<"$role" \
+  && [ "$(grep -c 'resources:' <<<"$role")" = "4" ] && [ "$secret_verbs" = 'verbs:["create"]' ]; then
   pass builds-role-scoped
 else
-  bad builds-role-scoped "the Role is not limited to jobs, pods and pods/log in the builds namespace"
+  bad builds-role-scoped "the Role is not limited to jobs, pods, pods/log and creating secrets in the builds namespace (secrets: $secret_verbs)"
 fi
 # The server's Role only reads: pods and pod logs, get and list, in the builds namespace.
 logs_role="$(awk '/^# Source: stardust\/templates\/builds-rbac.yaml/{s=1} s' <<<"$out" \
