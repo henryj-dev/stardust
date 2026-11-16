@@ -238,6 +238,12 @@ source-github:
   privateKey: { file: /run/secrets/github-app.pem }
 ```
 
+The project form's **Check access** says how stardust reads the repository
+it names (also `GET /api/v1/source/access?repo=owner/name`, for
+administrators): public, through the App, with the token, or not at all. It
+warns when the App is installed on all of the owner's repositories rather than
+the ones stardust builds.
+
 ### `builder-buildkit`
 
 Builds images in Kubernetes Jobs with rootless BuildKit. Requires

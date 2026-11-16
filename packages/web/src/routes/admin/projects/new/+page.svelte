@@ -10,5 +10,11 @@ let { data, form } = $props();
 
 <main>
   <h1>New project</h1>
-  <ProjectForm fields={form?.fields ?? data.fields} errors={form?.errors ?? []} creating={true} />
+  <ProjectForm
+    fields={form?.fields ?? data.fields}
+    errors={form?.errors ?? []}
+    creating={true}
+    action="?/create"
+    access={form && "access" in form ? form.access : null}
+  />
 </main>

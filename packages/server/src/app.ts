@@ -22,6 +22,7 @@ import {
   PipelineDefError,
   type PullTarget,
   pipelineDefFromComponents,
+  type RepoAccess,
   type ResolvedTarget,
   removeResource,
   scaffoldComponent,
@@ -113,6 +114,8 @@ export interface Services {
   globalSql?: Sql;
   /** The commit a manual run builds, from the source host. */
   resolveTarget: (repo: string, target: PullTarget) => Promise<ResolvedTarget>;
+  /** Whether stardust can read a repository, and how. Without it the access check answers 404. */
+  repoAccess?: (repo: string) => Promise<RepoAccess>;
   /** Live run updates. Without it the events endpoint is not served. */
   events?: RunEvents;
   /** Build logs from the cluster. Without it the log endpoint says logs are not enabled. */
@@ -936,6 +939,25 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
 
   // Writes a minimal set of manifests into a component's empty deploy
   // directory, so its first delivery has an image to point at.
+  // Whether stardust can read a repository, before a project names it: public,
+  // through the GitHub App (and how widely it is installed), with the token, or not at all.
+  app.get("/api/v1/source/access", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const repo = c.req.query("repo") ?? "";
+    // Each half a GitHub name, never "." or ".." (which would walk the API's paths).
+    const halves = repo.split("/");
+    if (halves.length !== 2 || halves.some((h) => !/^[A-Za-z0-9_.-]+$/.test(h) || /^\.+$/.test(h))) {
+      return c.json({ error: "repo must be owner/name" }, 400);
+    }
+    if (!services.repoAccess) return c.json({ error: "the source host cannot say who reads a repository" }, 404);
+    try {
+      return c.json({ repo, ...(await services.repoAccess(repo)) });
+    } catch (err) {
+      return c.json({ error: `source host: ${(err as Error).message}` }, 502);
+    }
+  });
+
   app.post("/api/v1/projects/:id/components/:name/scaffold", async (c) => {
     const denied = await deny(c, "admin");
     if (denied) return denied;

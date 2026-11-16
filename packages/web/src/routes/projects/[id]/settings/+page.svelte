@@ -16,6 +16,7 @@ let { data, form } = $props();
     errors={(form && "errors" in form ? form.errors : undefined) ?? []}
     creating={false}
     action="?/save"
+    access={form && "access" in form ? form.access : data.access}
   />
 
   <h2>Delete this project</h2>

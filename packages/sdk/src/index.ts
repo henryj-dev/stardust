@@ -18,6 +18,7 @@ export type {
   ProjectListItem,
   ProjectView,
   PullTarget,
+  RepoAccess,
   RollbackResult,
   RunSummary,
   RunView,

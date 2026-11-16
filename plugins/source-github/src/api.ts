@@ -1,4 +1,4 @@
-import { type PullTarget, type ResolvedTarget, type SourceHost, TargetError } from "@stardust/core";
+import { type PullTarget, type RepoAccess, type ResolvedTarget, type SourceHost, TargetError } from "@stardust/core";
 
 const headers = (token: string | undefined): Record<string, string> => ({
   accept: "application/vnd.github+json",
@@ -93,5 +93,28 @@ export function targetApi(
     const branch = "branch" in target ? target.branch : await defaultBranch(repo);
     const what = `branch ${branch}`;
     return { ref: `refs/heads/${branch}`, sha: await branchHead(repo, branch, what) };
+  };
+}
+
+/**
+ * Whether a repository is readable with this token (or anonymously, without
+ * one). GitHub answers 404 for a private repository the caller cannot read,
+ * the same as for none at all, so both are `none`.
+ */
+export function repoAccess(
+  apiBaseUrl: string,
+  token: string | undefined,
+  fetchFn: typeof fetch = fetch,
+): (repo: string) => Promise<RepoAccess> {
+  const base = apiBaseUrl.replace(/\/+$/, "");
+  return async (repo) => {
+    const res = await fetchFn(`${base}/repos/${repo}`, {
+      headers: headers(token),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (res.status === 404) return { readable: "none" };
+    if (!res.ok) throw new Error(`the source host answered ${res.status} for ${repo}`);
+    const { private: hidden } = (await res.json()) as { private?: boolean };
+    return { readable: hidden === false ? "public" : "token" };
   };
 }

@@ -10,6 +10,7 @@
  * on is refused, rather than cloned anonymously and failing later.
  */
 import { createSign } from "node:crypto";
+import type { RepoAccess } from "@stardust/core";
 
 export interface GitHubAppOptions {
   appId: number;
@@ -79,6 +80,18 @@ export function githubApp(options: GitHubAppOptions) {
 
   return {
     tokenFor,
+    /** Whether the App reads this repository (and how widely it is installed), else whether it is public. */
+    async access(repo: string): Promise<RepoAccess> {
+      const found = await call(`/repos/${repo}/installation`, { auth: jwt() });
+      if (found.ok) {
+        const { repository_selection } = (await found.json()) as { repository_selection?: string };
+        return { readable: "app", installation: repository_selection === "all" ? "all" : "selected" };
+      }
+      if (found.status !== 404) {
+        throw new Error(`GitHub answered ${found.status} looking for the App's installation on ${repo}`);
+      }
+      return { readable: (await isPublic(repo)) ? "public" : "none" };
+    },
     /** What a build clones with: a token for the repository, none for a public one; never anonymous for a private one. */
     async cloneToken(repo: string): Promise<string | null> {
       const token = await tokenFor(repo);

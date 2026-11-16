@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { TargetError } from "@stardust/core";
-import { targetApi } from "./api.ts";
+import { repoAccess, targetApi } from "./api.ts";
 
 const HEAD = "f".repeat(40);
 const TAG = "c".repeat(40);
@@ -99,4 +99,24 @@ it("resolves a branch on a host without `commits/heads/` (Gitea) through `branch
     down.seen.some((s) => s.path.startsWith("acme/app/branches/")),
     false,
   );
+});
+
+it("says whether a token (or no token) reads a repository", async () => {
+  const seen: string[] = [];
+  const fake = (async (input: string | URL | Request, init?: RequestInit) => {
+    const p = new URL(String(input)).pathname;
+    seen.push(new Headers(init?.headers).get("authorization") ?? "");
+    if (p === "/repos/acme/open") return Response.json({ private: false });
+    if (p === "/repos/acme/closed") return Response.json({ private: true });
+    if (p === "/repos/acme/down") return new Response("{}", { status: 500 });
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  const withToken = repoAccess("https://api.github.test/", "t0ken", fake);
+  assert.deepEqual(await withToken("acme/open"), { readable: "public" });
+  assert.deepEqual(await withToken("acme/closed"), { readable: "token" });
+  assert.deepEqual(await withToken("acme/gone"), { readable: "none" });
+  await assert.rejects(withToken("acme/down"), /500/);
+  assert.ok(seen.every((a) => a === "Bearer t0ken"));
+  assert.deepEqual(await repoAccess("https://api.github.test", undefined, fake)("acme/open"), { readable: "public" });
+  assert.equal(seen.at(-1), "");
 });

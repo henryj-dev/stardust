@@ -32,4 +32,22 @@ export interface SourceHost {
    * it cannot read. Absent when the host gives none (a static clone secret is used).
    */
   cloneToken?(repo: string): Promise<string | null>;
+  /** Whether stardust can read this repository, and how. Absent when the host cannot say. */
+  access?(repo: string): Promise<RepoAccess>;
+}
+
+/**
+ * How stardust reads a repository:
+ * - `public`: anyone can, so builds clone it without a token;
+ * - `app`: the GitHub App is installed on it;
+ * - `token`: the configured token reads it;
+ * - `none`: it cannot — private and not installed on, or no such repository.
+ */
+export interface RepoAccess {
+  readable: "public" | "app" | "token" | "none";
+  /**
+   * With the App: whether its installation covers all of the owner's
+   * repositories, or only the ones chosen. With `all`, a leaked key reads every one.
+   */
+  installation?: "all" | "selected";
 }

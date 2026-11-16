@@ -1,5 +1,5 @@
 import { definePlugin } from "@stardust/core";
-import { targetApi } from "./api.ts";
+import { repoAccess, targetApi } from "./api.ts";
 import { githubApp } from "./app.ts";
 
 const isSecretRef = (value: unknown): boolean => {
@@ -45,11 +45,17 @@ export const plugin = definePlugin({
           privateKey: await resolveSecret(config.privateKey, `${at}.privateKey`),
           apiBaseUrl,
         });
-        return { source: { resolveTarget: targetApi(apiBaseUrl, app.tokenFor), cloneToken: app.cloneToken } };
+        return {
+          source: {
+            resolveTarget: targetApi(apiBaseUrl, app.tokenFor),
+            cloneToken: app.cloneToken,
+            access: app.access,
+          },
+        };
       }
       // Optional: public repositories need no token.
       const token = config.token === undefined ? undefined : await resolveSecret(config.token, `${at}.token`);
-      return { source: { resolveTarget: targetApi(apiBaseUrl, token) } };
+      return { source: { resolveTarget: targetApi(apiBaseUrl, token), access: repoAccess(apiBaseUrl, token) } };
     },
   },
   validateConfig(section) {
@@ -75,4 +81,4 @@ export const plugin = definePlugin({
   },
 });
 
-export { targetApi } from "./api.ts";
+export { repoAccess, targetApi } from "./api.ts";
