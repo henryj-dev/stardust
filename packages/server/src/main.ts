@@ -30,20 +30,30 @@ let config: StardustConfig;
 let ports: Partial<Ports>;
 let features: Feature[];
 let sql: Sql;
+let globalSql: Sql;
 try {
   config = await loadConfig(configPath);
   sql = connect(config.database.url, { max: 8 });
+  // One database until there are several regions: then the global one is its own (see the plan's P8).
+  globalSql = sql;
   const plugins = createPluginRegistry(bundledPlugins).resolve(config.plugins);
   ports = await assemble({
     plugins,
     sections: config.plugins,
     want: ["source", "identity", "builder", "deployRepo", "cipher"],
-    platform: { database: databasePort(sql), sagas: sagaStore(sql), guards: guardStore(sql), ...kube() },
+    platform: {
+      database: databasePort(sql),
+      globalDatabase: databasePort(globalSql),
+      sagas: sagaStore(sql),
+      guards: guardStore(sql, globalSql),
+      ...kube(),
+    },
     resolveSecret: resolveSecretRef,
     log,
     publicUrl: config.server.publicUrl,
+    region: config.region,
   });
-  features = buildFeatures(plugins, config.plugins, ports, log);
+  features = buildFeatures(plugins, config.plugins, ports, log, config.region);
 } catch (err) {
   console.error((err as Error).message);
   process.exit(1);
@@ -61,7 +71,9 @@ function kube(): Partial<Ports> {
 }
 
 await migrate(sql);
-for (const feature of features) await migratePlugin(sql, feature.plugin, await feature.migrations());
+for (const feature of features) {
+  await migratePlugin({ regional: sql, global: globalSql }, feature.plugin, await feature.migrations());
+}
 
 if (config.server.bootstrapAdmin) {
   const { username, password } = config.server.bootstrapAdmin;
@@ -77,6 +89,7 @@ if (ports.source) {
     log,
     events,
     sql,
+    globalSql,
     resolveTarget: (repo, target) => (ports.source as NonNullable<Ports["source"]>).resolveTarget(repo, target),
     ...(ports.identity ? { oidc: ports.identity } : {}),
     features,

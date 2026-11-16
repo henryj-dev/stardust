@@ -35,6 +35,7 @@ export {
 export { MIGRATIONS_DIR, migrate } from "./migrate.ts";
 export type { ExternalIdentity, IdentitySignIn, PendingLoginRow } from "./oidc.ts";
 export { savePendingLogin, signInWithIdentity, takePendingLogin, usernameFrom } from "./oidc.ts";
+export type { Databases } from "./plugins.ts";
 export { claimScheduleRun, databasePort, finishScheduleRun, migratePlugin } from "./plugins.ts";
 export type { Component, Project, RunSummary, RunView } from "./projects.ts";
 export {
@@ -51,4 +52,6 @@ export type { ClaimedJob, JobResult } from "./queue.ts";
 export { claimJob, finishJob, reclaimExpired, renewLease } from "./queue.ts";
 export type { StartRun } from "./runs.ts";
 export { advanceRun, startRun } from "./runs.ts";
+export type { CoreTableScope } from "./scopes.ts";
+export { TABLE_SCOPES } from "./scopes.ts";
 export { guardStore, purgeGuards, sagaStore } from "./stores.ts";

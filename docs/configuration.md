@@ -10,6 +10,9 @@ process with an invalid configuration does not start.
 ```yaml
 version: 1
 
+# The region this installation serves (lower-case, required, no default).
+region: eu-west
+
 server:
   host: 0.0.0.0
   port: 8080

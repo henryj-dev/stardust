@@ -4,6 +4,7 @@ import { ConfigError, type LoadConfigOptions, parseConfig } from "./load.ts";
 
 const VALID = `
 version: 1
+region: test
 server:
   publicUrl: https://stardust.example.com
 database:
@@ -100,6 +101,20 @@ describe("parseConfig", () => {
       issues.some((i) => i.startsWith("server.publicUrl:")),
       issues.join("\n"),
     );
+  });
+
+  it("requires a region, written as a lower-case name", async () => {
+    const missing = await issuesOf(VALID.replace("region: test\n", ""));
+    assert.ok(
+      missing.some((i) => i.startsWith("region:")),
+      missing.join("\n"),
+    );
+    const bad = await issuesOf(VALID.replace("region: test", "region: EU West"));
+    assert.ok(
+      bad.some((i) => i.startsWith("region:") && i.includes("lower-case name")),
+      bad.join("\n"),
+    );
+    assert.equal((await parseConfig(VALID, "test.yaml", { env })).region, "test");
   });
 
   it("rejects an unsupported version", async () => {

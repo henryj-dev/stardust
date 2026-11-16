@@ -22,9 +22,12 @@ let config: StardustConfig;
 let ports: Partial<Ports>;
 let features: Feature[];
 let sql: Sql;
+let globalSql: Sql;
 try {
   config = await loadConfig(configPath);
   sql = connect(config.database.url, { max: 4 });
+  // One database until there are several regions: then the global one is its own (see the plan's P8).
+  globalSql = sql;
   const plugins = createPluginRegistry(bundledPlugins).resolve(config.plugins);
   ports = await assemble({
     plugins,
@@ -33,22 +36,26 @@ try {
     // Builds run as Kubernetes Jobs: a worker that builds runs in the cluster.
     platform: {
       database: databasePort(sql),
+      globalDatabase: databasePort(globalSql),
       sagas: sagaStore(sql),
-      guards: guardStore(sql),
+      guards: guardStore(sql, globalSql),
       ...(config.plugins["builder-buildkit"] && config.plugins["gitops-git"] ? { kube: inClusterClient() } : {}),
     },
     resolveSecret: resolveSecretRef,
     log,
     publicUrl: config.server.publicUrl,
+    region: config.region,
   });
-  features = buildFeatures(plugins, config.plugins, ports, log);
+  features = buildFeatures(plugins, config.plugins, ports, log, config.region);
 } catch (err) {
   console.error((err as Error).message);
   process.exit(1);
 }
 
 await migrate(sql);
-for (const feature of features) await migratePlugin(sql, feature.plugin, await feature.migrations());
+for (const feature of features) {
+  await migratePlugin({ regional: sql, global: globalSql }, feature.plugin, await feature.migrations());
+}
 
 let handler: JobHandler;
 if (ports.builder && ports.deployRepo) {
@@ -79,7 +86,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 
 const workerId = `${hostname()}:${process.pid}`;
 console.log(`stardust worker started (${workerId})`);
-startHousekeeping({ sql, log, auditRetentionDays: config.audit.retentionDays, signal: stop.signal });
+startHousekeeping({ sql, globalSql, log, auditRetentionDays: config.audit.retentionDays, signal: stop.signal });
 startSchedules({ sql, features, holder: workerId, log, signal: stop.signal });
 await runWorker({ sql, workerId, handler, log, signal: stop.signal });
 await sql.end({ timeout: 5 });

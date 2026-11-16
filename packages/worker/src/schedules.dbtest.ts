@@ -36,7 +36,13 @@ const ticker = definePlugin({
 });
 
 const featuresWith = (sections: Record<string, unknown>) =>
-  buildFeatures(createPluginRegistry([ticker]).resolve(sections), sections, { database: databasePort(db.sql) }, quiet);
+  buildFeatures(
+    createPluginRegistry([ticker]).resolve(sections),
+    sections,
+    { database: databasePort(db.sql) },
+    quiet,
+    "test",
+  );
 const signal = new AbortController().signal;
 
 describe("schedules", () => {

@@ -3,6 +3,9 @@
 # variable ({ env: NAME }) or a mounted file ({ file: /path }).
 version: 1
 
+# The region this installation serves: one installation, one cluster, one region.
+region: example
+
 server:
   host: 0.0.0.0
   port: 8080

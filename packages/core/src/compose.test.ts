@@ -52,6 +52,7 @@ const run = (plugins: Plugin[], want: PortName[], more: Partial<Parameters<typeo
     resolveSecret: async () => "secret",
     log,
     publicUrl: "https://stardust.example.com/",
+    region: "test",
     ...more,
   });
 

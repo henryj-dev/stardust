@@ -94,7 +94,7 @@ describe("migrations", () => {
       CREATE INDEX runtime_pods_idx ON runtime_pods (project);
       ALTER TABLE runtime_pods ADD COLUMN seen timestamptz;
       INSERT INTO runtime_pods (id) VALUES ('x');`;
-    assert.deepEqual(migrationProblems("runtime", [{ name: "0001_pods.sql", sql: own }]), []);
+    assert.deepEqual(migrationProblems("runtime", [{ name: "0001_pods.sql", scope: "regional", sql: own }]), []);
     for (const sql of [
       "DROP TABLE users;",
       "ALTER TABLE projects ADD COLUMN x int;",
@@ -104,19 +104,26 @@ describe("migrations", () => {
       "CREATE INDEX evil ON users (username);",
       "CREATE TABLE public.runtime_x (id int);",
     ]) {
-      assert.equal(migrationProblems("runtime", [{ name: "0001_x.sql", sql }]).length, 1, sql);
+      assert.equal(migrationProblems("runtime", [{ name: "0001_x.sql", scope: "regional", sql }]).length, 1, sql);
     }
+  });
+
+  it("say which database they run in", () => {
+    const sql = "CREATE TABLE runtime_a (id int);";
+    assert.deepEqual(migrationProblems("runtime", [{ name: "0001_a.sql", scope: "everywhere" as never, sql }]), [
+      'migration "0001_a.sql" must say its scope: global or regional',
+    ]);
   });
 
   it("are named NNNN_<words>.sql, once each", () => {
     const sql = "CREATE TABLE runtime_a (id int);";
-    assert.deepEqual(migrationProblems("runtime", [{ name: "first.sql", sql }]), [
+    assert.deepEqual(migrationProblems("runtime", [{ name: "first.sql", scope: "regional", sql }]), [
       'migration "first.sql" must be named NNNN_<words>.sql',
     ]);
     assert.deepEqual(
       migrationProblems("runtime", [
-        { name: "0001_a.sql", sql },
-        { name: "0001_a.sql", sql },
+        { name: "0001_a.sql", scope: "regional", sql },
+        { name: "0001_a.sql", scope: "regional", sql },
       ]),
       ['migration "0001_a.sql" is declared twice'],
     );

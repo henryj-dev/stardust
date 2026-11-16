@@ -23,7 +23,11 @@ const notes = definePlugin({
   ],
   capabilities: ["notes.write"],
   migrations: async () => [
-    { name: "0001_notes.sql", sql: "CREATE TABLE notes_items (id serial PRIMARY KEY, text text NOT NULL);" },
+    {
+      name: "0001_notes.sql",
+      scope: "regional",
+      sql: "CREATE TABLE notes_items (id serial PRIMARY KEY, text text NOT NULL);",
+    },
   ],
   routes: ({ ports }) => {
     const database = ports.database;
@@ -79,9 +83,9 @@ after(async () => db.close());
 /** The server as main.ts builds it, with `plugins:` of stardust.yaml as given. */
 async function serverWith(sections: Record<string, unknown>) {
   const plugins = createPluginRegistry([notes]).resolve(sections);
-  const ports = { database: databasePort(db.sql) };
-  const features: Feature[] = buildFeatures(plugins, sections, ports, quiet);
-  for (const f of features) await migratePlugin(db.sql, f.plugin, await f.migrations());
+  const ports = { database: databasePort(db.sql), globalDatabase: databasePort(db.sql) };
+  const features: Feature[] = buildFeatures(plugins, sections, ports, quiet, "test");
+  for (const f of features) await migratePlugin({ regional: db.sql, global: db.sql }, f.plugin, await f.migrations());
   return createApp(
     { version: "test" },
     { sql: db.sql, resolveTarget: async () => ({ ref: "", sha: "" }), features, log: quiet },
@@ -147,7 +151,9 @@ describe("a plugin's routes and tables", () => {
 
   it("refuses a migration that touches a table outside the plugin's names", async () => {
     await assert.rejects(
-      migratePlugin(db.sql, "notes", [{ name: "0002_evil.sql", sql: "DROP TABLE users;" }]),
+      migratePlugin({ regional: db.sql, global: db.sql }, "notes", [
+        { name: "0002_evil.sql", scope: "global", sql: "DROP TABLE users;" },
+      ]),
       /notes may only use tables named notes_\*/,
     );
     const [users] = await db.sql`SELECT to_regclass('users') AS t`;
