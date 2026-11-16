@@ -49,3 +49,72 @@ it("signs in and checks sessions against the global database, and refuses when i
   assert.notEqual(cut.status, 200);
   assert.ok(cut.status >= 500, `expected a refusal, got ${cut.status}`);
 });
+
+it("changes a project only in the region that owns it, and names the owner elsewhere", async () => {
+  const one = await createTestDb();
+  try {
+    await ensureBootstrapAdmin(one.sql, "admin", PASSWORD);
+    const r = await signIn(one.sql, "admin", PASSWORD);
+    if (!r.ok) throw new Error("admin");
+    const auth = { authorization: `Bearer ${r.token}`, "content-type": "application/json" };
+    const regionApp = (region: string) =>
+      createApp(
+        { version: "test" },
+        { sql: one.sql, region, resolveTarget: async () => ({ ref: "refs/heads/main", sha: "a".repeat(40) }) },
+      );
+    const ams = regionApp("dev-ams");
+    const fra = regionApp("prod-fra");
+    const put = (app: ReturnType<typeof regionApp>, body: unknown) =>
+      app.request("/api/v1/projects/shop", { method: "PUT", headers: auth, body: JSON.stringify(body) });
+    assert.equal((await put(ams, { githubRepo: "acme/shop", components: [] })).status, 200);
+    const [row] = await one.sql<{ metadata: { region?: string } }[]>`SELECT metadata FROM projects WHERE id = 'shop'`;
+    assert.equal(row?.metadata.region, "dev-ams", "made in dev-ams, owned by it");
+
+    const refused = await put(fra, { githubRepo: "acme/shop", components: [], metadata: {} });
+    assert.equal(refused.status, 409);
+    assert.deepEqual(await refused.json(), {
+      error: "project shop belongs to region dev-ams: change it there",
+      region: "dev-ams",
+    });
+    const run = await fra.request("/api/v1/projects/shop/runs", { method: "POST", headers: auth, body: "{}" });
+    assert.equal(run.status, 409);
+    const plugin = await fra.request("/api/v1/plugins/runtime/projects/shop/restart", {
+      method: "POST",
+      headers: auth,
+      body: "{}",
+    });
+    assert.equal(plugin.status, 409, "project-scoped plugin routes too");
+    assert.equal((await fra.request("/api/v1/projects/shop", { headers: auth })).status, 200, "reading is anywhere");
+
+    assert.equal((await put(ams, { githubRepo: "acme/shop", components: [], metadata: { note: "x" } })).status, 200);
+    const [kept] = await one.sql<
+      { metadata: { region?: string; note?: string } }[]
+    >`SELECT metadata FROM projects WHERE id = 'shop'`;
+    assert.deepEqual(kept?.metadata, { note: "x", region: "dev-ams" }, "an edit keeps the owner");
+  } finally {
+    await one.close();
+  }
+});
+
+it("gives a region copies of the global plugin tables, and the global database only those", async () => {
+  const { migratePlugin } = await import("@stardust/db");
+  const regionalDb = await createTestDb();
+  const globalDb = await createTestDb();
+  try {
+    await migratePlugin({ regional: regionalDb.sql, global: globalDb.sql }, "probe", [
+      { name: "0001_g.sql", scope: "global", sql: "CREATE TABLE probe_shared (id int)" },
+      { name: "0002_r.sql", scope: "regional", sql: "CREATE TABLE probe_here (id int)" },
+    ]);
+    const tables = async (db: TestDb) =>
+      (
+        await db.sql<
+          { t: string }[]
+        >`SELECT table_name AS t FROM information_schema.tables WHERE table_name LIKE 'probe_%' AND table_schema = current_schema() ORDER BY 1`
+      ).map((r) => r.t);
+    assert.deepEqual(await tables(globalDb), ["probe_shared"]);
+    assert.deepEqual(await tables(regionalDb), ["probe_here", "probe_shared"]);
+  } finally {
+    await regionalDb.close();
+    await globalDb.close();
+  }
+});

@@ -51,6 +51,10 @@ export async function parseConfig(
 
   const issues: ConfigIssue[] = [];
   const databaseUrl = await resolveSecret(raw.database.url, "database.url", env, readSecretFile, issues);
+  const globalDatabaseUrl =
+    raw.database.globalUrl === undefined
+      ? undefined
+      : await resolveSecret(raw.database.globalUrl, "database.globalUrl", env, readSecretFile, issues);
   const bootstrapPassword = raw.server.bootstrapAdmin
     ? await resolveSecret(
         raw.server.bootstrapAdmin.password,
@@ -77,7 +81,7 @@ export async function parseConfig(
       bootstrapAdmin && bootstrapPassword !== undefined
         ? { ...server, bootstrapAdmin: { username: bootstrapAdmin.username, password: bootstrapPassword } }
         : server,
-    database: { url: databaseUrl },
+    database: { url: databaseUrl, ...(globalDatabaseUrl ? { globalUrl: globalDatabaseUrl } : {}) },
     auth: {
       ...raw.auth,
       local: {

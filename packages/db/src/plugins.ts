@@ -28,8 +28,10 @@ export async function migratePlugin(
   const targets: Sql[] =
     databases.global === databases.regional ? [databases.regional] : [databases.global, databases.regional];
   for (const sql of targets) {
+    // The global database has the global tables; a region has its own tables and
+    // copies of the global ones (kept by replication), so it takes every migration.
     const mine = ordered.filter((m) =>
-      targets.length === 1 ? true : sql === databases.global ? m.scope === "global" : m.scope === "regional",
+      targets.length === 1 || sql !== databases.global ? true : m.scope === "global",
     );
     if (mine.length === 0) continue;
     applied.push(

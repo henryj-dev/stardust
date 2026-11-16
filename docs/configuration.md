@@ -25,6 +25,7 @@ server:
 
 database:
   url: { env: DATABASE_URL }
+  globalUrl: { env: GLOBAL_DATABASE_URL } # optional: see "Several regions"
 
 audit:
   retentionDays: 365 # optional; see "Audit log"
@@ -35,6 +36,28 @@ plugins:
   builder-buildkit: { ... }
   gitops-git: { ... }
 ```
+
+## Several regions
+
+Each region (a cluster, a private network) runs its own stardust with its own
+`region` and its own database for what happens there: runs, jobs, the
+features' regional tables. Accounts, roles, projects and the audit log live
+in one primary every region shares, `database.globalUrl`; left out, it is the
+same database, which is how one region works.
+
+- Every decision about access (sign-in, sessions, roles, tokens) reads the
+  primary. When a region cannot reach it, such requests are refused, never
+  allowed.
+- Every region's database has the whole schema: the global tables there are
+  copies, kept by logical replication from the primary (list the global
+  tables in a publication, not all tables, and leave `schema_migrations`
+  out). stardust writes global tables to the primary only.
+- A project belongs to the region it was made in (`metadata.region`). Other
+  regions show it but refuse to change it, answering 409 with the owner's
+  name; a project from before regions can be changed anywhere.
+- Features that act on shared things once (cloud instances, say) are turned
+  on in one installation only: a plugin's section in `stardust.yaml` decides,
+  so the others simply do not have those routes.
 
 ## Accounts and access
 

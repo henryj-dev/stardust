@@ -31,8 +31,14 @@ export const configSchema = z.strictObject({
       })
       .optional(),
   }),
+  /**
+   * `url`: this region's database (runs, jobs, what happened here).
+   * `globalUrl`: the one primary every region shares for accounts, roles and
+   * the audit log. Left out, it is the same database (one region).
+   */
   database: z.strictObject({
     url: secretRef,
+    globalUrl: secretRef.optional(),
   }),
   /**
    * Signing in. Local accounts (username and password) are on unless turned
@@ -91,5 +97,5 @@ export type StardustConfig = Omit<RawConfig, "database" | "server" | "auth"> & {
     local: Omit<RawConfig["auth"]["local"], "totpKey"> & { totpKey?: string };
   };
   server: Omit<RawConfig["server"], "bootstrapAdmin"> & { bootstrapAdmin?: { username: string; password: string } };
-  database: { url: string };
+  database: { url: string; globalUrl?: string };
 };

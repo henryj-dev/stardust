@@ -35,8 +35,8 @@ let globalSql: Sql;
 try {
   config = await loadConfig(configPath);
   sql = connect(config.database.url, { max: 4 });
-  // One database until there are several regions: then the global one is its own (see the plan's P8).
-  globalSql = sql;
+  // The global primary when there are several regions; otherwise this same database.
+  globalSql = config.database.globalUrl ? connect(config.database.globalUrl, { max: 4 }) : sql;
   const plugins = createPluginRegistry(bundledPlugins).resolve(config.plugins);
   ports = await assemble({
     plugins,
@@ -63,6 +63,8 @@ try {
 }
 
 await migrate(sql);
+// The global primary has the whole schema too; each region keeps copies of the global tables (replicated).
+if (globalSql !== sql) await migrate(globalSql);
 for (const feature of features) {
   await migratePlugin({ regional: sql, global: globalSql }, feature.plugin, await feature.migrations());
 }
