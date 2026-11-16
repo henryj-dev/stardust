@@ -384,3 +384,33 @@ describe("restore checks and deleting", () => {
     assert.equal(event?.target, "orders");
   });
 });
+
+describe("a process without the cipher (the worker)", () => {
+  it("assembles and runs the checks schedule, and refuses only what seals a password", async () => {
+    // Assembly refuses a plugin whose requires are missing: the worker has no cipher.
+    assert.ok(!plugin.requires?.includes("cipher"), "the cipher is not required to start");
+    const { cipher: _held, ...withoutCipher } = feature.context.ports;
+    const sections = { databases: feature.context.config };
+    const [bare] = buildFeatures(
+      createPluginRegistry([plugin]).resolve(sections),
+      sections,
+      withoutCipher,
+      quiet,
+      "test",
+    );
+    assert.ok(bare, "the feature is there without a cipher");
+    for (const s of bare.schedules) await s.run({ ...bare.context, signal: new AbortController().signal });
+    const worker = createApp(
+      { version: "t" },
+      { sql: db.sql, resolveTarget: async () => ({ ref: "", sha: "" }), features: [bare], log: quiet },
+    );
+    const res = await worker.request("/api/v1/plugins/databases/databases", {
+      method: "POST",
+      headers: admin,
+      body: JSON.stringify({ name: "nocipher" }),
+    });
+    assert.equal(res.status, 503);
+    assert.match(((await res.json()) as { error: string }).error, /cipher/);
+    assert.equal((await worker.request("/api/v1/plugins/databases/databases", { headers: admin })).status, 200);
+  });
+});
