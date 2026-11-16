@@ -159,6 +159,18 @@ jobs:
       # The backup and restore-check scripts, run for real: dump, encrypt, restore, compare fingerprints.
       - run: pnpm run test:docker
 
+  broker:
+    name: vultr broker (image)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The test stage runs the broker's tests in the image; then the runtime stage builds.
+      - run: docker build -f broker/vultr/Dockerfile --target test .
+      - run: docker build -f broker/vultr/Dockerfile -t vultr-broker:ci .
+
   agent:
     name: agent (go)
     runs-on: ubuntu-24.04

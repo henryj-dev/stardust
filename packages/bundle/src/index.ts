@@ -5,6 +5,7 @@
  */
 import type { Plugin } from "@stardust/core";
 import { plugin as builderBuildkit } from "@stardust/plugin-builder-buildkit";
+import { plugin as cloudVultr } from "@stardust/plugin-cloud-vultr";
 import { plugin as databases } from "@stardust/plugin-databases";
 import { plugin as dbStatefulset } from "@stardust/plugin-db-statefulset";
 import { plugin as dnsCloudflare } from "@stardust/plugin-dns-cloudflare";
@@ -23,6 +24,7 @@ import { plugin as targetCfWorkers } from "@stardust/plugin-target-cf-workers";
 
 export const bundledPlugins: readonly Plugin[] = [
   builderBuildkit,
+  cloudVultr,
   databases,
   dbStatefulset,
   dnsCloudflare,

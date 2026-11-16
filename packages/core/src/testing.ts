@@ -5,12 +5,20 @@
 import { createHash } from "node:crypto";
 import type { CommitResult, PendingCommit, RepoFile, RepoIO } from "./ports/repo.ts";
 
+export { computeProviderContract } from "./ports/testing/compute.contract.ts";
 export { databaseProviderContract } from "./ports/testing/databases.contract.ts";
 export { dnsProviderContract } from "./ports/testing/dns.contract.ts";
 export type { LogSeed } from "./ports/testing/logs.contract.ts";
 export { logSourceContract } from "./ports/testing/logs.contract.ts";
 export { objectStoreContract } from "./ports/testing/store.contract.ts";
 
+import {
+  type ComputeCatalog,
+  type ComputeInstance,
+  type ComputeProvider,
+  type CreateInstanceInput,
+  createInstanceProblems,
+} from "./ports/compute.ts";
 import { type DnsProvider, type DnsRecord, dnsRecordProblems, normalizeDnsName } from "./ports/dns.ts";
 import type { ObjectStore } from "./ports/store.ts";
 
@@ -198,5 +206,74 @@ export class MemoryRepo implements RepoIO {
     this.commits.push({ sha, files });
     this.log.push(`commit:${message}`);
     return { status: "committed", sha };
+  }
+}
+
+/** Instances in memory, with a small fixed catalog; it keeps the compute contract. */
+export class MemoryCompute implements ComputeProvider {
+  readonly capabilities = { resize: true, reverseDns: true, console: false };
+  readonly instances = new Map<string, ComputeInstance & { userData: string | null }>();
+  readonly reverse = new Map<string, string>();
+  private next = 1;
+  async catalog(): Promise<ComputeCatalog> {
+    return {
+      regions: [{ id: "ams", city: "Amsterdam", country: "NL" }],
+      plans: [
+        { id: "small", vcpus: 1, memoryMb: 1024, diskGb: 25, monthlyCost: 5, regions: ["ams"] },
+        { id: "large", vcpus: 4, memoryMb: 8192, diskGb: 160, monthlyCost: 40, regions: ["ams"] },
+      ],
+      images: [{ id: "rocky-10", name: "Rocky Linux 10" }],
+      sshKeys: [{ id: "k1", name: "ops" }],
+      networks: [{ id: "n1", name: "private", region: "ams", subnet: "10.10.0.0/20" }],
+    };
+  }
+  async list(): Promise<ComputeInstance[]> {
+    return [...this.instances.values()].map(({ userData: _u, ...i }) => ({ ...i }));
+  }
+  async get(id: string): Promise<ComputeInstance | null> {
+    const found = this.instances.get(id);
+    if (!found) return null;
+    const { userData: _u, ...i } = found;
+    return { ...i };
+  }
+  async create(input: CreateInstanceInput): Promise<ComputeInstance> {
+    const problems = createInstanceProblems(input);
+    if (problems.length > 0) throw new Error(problems.join("; "));
+    const id = `00000000-0000-4000-8000-${String(this.next++).padStart(12, "0")}`;
+    const made = {
+      id,
+      label: input.label,
+      hostname: input.hostname,
+      region: input.region,
+      plan: input.plan,
+      os: "Rocky Linux 10",
+      state: "pending" as const,
+      mainIp: `192.0.2.${this.next}`,
+      ipv6: null,
+      internalIp: input.networks?.length ? `10.10.0.${this.next}` : null,
+      tags: input.tags ?? [],
+      createdAt: new Date().toISOString(),
+      userData: input.userData ?? null,
+    };
+    this.instances.set(id, made);
+    const { userData: _u, ...i } = made;
+    return { ...i };
+  }
+  async resize(id: string, plan: string): Promise<void> {
+    const i = this.instances.get(id);
+    if (!i) throw new Error("no such instance");
+    i.plan = plan;
+  }
+  async clearUserData(id: string, note: string): Promise<void> {
+    const i = this.instances.get(id);
+    if (!i) throw new Error("no such instance");
+    i.userData = `# cleared: ${note}`;
+  }
+  async setReverseDns(_id: string, ip: string, name: string): Promise<void> {
+    this.reverse.set(ip, name);
+  }
+  async destroy(id: string, approval: string): Promise<void> {
+    if (!approval) throw new Error("deleting needs an approval");
+    this.instances.delete(id);
   }
 }

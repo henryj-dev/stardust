@@ -185,6 +185,18 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  broker/vultr:
+    dependencies:
+      '@hono/node-server':
+        specifier: ^2.1.5
+        version: 2.1.5(hono@4.13.14)
+      hono:
+        specifier: ^4.13.14
+        version: 4.13.14
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
+
   charts/stardust: {}
 
   packages/bundle:
@@ -195,6 +207,9 @@ importers:
       '@stardust/plugin-builder-buildkit':
         specifier: workspace:*
         version: link:../../plugins/builder-buildkit
+      '@stardust/plugin-cloud-vultr':
+        specifier: workspace:*
+        version: link:../../plugins/cloud-vultr
       '@stardust/plugin-databases':
         specifier: workspace:*
         version: link:../../plugins/databases
@@ -379,6 +394,12 @@ importers:
         version: link:../../plugins/target-cf-workers
 
   plugins/builder-buildkit:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  plugins/cloud-vultr:
     dependencies:
       '@stardust/core':
         specifier: workspace:*
