@@ -195,7 +195,7 @@ export function deployJob(req: DeployRequest, options: WorkersOptions): Record<s
                 { name: "GIT_USERNAME", value: options.cloneUsername ?? "x-access-token" },
                 { name: "REPO", value: req.repo },
                 { name: "SHA", value: req.sha },
-                ...(options.cloneSecret
+                ...(options.cloneSecret && req.trusted !== false
                   ? [{ name: "GITHUB_TOKEN", valueFrom: { secretKeyRef: { name: options.cloneSecret, key: "token" } } }]
                   : []),
               ],

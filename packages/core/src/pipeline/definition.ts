@@ -11,8 +11,8 @@
  * - `W` — Cloudflare Workers deployment
  */
 
-export type JobPipeline = "W" | "C" | "N";
-const PIPELINES: readonly JobPipeline[] = ["W", "C", "N"];
+export type JobPipeline = "W" | "C" | "N" | "M";
+const PIPELINES: readonly JobPipeline[] = ["W", "C", "N", "M"];
 
 export interface PipelineOn {
   push?: { branches?: string[]; tags?: string[] };
@@ -59,10 +59,9 @@ export function pipelineDefFromComponents(
     if (jobs[key]) {
       throw new PipelineDefError(`duplicate component name "${component.name}"`);
     }
-    jobs[key] = {
-      pipeline: component.pipeline,
-      ...(component.pipeline === "C" ? { component: component.name } : {}),
-    };
+    // Every job names its component: in a project with several, the worker
+    // finds the component by this name (the job's key is lower-cased).
+    jobs[key] = { pipeline: component.pipeline, component: component.name };
   }
   return { on: { workflow_dispatch: {} }, jobs };
 }
@@ -87,7 +86,7 @@ export function validatePipelineDef(def: unknown): { ok: true } | { ok: false; e
     const job = jobs[key];
     if (!job || typeof job !== "object") return { ok: false, error: `job "${key}" is not an object` };
     if (!PIPELINES.includes(job.pipeline)) {
-      return { ok: false, error: `job "${key}": pipeline must be W, C or N (got ${String(job.pipeline)})` };
+      return { ok: false, error: `job "${key}": pipeline must be W, C, N or M (got ${String(job.pipeline)})` };
     }
     if (job.needs !== undefined) {
       if (!Array.isArray(job.needs)) return { ok: false, error: `job "${key}": needs must be an array` };

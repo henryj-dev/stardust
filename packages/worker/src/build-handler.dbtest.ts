@@ -280,3 +280,118 @@ describe("pipeline W", () => {
     assert.equal(pr.created.length, 0, "nothing was released");
   });
 });
+
+describe("someone else's code", () => {
+  const PIN = "1".repeat(40);
+  const DIGEST_UP = `sha256:${"9".repeat(64)}`;
+  const M_DEF = { on: { workflow_dispatch: {} }, jobs: { app: { pipeline: "M" as const, component: "app" } } };
+  const C_DEF = { on: { workflow_dispatch: {} }, jobs: { hub: { pipeline: "C" as const, component: "hub" } } };
+  before(async () => {
+    await putProject(db.sql, {
+      id: "counter",
+      name: "Counter",
+      githubRepo: "upstream/counter",
+      pipelineDef: M_DEF,
+      components: [
+        {
+          name: "app",
+          pipeline: "M",
+          image: `docker.io/upstream/counter:2.7@${DIGEST_UP}`,
+          deployDir: "deploy/counter",
+        },
+      ],
+      metadata: { trust: "external", pin: PIN },
+    });
+    await putProject(db.sql, {
+      id: "station",
+      name: "Station",
+      githubRepo: "upstream/station",
+      pipelineDef: C_DEF,
+      components: [{ name: "hub", pipeline: "C", context: "hub", deployDir: "deploy/station" }],
+      metadata: { trust: "external" },
+    });
+  });
+
+  async function runAs(
+    projectId: string,
+    def: typeof M_DEF | typeof C_DEF,
+    sha: string,
+    upstreamBuilds: string[] = [],
+  ) {
+    const runId = await startRun(db.sql, {
+      projectId,
+      event: "workflow_dispatch",
+      trigger: "manual",
+      ref: "refs/heads/main",
+      sha,
+      def,
+      changedPaths: null,
+    });
+    const job = await claimJob(db.sql, "w", 30_000);
+    assert.ok(job);
+    const { client, created } = kube({ succeeded: 1 }, `[stardust-image-digest] ${DIGEST_UP}\n`);
+    const repo = new MemoryRepo({
+      "deploy/counter/deployment.yaml": "image: registry.example.com/counter/app:old\n",
+      "deploy/station/deployment.yaml": "image: registry.example.com/station/hub:old\n",
+    });
+    const handler = buildHandler({
+      sql: db.sql,
+      builder: createBuilder({
+        kube: { ...client, stream: () => Promise.reject(new Error("none")) },
+        namespace: "builds",
+        registry: "registry.example.com",
+        cloneSecret: "clone",
+        pushSecret: "push",
+      }),
+      deployRepo: repo,
+      upstreamBuilds,
+      log: quiet,
+      pollMs: 1,
+    });
+    await runJob({ sql: db.sql, workerId: "w", handler, log: quiet, leaseMs: 30_000 }, job);
+    const [row] = await db.sql<
+      { status: string; detail: Record<string, unknown> }[]
+    >`SELECT status, detail FROM jobs WHERE run_id = ${runId}`;
+    return { row, created, files: repo.files() };
+  }
+  const envNames = (job: Record<string, unknown> | undefined) => JSON.stringify(job ?? {});
+  /** Names of the env entries every container of the Job gets. */
+  const envOf = (job: Record<string, unknown> | undefined) => {
+    const pod = (
+      job as {
+        spec?: {
+          template?: {
+            spec?: {
+              initContainers?: Array<{ env?: Array<{ name: string }> }>;
+              containers?: Array<{ env?: Array<{ name: string }> }>;
+            };
+          };
+        };
+      }
+    )?.spec?.template?.spec;
+    return [...(pod?.initContainers ?? []), ...(pod?.containers ?? [])].flatMap((c) =>
+      (c.env ?? []).map((e) => e.name),
+    );
+  };
+
+  it("mirrors a pinned external image without cloning, and delivers its digest", async () => {
+    const { row, created, files } = await runAs("counter", M_DEF, PIN);
+    assert.equal(row?.status, "success");
+    assert.match(envNames(created[0]), /crane/);
+    assert.ok(!envOf(created[0]).includes("GITHUB_TOKEN"));
+    assert.match(files["deploy/counter/deployment.yaml"] ?? "", new RegExp(`counter/app:1111111@${DIGEST_UP}`));
+  });
+
+  it("runs only the pin, and builds an external project's code only when the operator allows it, without tokens", async () => {
+    const wrong = await runAs("counter", M_DEF, "2".repeat(40));
+    assert.equal(wrong.row?.status, "failed");
+    assert.match(String(wrong.row?.detail.reason), /pinned to/);
+    assert.equal(wrong.created.length, 0);
+    const refused = await runAs("station", C_DEF, "3".repeat(40));
+    assert.match(String(refused.row?.detail.reason), /upstreamBuilds/);
+    assert.equal(refused.created.length, 0, "nothing ran");
+    const allowed = await runAs("station", C_DEF, "4".repeat(40), ["station"]);
+    assert.equal(allowed.created.length, 1);
+    assert.ok(!envOf(allowed.created[0]).includes("GITHUB_TOKEN"), "no clone token for someone else's code");
+  });
+});

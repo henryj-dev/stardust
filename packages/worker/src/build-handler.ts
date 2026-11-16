@@ -6,6 +6,7 @@
  */
 import {
   type Builder,
+  buildDecision,
   buildLogKey,
   bumpImage,
   type DeployTarget,
@@ -13,6 +14,7 @@ import {
   type ObjectStore,
   type RepoIO,
   redactLog,
+  trustOf,
 } from "@stardust/core";
 import { getProject, type Sql } from "@stardust/db";
 import type { HandlerOutcome, JobHandler } from "./loop.ts";
@@ -21,6 +23,8 @@ export interface BuildHandlerDeps {
   sql: Sql;
   builder: Builder;
   deployRepo: RepoIO;
+  /** External projects whose own code may be built (operator's `jobs.upstreamBuilds`). */
+  upstreamBuilds?: readonly string[];
   /** Pipelines released outside Kubernetes, by letter (W: Cloudflare Workers). */
   targets?: Readonly<Record<string, DeployTarget>>;
   /** Keeps each finished build's log after the cluster cleans the build up. Optional. */
@@ -77,8 +81,15 @@ export function buildHandler(deps: BuildHandlerDeps): JobHandler {
     const name = job.def.component ?? (project.components.length === 1 ? project.components[0]?.name : undefined);
     const component = project.components.find((c) => c.name === name);
     if (!component) return failed(`job "${job.name}" names no known component`);
+    // Someone else's code: decided in one place, before anything runs.
+    const decision = buildDecision(
+      trustOf(project.metadata),
+      { projectId: project.id, pipeline: job.def.pipeline, sha: job.sha },
+      deps.upstreamBuilds ?? [],
+    );
+    if (!decision.ok) return failed(decision.reason);
 
-    if (job.def.pipeline !== "C" && job.def.pipeline !== "N") {
+    if (job.def.pipeline !== "C" && job.def.pipeline !== "N" && job.def.pipeline !== "M") {
       const target = deps.targets?.[job.def.pipeline];
       if (!target) return failed(`pipeline ${job.def.pipeline} has no deploy target configured`);
       // A pull request is never released: its head is unreviewed code.
@@ -95,6 +106,7 @@ export function buildHandler(deps: BuildHandlerDeps): JobHandler {
             component: component.name,
             runId: job.runId,
             jobName: job.name,
+            ...(decision.trusted ? {} : { trusted: false }),
             ...(component.context ? { context: component.context } : {}),
             ...(component.buildEnv ? { buildEnv: component.buildEnv } : {}),
           },
@@ -124,17 +136,20 @@ export function buildHandler(deps: BuildHandlerDeps): JobHandler {
         component: component.name,
         runId: job.runId,
         jobName: job.name,
-        ...(component.context ? { context: component.context } : {}),
-        // C builds the repository's Dockerfile; N builds a Node app with the builder's own.
-        ...(job.def.pipeline === "N"
-          ? {
-              kind: "node" as const,
-              ...(component.port !== undefined ? { port: component.port } : {}),
-              ...(component.buildEnv ? { buildEnv: component.buildEnv } : {}),
-            }
-          : component.dockerfile
-            ? { dockerfile: component.dockerfile }
-            : {}),
+        ...(decision.trusted ? {} : { trusted: false }),
+        ...(component.context && job.def.pipeline !== "M" ? { context: component.context } : {}),
+        // C builds the repository's Dockerfile; N builds a Node app with the builder's own; M copies a published image.
+        ...(job.def.pipeline === "M"
+          ? { kind: "mirror" as const, source: component.image ?? "" }
+          : job.def.pipeline === "N"
+            ? {
+                kind: "node" as const,
+                ...(component.port !== undefined ? { port: component.port } : {}),
+                ...(component.buildEnv ? { buildEnv: component.buildEnv } : {}),
+              }
+            : component.dockerfile
+              ? { dockerfile: component.dockerfile }
+              : {}),
       },
       { signal, ...(deps.pollMs !== undefined ? { pollMs: deps.pollMs } : {}) },
     );

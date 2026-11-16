@@ -643,6 +643,25 @@ removed.
 Pipeline `W` releases a Cloudflare Worker instead of building an image (fields
 `context` and `buildEnv`); see below.
 
+Pipeline `M` builds nothing: it copies a published image, pinned by digest
+(field `image`, e.g. `docker.io/org/app:2.7@sha256:…`), into your registry
+with a Job that runs none of the project's code, and checks the copy has the
+same digest.
+
+#### Someone else's code
+
+A project whose metadata says `trust: external` is an open-source project
+deployed as it is. Its builds get no clone token and no project secret, it is
+only mirrored (pipeline `M`) unless you list it in `jobs.upstreamBuilds`
+(a build still pushes, so dropping the tokens alone is not a boundary), and
+with `pin: <commit>` only that commit runs; a run asks for the pin when
+nothing else is asked.
+
+```yaml
+jobs:
+  upstreamBuilds: [station] # external projects whose own code may be built
+```
+
 #### Pipeline W: `target-cf-workers`
 
 Pipeline `W`: a component released as a Cloudflare Worker instead of an image.

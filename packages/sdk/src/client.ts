@@ -114,18 +114,20 @@ export interface RunView {
   jobs: JobView[];
 }
 
-/** How a component is built (W, C or N) and where its manifests live in the deploy repository. */
+/** How a component is built (W, C, N, or M for a mirrored image) and where its manifests live in the deploy repository. */
 export interface ProjectComponent {
   name: string;
-  pipeline: "W" | "C" | "N";
+  pipeline: "W" | "C" | "N" | "M";
   /** Directory inside the source repository used as the build context. */
   context?: string;
   /** Not for pipeline N, which builds without a Dockerfile of its own. */
   dockerfile?: string;
   /** Pipeline N only: the port the app listens on. */
   port?: number;
-  /** Pipeline N only: environment during the build. Not for secrets. */
+  /** Pipelines N and W: environment during the build. Not for secrets. */
   buildEnv?: Record<string, string>;
+  /** Pipeline M: the published image to mirror, pinned by digest. */
+  image?: string;
   deployDir: string;
 }
 

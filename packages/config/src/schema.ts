@@ -53,12 +53,17 @@ export const configSchema = z.strictObject({
       reauthMinutes: z.number().int().min(1).max(1440).default(10),
     })
     .default({ local: { enabled: true, totp: "optional" }, reauthMinutes: 10 }),
-  /** Jobs across all workers. `maxRunning` caps how many run at once; 0 is no limit. */
+  /**
+   * Jobs across all workers. `maxRunning` caps how many run at once; 0 is no
+   * limit. `upstreamBuilds` lists the external projects whose own code may be
+   * built (otherwise they are only mirrored).
+   */
   jobs: z
     .strictObject({
       maxRunning: z.number().int().min(0).max(1000).default(0),
+      upstreamBuilds: z.array(z.string().regex(/^[a-z][a-z0-9-]{0,62}$/)).default([]),
     })
-    .default({ maxRunning: 0 }),
+    .default({ maxRunning: 0, upstreamBuilds: [] }),
   /** The audit log. The worker removes events older than `retentionDays`; 0 keeps them all. */
   audit: z
     .strictObject({

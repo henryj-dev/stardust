@@ -114,6 +114,7 @@ if (ports.source) {
     ...(ports.store ? { store: ports.store } : {}),
     ...(ports.images ? { images: ports.images } : {}),
     features,
+    upstreamBuilds: config.jobs.upstreamBuilds,
     ...buildLogServices(),
     ...envServices(),
   };

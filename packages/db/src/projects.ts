@@ -6,6 +6,7 @@ import {
   hasControlCharacter,
   type JobPipeline,
   loadPipelineDef,
+  PINNED_IMAGE,
   type PipelineDef,
   type ProjectCatalog,
 } from "@stardust/core";
@@ -19,8 +20,10 @@ export interface Component {
   dockerfile?: string;
   /** Pipeline N (a Node app built without a Dockerfile of its own): the port it listens on. */
   port?: number;
-  /** Pipeline N: environment during the build, e.g. which adapter to compile in. Not for secrets. */
+  /** Pipelines N and W: environment during the build, e.g. which adapter to compile in. Not for secrets. */
   buildEnv?: Record<string, string>;
+  /** Pipeline M: the published image to mirror, pinned by digest. */
+  image?: string;
   /** Directory in the deploy repository holding this component's manifests. */
   deployDir: string;
 }
@@ -52,18 +55,25 @@ export function validateProject(p: Project): void {
     if (!NAME.test(c.name)) problems.push(`${at}.name "${c.name}" is not a DNS label`);
     if (seen.has(c.name)) problems.push(`${at}.name "${c.name}" is a duplicate`);
     seen.add(c.name);
-    if (!["W", "C", "N"].includes(c.pipeline)) problems.push(`${at}.pipeline must be W, C or N`);
+    if (!["W", "C", "N", "M"].includes(c.pipeline)) problems.push(`${at}.pipeline must be W, C, N or M`);
+    if (c.pipeline === "M") {
+      if (typeof c.image !== "string" || !PINNED_IMAGE.test(c.image))
+        problems.push(`${at}.image must be the published image pinned by digest (…@sha256:…)`);
+    } else if (c.image !== undefined) {
+      problems.push(`${at}.image applies to pipeline M only`);
+    }
     if (typeof c.deployDir !== "string" || !REL.test(c.deployDir))
       problems.push(`${at}.deployDir must be a relative path`);
     for (const key of ["context", "dockerfile"] as const) {
       const v = c[key];
       if (v !== undefined && !REL.test(v)) problems.push(`${at}.${key} must be a relative path`);
     }
-    if (c.pipeline === "N") {
-      if (c.dockerfile !== undefined)
-        problems.push(`${at}.dockerfile: pipeline N builds without a Dockerfile of its own`);
-      if (c.port !== undefined && !(Number.isInteger(c.port) && c.port >= 1 && c.port <= 65535))
-        problems.push(`${at}.port must be a TCP port`);
+    if (c.pipeline === "N" && c.dockerfile !== undefined)
+      problems.push(`${at}.dockerfile: pipeline N builds without a Dockerfile of its own`);
+    if (c.pipeline === "N" && c.port !== undefined && !(Number.isInteger(c.port) && c.port >= 1 && c.port <= 65535))
+      problems.push(`${at}.port must be a TCP port`);
+    if (c.pipeline !== "N" && c.port !== undefined) problems.push(`${at}: port applies to pipeline N only`);
+    if (c.pipeline === "N" || c.pipeline === "W") {
       if (c.buildEnv !== undefined) {
         if (typeof c.buildEnv !== "object" || c.buildEnv === null || Array.isArray(c.buildEnv))
           problems.push(`${at}.buildEnv must map names to values`);
@@ -74,8 +84,8 @@ export function validateProject(p: Project): void {
               problems.push(`${at}.buildEnv.${k} must be text without control characters`);
           }
       }
-    } else if (c.port !== undefined || c.buildEnv !== undefined) {
-      problems.push(`${at}: port and buildEnv apply to pipeline N only`);
+    } else if (c.buildEnv !== undefined) {
+      problems.push(`${at}: buildEnv applies to pipelines N and W only`);
     }
   }
   if (p.pipelineDef !== null) {

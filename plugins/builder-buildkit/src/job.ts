@@ -18,11 +18,14 @@
  * same commit builds the same image.
  */
 
-import { hasControlCharacter } from "@stardust/core";
+import { digestOf, hasControlCharacter, PINNED_IMAGE } from "@stardust/core";
 
 export const DEFAULT_IMAGES = {
   buildkit: "moby/buildkit:v0.34.1-rootless@sha256:f68752a5a94acfcdad2d07867b7075601a421638e17fc5f28efc1c814d0c4f89",
   git: "alpine/git:v2.54.0@sha256:e8ceedc73bd80992ae8d58a7d24c58b8322146c354f1d2e81a97db4452068ec0",
+  /** Copies mirrored images; the debug image has the shell the Job script needs. */
+  crane:
+    "gcr.io/go-containerregistry/crane/debug:v0.22.1@sha256:e78770b31258a3846f878036d9c1f63fbe4c871f9f56990bf77fd95c013e3c1b",
   /** Base of `kind: "node"` builds. */
   node: "node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d",
 } as const;
@@ -41,8 +44,12 @@ export interface BuildInput {
   /** Path of the Dockerfile and build context inside the repository. Defaults to the root. */
   context?: string;
   dockerfile?: string;
-  /** "dockerfile" (default) builds the repository's Dockerfile; "node" builds a Node app with NODE_DOCKERFILE. */
-  kind?: "dockerfile" | "node";
+  /** "dockerfile" (default) builds the repository's Dockerfile; "node" builds a Node app with NODE_DOCKERFILE; "mirror" copies `source`. */
+  kind?: "dockerfile" | "node" | "mirror";
+  /** kind "mirror": the published image, pinned by digest. */
+  source?: string;
+  /** False for code nobody here reviewed: no clone token, no project secret. */
+  trusted?: boolean;
   /** Port the Node app listens on (kind "node"). */
   port?: number;
   /** Environment during the Node build (kind "node"), e.g. which adapter or database driver to compile in. Not secret. */
@@ -68,7 +75,7 @@ export interface BuilderOptions {
   pushSecret: string;
   /** Optional per-project secret mounted read-only at /run/secrets/project. */
   projectSecret?: string;
-  images?: { buildkit: string; git: string; node?: string };
+  images?: { buildkit: string; git: string; node?: string; crane?: string };
   deadlineSeconds?: number;
   ttlSeconds?: number;
   resources?: { requests: Record<string, string>; limits: Record<string, string> };
@@ -100,6 +107,15 @@ export function validateBuildInput(input: BuildInput): void {
     if (value !== undefined && !RELATIVE_PATH.test(value)) {
       problems.push(`${key} "${value}" must be a relative path inside the repository`);
     }
+  }
+  if (input.kind === "mirror") {
+    if (typeof input.source !== "string" || !PINNED_IMAGE.test(input.source)) {
+      problems.push("a mirror needs source: the published image pinned by digest");
+    }
+    if (input.context !== undefined || input.dockerfile !== undefined)
+      problems.push("a mirror builds nothing: no context or dockerfile");
+  } else if (input.source !== undefined) {
+    problems.push("source applies to mirrors only");
   }
   if (input.kind === "node") {
     if (input.dockerfile !== undefined) problems.push("a node build uses no dockerfile of its own");
@@ -261,8 +277,20 @@ export const DIGEST_LINE = /^\[stardust-image-digest\] (sha256:[0-9a-f]{64})$/m;
 
 const env = (pairs: Record<string, string>) => Object.entries(pairs).map(([name, value]) => ({ name, value }));
 
+/**
+ * Copies a published image, pinned by digest, into our registry: no code of
+ * the project runs, and the copy must have the same digest as the pin.
+ */
+export const MIRROR_SCRIPT = `set -eu
+crane copy \${INSECURE:+--insecure} "\${SOURCE}" "\${TARGET}"
+GOT="$(crane digest \${INSECURE:+--insecure} "\${TARGET}")"
+if [ "\${GOT}" != "\${EXPECT}" ]; then echo "[mirror] the copy is \${GOT}, the pin is \${EXPECT}" >&2; exit 1; fi
+echo "[stardust-image-digest] \${GOT}"
+`;
+
 export function buildJob(input: BuildInput, options: BuilderOptions): Record<string, unknown> {
   validateBuildInput(input);
+  if (input.kind === "mirror") return mirrorJob(input, options);
   const gitBase = options.gitBaseUrl ?? "https://github.com";
   if (!GIT_BASE.test(gitBase)) throw new BuildInputError(`gitBaseUrl "${gitBase}" is not an http(s) base URL`);
   const images = options.images ?? DEFAULT_IMAGES;
@@ -322,7 +350,7 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
                   SHA: input.sha,
                   HOME: "/workspace/home",
                 }),
-                ...(options.cloneSecret
+                ...(options.cloneSecret && input.trusted !== false
                   ? [{ name: "GITHUB_TOKEN", valueFrom: { secretKeyRef: { name: options.cloneSecret, key: "token" } } }]
                   : []),
               ],
@@ -372,7 +400,7 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
                 { name: "workspace", mountPath: "/workspace" },
                 { name: "buildkit-state", mountPath: "/home/user/.local/share/buildkit" },
                 { name: "push-auth", mountPath: "/home/user/.docker", readOnly: true },
-                ...(options.projectSecret
+                ...(options.projectSecret && input.trusted !== false
                   ? [{ name: "project-secret", mountPath: "/run/secrets/project", readOnly: true }]
                   : []),
               ],
@@ -389,7 +417,7 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
                 items: [{ key: "config.json", path: "config.json" }],
               },
             },
-            ...(options.projectSecret
+            ...(options.projectSecret && input.trusted !== false
               ? [
                   {
                     name: "project-secret",
@@ -397,6 +425,82 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
                   },
                 ]
               : []),
+          ],
+        },
+      },
+    },
+  };
+}
+
+function mirrorJob(input: BuildInput, options: BuilderOptions): Record<string, unknown> {
+  const images = options.images ?? DEFAULT_IMAGES;
+  const short = input.sha.slice(0, 7);
+  const source = input.source ?? "";
+  const labels = {
+    "app.kubernetes.io/managed-by": "stardust",
+    "app.kubernetes.io/component": "build",
+    [`${LABEL_PREFIX}/project`]: input.projectId,
+    [`${LABEL_PREFIX}/run`]: input.runId,
+    [`${LABEL_PREFIX}/job`]: input.jobName,
+  };
+  return {
+    apiVersion: "batch/v1",
+    kind: "Job",
+    metadata: {
+      generateName: `mirror-${input.projectId}-${input.component}-`.slice(0, 57),
+      labels,
+      annotations: {
+        [`${LABEL_PREFIX}/source`]: source,
+        [`${LABEL_PREFIX}/image`]: `${input.imageRepository}:${short}`,
+      },
+    },
+    spec: {
+      backoffLimit: 0,
+      activeDeadlineSeconds: options.deadlineSeconds ?? 1800,
+      ttlSecondsAfterFinished: options.ttlSeconds ?? 3600,
+      template: {
+        metadata: { labels },
+        spec: {
+          automountServiceAccountToken: false,
+          enableServiceLinks: false,
+          restartPolicy: "Never",
+          securityContext: {
+            runAsUser: 1000,
+            runAsGroup: 1000,
+            fsGroup: 1000,
+            seccompProfile: { type: "RuntimeDefault" },
+          },
+          containers: [
+            {
+              name: "mirror",
+              image: images.crane ?? DEFAULT_IMAGES.crane,
+              command: ["/busybox/sh", "-c", MIRROR_SCRIPT],
+              env: env({
+                SOURCE: source,
+                TARGET: `${input.imageRepository}:${short}`,
+                EXPECT: digestOf(source) ?? "",
+                DOCKER_CONFIG: "/home/user/.docker",
+                ...(options.insecureRegistry ? { INSECURE: "1" } : {}),
+              }),
+              securityContext: {
+                runAsNonRoot: true,
+                allowPrivilegeEscalation: false,
+                readOnlyRootFilesystem: true,
+                capabilities: { drop: ["ALL"] },
+              },
+              resources: { requests: { cpu: "100m", memory: "128Mi" }, limits: { memory: "512Mi" } },
+              volumeMounts: [{ name: "push-auth", mountPath: "/home/user/.docker", readOnly: true }],
+            },
+          ],
+          volumes: [
+            {
+              name: "push-auth",
+              secret: {
+                secretName: options.pushSecret,
+                defaultMode: 0o444,
+                items: [{ key: "config.json", path: "config.json" }],
+              },
+            },
           ],
         },
       },

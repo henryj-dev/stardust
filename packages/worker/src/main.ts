@@ -75,6 +75,7 @@ if (ports.builder && ports.deployRepo) {
     deployRepo: ports.deployRepo.repo,
     ...(ports.store ? { store: ports.store } : {}),
     ...(ports.deployTargets ? { targets: ports.deployTargets } : {}),
+    upstreamBuilds: config.jobs.upstreamBuilds,
     ...(ports.deployRepo.buildRevAnnotation ? { buildRevAnnotation: ports.deployRepo.buildRevAnnotation } : {}),
     log,
   });
