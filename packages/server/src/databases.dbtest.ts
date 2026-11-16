@@ -44,7 +44,10 @@ const legacy = {
         containers: [
           {
             image: "postgres:16",
-            env: [{ name: "POSTGRES_PASSWORD", valueFrom: { secretKeyRef: { name: "legacy-pw", key: "pw" } } }],
+            env: [
+              { name: "POSTGRES_USER", value: "legacy_owner" },
+              { name: "POSTGRES_PASSWORD", valueFrom: { secretKeyRef: { name: "legacy-pw", key: "pw" } } },
+            ],
           },
         ],
       },
@@ -197,6 +200,12 @@ describe("databases", () => {
     );
     const cron = f["deploy/databases/backup/apps/db-backup.yaml"] ?? "";
     assert.ok(cron.includes("legacy-pw") && cron.includes("legacy-svc.apps.svc"));
+    // Its image's POSTGRES_USER is the role it is dumped as.
+    const [row] = await db.sql<
+      { superuser_role: string | null }[]
+    >`SELECT superuser_role FROM databases_instances WHERE name = 'legacy'`;
+    assert.equal(row?.superuser_role, "legacy_owner");
+    assert.match(cron, /name: ROLE_0\n\s+value: legacy_owner/);
     assert.deepEqual(resources("deploy/databases/backup/kustomization.yaml"), ["databases", "apps"]);
     const { instances, unmanaged } = (await (await call("GET", "/databases")).json()) as {
       instances: Array<{ name: string; ready: boolean }>;
@@ -298,6 +307,8 @@ describe("databases", () => {
     );
     assert.ok(resources("deploy/databases/kustomization.yaml").includes("legacy"));
     assert.ok(Object.keys(files()).some((p) => p.startsWith("deploy/databases/legacy/grant-shop-ro/")));
+    const legacyGrant = Object.entries(files()).find(([p]) => /legacy\/grant-shop-ro\/grant-shop_ro\.yaml$/.test(p));
+    assert.match(legacyGrant?.[1] ?? "", /name: PGUSER\n\s+value: legacy_owner/, "the grant signs in as that role");
     assert.equal((await call("DELETE", "/databases/legacy/grants/shop_ro")).status, 200);
     assert.ok(!Object.keys(files()).some((p) => p.startsWith("deploy/databases/legacy/")));
     assert.ok(!resources("deploy/databases/kustomization.yaml").includes("legacy"));

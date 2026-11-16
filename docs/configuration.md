@@ -524,7 +524,10 @@ person deletes them. An adopted instance is only forgotten.
 Provides the `databases` port for PostgreSQL run as a plain StatefulSet (one
 replica, a volume claim, a Service). It finds instances by image in the
 namespaces it is given, reading the superuser password's Secret _name and
-key_ from the pod's `POSTGRES_PASSWORD`, never its value. It renders the
+key_ from the pod's `POSTGRES_PASSWORD`, never its value, and the superuser
+role from `POSTGRES_USER` (`postgres` when it is absent). An instance whose
+`POSTGRES_USER` comes from a Secret or ConfigMap (or might, through
+`envFrom`) cannot be adopted: set it as a plain value. It renders the
 manifests that the `databases` feature commits: a new instance, a Job that
 creates an application's role and database (safe to run again), and a backup
 CronJob that dumps every instance, encrypts each dump with SOPS to an age key

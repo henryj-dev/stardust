@@ -84,6 +84,107 @@ describe("finding instances", () => {
   });
 });
 
+describe("the superuser's role", () => {
+  const PASSWORD = { name: "POSTGRES_PASSWORD", valueFrom: { secretKeyRef: { name: "pw", key: "pw" } } };
+  const withEnv = (name: string, env: unknown[], envFrom?: unknown[]) => {
+    const o = sts("apps", name, "postgres:17-alpine");
+    const c = o.spec.template.spec.containers[0] as Record<string, unknown>;
+    c.env = env;
+    if (envFrom) c.envFrom = envFrom;
+    return o;
+  };
+  const kube = fakeKube({
+    apps: [
+      withEnv("plain", [PASSWORD]),
+      withEnv("named", [{ name: "POSTGRES_USER", value: "analytics" }, PASSWORD]),
+      withEnv("explicit", [{ name: "POSTGRES_USER", value: "postgres" }, PASSWORD]),
+      withEnv("empty", [{ name: "POSTGRES_USER" }, PASSWORD]),
+      withEnv("secret", [{ name: "POSTGRES_USER", valueFrom: { secretKeyRef: { name: "u", key: "u" } } }, PASSWORD]),
+      withEnv("quoted", [{ name: "POSTGRES_USER", value: "Hub-Admin" }, PASSWORD]),
+      withEnv("envfrom", [PASSWORD], [{ configMapRef: { name: "pg-env" } }]),
+      withEnv("envfrom-named", [{ name: "POSTGRES_USER", value: "sso_admin" }, PASSWORD], [{ configMapRef: { name: "x" } }]),
+    ],
+  });
+  const p = statefulSetPostgres({ kube, namespace: "apps", namespaces: [] });
+
+  it("is POSTGRES_USER when the pod sets it plainly, postgres when it does not, unknown otherwise", async () => {
+    const found = Object.fromEntries((await p.discover()).map((s) => [s.ref.name, s.superuser]));
+    assert.deepEqual(found, {
+      plain: { name: "pw", key: "pw" },
+      named: { name: "pw", key: "pw", role: "analytics" },
+      explicit: { name: "pw", key: "pw" },
+      empty: { name: "pw", key: "pw" },
+      // From a Secret, behind envFrom, or not a plain identifier: no one known to sign in as.
+      secret: null,
+      quoted: null,
+      envfrom: null,
+      "envfrom-named": { name: "pw", key: "pw", role: "sso_admin" },
+    });
+  });
+
+  it("goes into the dump, the fingerprint and the grant as env, never into the script", () => {
+    const target = {
+      name: "goat",
+      ref: { namespace: "apps", name: "named" },
+      host: "named.apps.svc",
+      superuser: { name: "pw", key: "pw", role: "analytics" },
+    };
+    const plain = { ...target, name: "plain", host: "plain.apps.svc", superuser: { name: "pw", key: "pw" } };
+    const backup = parse(
+      Object.values(
+        p.renderBackup({
+          name: "db-backup",
+          namespace: "apps",
+          schedule: "15 3 * * *",
+          storage: { endpoint: "https://s3.example.com", bucket: "backups", credentials: "c", prefix: "pg" },
+          recipient: `age1${"q".repeat(58)}`,
+          retentionHours: 24,
+          targets: [target, plain],
+        }),
+      )[0] ?? "",
+    ) as { spec: { jobTemplate: { spec: { template: { spec: PodSpec } } } } };
+    const dump = backup.spec.jobTemplate.spec.template.spec.initContainers?.[0] as Container & {
+      env: Array<{ name: string; value?: string }>;
+    };
+    assert.deepEqual(
+      dump.env.filter((e) => e.name.startsWith("ROLE_")),
+      [
+        { name: "ROLE_0", value: "analytics" },
+        { name: "ROLE_1", value: "postgres" },
+      ],
+    );
+    const script = dump.command?.[2] ?? "";
+    assert.ok(!script.includes("analytics") && !/-U postgres/.test(script));
+    assert.match(script, /^dump_one goat named\.apps\.svc "\$PW_0" "\$ROLE_0"$/m);
+    assert.match(script, /fingerprint "\$HOST" "\$ROLE"/);
+    assert.match(script, /pg_dumpall --clean --if-exists -h "\$HOST" -U "\$ROLE"/);
+
+    const job = parse(
+      Object.values(
+        p.renderAppGrant(target, { database: "stats", role: "stats_app", password: { name: "a", key: "p" } }),
+      )[0] ?? "",
+    ) as { spec: { template: { spec: PodSpec } } };
+    const grant = job.spec.template.spec.containers[0] as Container & { env: Array<{ name: string; value?: string }> };
+    assert.deepEqual(
+      grant.env.find((e) => e.name === "PGUSER"),
+      { name: "PGUSER", value: "analytics" },
+    );
+    assert.ok(!(grant.command?.[2] ?? "").includes("-U postgres"));
+    assert.throws(
+      () => p.renderAppGrant(target, { database: "x", role: "analytics", password: { name: "a", key: "p" } }),
+      /must not be the superuser/,
+    );
+    assert.throws(
+      () =>
+        p.renderAppGrant(
+          { ...target, superuser: { name: "pw", key: "pw", role: "a b" } },
+          { database: "x", role: "x_app", password: { name: "a", key: "p" } },
+        ),
+      /superuser role/,
+    );
+  });
+});
+
 type Container = {
   name: string;
   image: string;

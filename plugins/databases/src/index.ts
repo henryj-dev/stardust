@@ -52,6 +52,11 @@ CREATE TABLE databases_checks (
 CREATE INDEX databases_checks_instance_idx ON databases_checks (instance, requested_at DESC);
 `;
 
+const ROLE_MIGRATION = `
+-- The superuser's role when it is not postgres (the image's POSTGRES_USER). NULL means postgres.
+ALTER TABLE databases_instances ADD COLUMN superuser_role text CHECK (superuser_role ~ '^[a-z_][a-z0-9_]{0,62}$');
+`;
+
 const MIGRATION = `
 -- Instances stardust manages, created by it or adopted.
 CREATE TABLE databases_instances (
@@ -106,6 +111,7 @@ interface InstanceRow {
   host: string;
   superuser_secret: string | null;
   superuser_key: string | null;
+  superuser_role: string | null;
   version: string | null;
 }
 
@@ -116,7 +122,10 @@ const managed = (r: InstanceRow): ManagedInstance => ({
   namespace: r.namespace,
   workload: r.workload,
   host: r.host,
-  superuser: r.superuser_secret && r.superuser_key ? { name: r.superuser_secret, key: r.superuser_key } : null,
+  superuser:
+    r.superuser_secret && r.superuser_key
+      ? { name: r.superuser_secret, key: r.superuser_key, ...(r.superuser_role ? { role: r.superuser_role } : {}) }
+      : null,
 });
 const newPassword = () => randomBytes(24).toString("base64url");
 const dashed = (role: string) => role.replace(/_/g, "-");
@@ -246,7 +255,11 @@ export function databasesFeature(ctx: FeatureContext) {
       isKubeName(ns) && isKubeName(workload) ? await provider.observe({ namespace: ns, name: workload }) : null;
     if (!state) throw new Refused(404, `no ${providerName} instance ${ns}/${workload}`);
     if (!state.superuser)
-      throw new Refused(409, "its pod does not read POSTGRES_PASSWORD from a Secret, so nothing could sign in to it");
+      throw new Refused(
+        409,
+        "its pod does not read POSTGRES_PASSWORD from a Secret, or does not set POSTGRES_USER as a plain value (a lowercase identifier, or absent for postgres), so stardust cannot tell who signs in to it",
+      );
+    const superuser = state.superuser;
     const host = `${state.service ?? workload}.${ns}.svc`;
     return db.transaction(async (tx) => {
       const taken = await tx.query(
@@ -255,9 +268,20 @@ export function databasesFeature(ctx: FeatureContext) {
       );
       if (taken.length > 0) throw new Refused(409, `${name} or ${ns}/${workload} is managed already`);
       await tx.query(
-        `INSERT INTO databases_instances (name, provider, namespace, workload, origin, host, superuser_secret, superuser_key, version, created_by)
-         VALUES ($1, $2, $3, $4, 'adopted', $5, $6, $7, $8, $9)`,
-        [name, providerName, ns, workload, host, state.superuser?.name, state.superuser?.key, state.version, by],
+        `INSERT INTO databases_instances (name, provider, namespace, workload, origin, host, superuser_secret, superuser_key, superuser_role, version, created_by)
+         VALUES ($1, $2, $3, $4, 'adopted', $5, $6, $7, $8, $9, $10)`,
+        [
+          name,
+          providerName,
+          ns,
+          workload,
+          host,
+          superuser.name,
+          superuser.key,
+          superuser.role ?? null,
+          state.version,
+          by,
+        ],
       );
       const sha = await commit(
         `databases: adopt ${ns}/${workload} as ${name}`,
@@ -813,6 +837,7 @@ export const plugin = definePlugin({
   migrations: async () => [
     { name: "0001_databases.sql", scope: "regional", sql: MIGRATION },
     { name: "0002_checks.sql", scope: "regional", sql: CHECKS_MIGRATION },
+    { name: "0003_superuser_role.sql", scope: "regional", sql: ROLE_MIGRATION },
   ],
   schedules: [
     { id: "checks", everyMs: 120_000, run: async (ctx) => void (await databasesFeature(ctx).reconcileChecks()) },

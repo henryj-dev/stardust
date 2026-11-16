@@ -4,8 +4,9 @@
  * user the pod asks for, the steps of one pod sharing a host directory as
  * /work, against a seeded PostgreSQL. Object storage is a small stand-in for
  * the aws CLI over a shared directory, mounted over the image's `aws`, so the
- * steps' shell runs unchanged. The age key is made here, at run time. Needs
- * Docker and nothing else.
+ * steps' shell runs unchanged. The source is made with POSTGRES_USER, so
+ * its superuser is not named postgres. The age key is made here, at run
+ * time. Needs Docker and nothing else.
  *
  *   pnpm run test:docker
  */
@@ -20,6 +21,8 @@ import { parse } from "yaml";
 import { statefulSetPostgres } from "./statefulset.ts";
 
 const PG_IMAGE = "postgres:17-alpine";
+// The source is made with POSTGRES_USER: no role named postgres exists there.
+const SUPERUSER = "appowner";
 const id = `sdbk${process.pid}`;
 const net = `${id}-net`;
 const source = `${id}-src`;
@@ -171,9 +174,21 @@ before(() => {
   mkdirSync(join(dir, "s3"));
   chmodSync(join(dir, "s3"), 0o777);
   must("network", "create", net);
-  must("run", "-d", "--name", source, "--network", net, "-e", "POSTGRES_PASSWORD=src-pw", PG_IMAGE);
+  must(
+    "run",
+    "-d",
+    "--name",
+    source,
+    "--network",
+    net,
+    "-e",
+    "POSTGRES_PASSWORD=src-pw",
+    "-e",
+    `POSTGRES_USER=${SUPERUSER}`,
+    PG_IMAGE,
+  );
   // Over TCP: the image's first, initializing server listens on its socket only, then restarts.
-  for (let i = 0; i < 90 && docker("exec", source, "pg_isready", "-h", "127.0.0.1", "-U", "postgres").status !== 0; i++)
+  for (let i = 0; i < 90 && docker("exec", source, "pg_isready", "-h", "127.0.0.1", "-U", SUPERUSER).status !== 0; i++)
     spawnSync("sleep", ["1"]);
   const seed = [
     "CREATE DATABASE shop;",
@@ -195,12 +210,26 @@ before(() => {
       "-v",
       "ON_ERROR_STOP=1",
       "-U",
-      "postgres",
+      SUPERUSER,
       "-q",
     ],
     { input: seed, encoding: "utf8" },
   );
   assert.equal(r.status, 0, r.stderr);
+  const roles = must(
+    "exec",
+    source,
+    "psql",
+    "-h",
+    "127.0.0.1",
+    "-U",
+    SUPERUSER,
+    "-d",
+    "postgres",
+    "-Atc",
+    "SELECT count(*) FROM pg_roles WHERE rolname = 'postgres'",
+  );
+  assert.equal(roles.trim(), "0", "the source has no postgres role");
 });
 
 after(() => {
@@ -234,7 +263,7 @@ it("dumps with a fingerprint, restores the dump into a fresh server, and the fin
           name: "shop-pg",
           ref: { namespace: "db", name: "shop-pg" },
           host: source,
-          superuser: { name: "s", key: "k" },
+          superuser: { name: "s", key: "k", role: SUPERUSER },
         },
       ],
     }),
