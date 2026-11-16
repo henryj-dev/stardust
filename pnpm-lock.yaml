@@ -267,6 +267,9 @@ importers:
       '@stardust/plugin-target-cf-workers':
         specifier: workspace:*
         version: link:../../plugins/target-cf-workers
+      '@stardust/plugin-upstream-images':
+        specifier: workspace:*
+        version: link:../../plugins/upstream-images
 
   packages/config:
     dependencies:
@@ -550,6 +553,12 @@ importers:
         version: link:../../packages/core
 
   plugins/target-cf-workers:
+    dependencies:
+      '@stardust/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  plugins/upstream-images:
     dependencies:
       '@stardust/core':
         specifier: workspace:*

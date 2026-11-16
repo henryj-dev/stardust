@@ -280,17 +280,24 @@ export async function listRuns(sql: Sql, projectId: string, limit = 20, onlyRun?
 
 /** The `projects` port: what plugins may read of a project. */
 export function projectCatalog(sql: Sql): ProjectCatalog {
+  const info = (p: Project) => ({
+    id: p.id,
+    name: p.name,
+    githubRepo: p.githubRepo,
+    components: p.components.map((c) => ({
+      name: c.name,
+      deployDir: c.deployDir,
+      pipeline: c.pipeline,
+      ...(c.image ? { image: c.image } : {}),
+    })),
+  });
   return {
     async get(id) {
       const p = await getProject(sql, id);
-      return p
-        ? {
-            id: p.id,
-            name: p.name,
-            githubRepo: p.githubRepo,
-            components: p.components.map((c) => ({ name: c.name, deployDir: c.deployDir })),
-          }
-        : null;
+      return p ? info(p) : null;
+    },
+    async list() {
+      return (await listProjects(sql)).map(info);
     },
   };
 }

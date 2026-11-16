@@ -5,6 +5,10 @@
 
 export interface ComponentInfo {
   name: string;
+  /** How it is built: W, C, N, or M (a mirrored image). */
+  pipeline?: string;
+  /** Pipeline M: the published image it mirrors, pinned by digest. */
+  image?: string;
   /** Directory in the deploy repository holding this component's manifests. */
   deployDir: string;
 }
@@ -20,4 +24,6 @@ export interface ProjectInfo {
 /** The `projects` port. */
 export interface ProjectCatalog {
   get(id: string): Promise<ProjectInfo | null>;
+  /** Every project. */
+  list?(): Promise<ProjectInfo[]>;
 }
