@@ -14,6 +14,7 @@ import type { DatabaseProvider } from "./databases.ts";
 import type { DeployTarget } from "./deploy-target.ts";
 import type { DnsProvider } from "./dns.ts";
 import type { IdentityProvider } from "./identity.ts";
+import type { InstanceHook } from "./instance-hooks.ts";
 import type { KubeStreamClient } from "./kube.ts";
 import type { LogSource } from "./logs.ts";
 import type { ProjectEnv } from "./project-env.ts";
@@ -52,6 +53,8 @@ export interface Ports {
   databases: Record<string, DatabaseProvider>;
   /** Cloud instances by account name, e.g. `vultr`. */
   compute: Record<string, ComputeProvider>;
+  /** Systems told about instances coming and going, by name. */
+  instanceHooks: Record<string, InstanceHook>;
   /** Releases outside Kubernetes, by pipeline letter, e.g. `W` (Cloudflare Workers). */
   deployTargets: Record<string, DeployTarget>;
   /** Secret env values on a project's layers, provided by the server. */
@@ -78,6 +81,7 @@ export const PORT_NAMES: readonly PortName[] = [
   "dns",
   "databases",
   "compute",
+  "instanceHooks",
   "deployTargets",
   "projectEnv",
 ];
@@ -93,6 +97,7 @@ export const MULTI_PORTS: ReadonlySet<PortName> = new Set<PortName>([
   "databases",
   "deployTargets",
   "compute",
+  "instanceHooks",
 ]);
 
 export * from "./builder.ts";
@@ -103,6 +108,7 @@ export * from "./databases.ts";
 export * from "./deploy-target.ts";
 export * from "./dns.ts";
 export * from "./identity.ts";
+export * from "./instance-hooks.ts";
 export * from "./kube.ts";
 export * from "./logs.ts";
 export * from "./project-env.ts";

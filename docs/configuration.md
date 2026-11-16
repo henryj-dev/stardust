@@ -335,6 +335,12 @@ internal record for its private address, the reverse name of its address
 data is cleared, since cloud-init can carry bootstrap secrets. A create that
 fails after the instance exists leaves it for you: deleting needs a person.
 
+Other systems can take part through the `instanceHooks` port (a plugin that
+provides it): before an instance is made a hook may add to its cloud-init
+(such as a one-time enrolment token; parts are joined as cloud-init multipart,
+never stored, and cleared once the instance runs) or refuse the create; it is
+told when the instance runs, may refuse a delete, and is told after one.
+
 Deleting takes two steps from someone who signed in recently: repeat the
 hostname to get a ticket for that one instance (five minutes, used once),
 then delete with it. Its DNS records go with it. Protected hosts are never

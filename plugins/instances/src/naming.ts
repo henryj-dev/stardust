@@ -54,3 +54,22 @@ export function plannedRecords(
 export function renderCloudInit(template: string, hostname: string): string {
   return template.replaceAll("{{hostname}}", hostname);
 }
+
+/**
+ * One user data from several parts (the configured cloud-init, and what the
+ * hooks add): a single part as it is, several as a cloud-init multipart
+ * message, each typed by its first line (`#cloud-config` or a `#!` script).
+ */
+export function combineUserData(parts: readonly string[], boundary = "stardust-part"): string | undefined {
+  const kept = parts.filter((p) => p.trim() !== "");
+  if (kept.length <= 1) return kept[0];
+  const typeOf = (p: string) =>
+    p.startsWith("#cloud-config") ? "text/cloud-config" : p.startsWith("#!") ? "text/x-shellscript" : "text/plain";
+  const body = kept
+    .map(
+      (p) =>
+        `--${boundary}\nContent-Type: ${typeOf(p)}; charset="utf-8"\nMIME-Version: 1.0\n\n${p.endsWith("\n") ? p : `${p}\n`}`,
+    )
+    .join("");
+  return `Content-Type: multipart/mixed; boundary="${boundary}"\nMIME-Version: 1.0\n\n${body}--${boundary}--\n`;
+}

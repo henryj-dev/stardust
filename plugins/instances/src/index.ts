@@ -39,9 +39,9 @@ import {
   type SagaRecord,
   startSaga,
 } from "@stardust/core";
-import { type DnsSettings, plannedRecords, renderCloudInit } from "./naming.ts";
+import { combineUserData, type DnsSettings, plannedRecords, renderCloudInit } from "./naming.ts";
 
-export { type DnsSettings, type PlannedRecord, plannedRecords, renderCloudInit } from "./naming.ts";
+export { combineUserData, type DnsSettings, type PlannedRecord, plannedRecords, renderCloudInit } from "./naming.ts";
 
 const MIGRATION = `
 -- Operations on instances: a create is a saga with the same id.
@@ -93,7 +93,13 @@ export interface CreateState {
   /** Records this saga wrote, so a failure removes exactly those. */
   records: Array<{ zone: string; id: string }>;
   ptr?: string | null;
+  /** Whether user data went in, so it is cleared once the instance runs. */
+  userDataSet?: boolean;
 }
+
+/** The configured hooks, in name order. */
+const hooksOf = (ctx: FeatureContext) =>
+  Object.entries(ctx.ports.instanceHooks ?? {}).sort(([a], [b]) => a.localeCompare(b));
 
 const TICKET_MS = 5 * 60_000;
 const RUNNING_WITHIN_MS = 15 * 60_000;
@@ -137,6 +143,19 @@ export function createSaga(ctx: FeatureContext, sleep = (ms: number, signal: Abo
           const keys = section.sshKeys?.length ? (await compute.catalog()).sshKeys : [];
           const missing = (section.sshKeys ?? []).filter((n) => !keys.some((k) => k.name === n));
           if (missing.length > 0) throw new Error(`no SSH key named ${missing.join(", ")} in the account`);
+          // Hooks prepare inside this step, so what they return (a one-time
+          // token, say) is never stored in the saga's state.
+          const parts = section.cloudInit ? [renderCloudInit(section.cloudInit, s.hostname)] : [];
+          for (const [name, hook] of hooksOf(ctx)) {
+            if (!hook.prepare) continue;
+            try {
+              const added = await hook.prepare({ hostname: s.hostname, region: s.region, networks: s.networks });
+              if (added.userData) parts.push(added.userData);
+            } catch (err) {
+              throw new Error(`hook ${name} refused: ${(err as Error).message}`);
+            }
+          }
+          const userData = combineUserData(parts);
           const made = await compute.create({
             label: s.label,
             hostname: s.hostname,
@@ -144,11 +163,11 @@ export function createSaga(ctx: FeatureContext, sleep = (ms: number, signal: Abo
             plan: s.plan,
             image: s.image,
             sshKeys: keys.filter((k) => section.sshKeys?.includes(k.name)).map((k) => k.id),
-            ...(section.cloudInit ? { userData: renderCloudInit(section.cloudInit, s.hostname) } : {}),
+            ...(userData ? { userData } : {}),
             ...(s.networks.length ? { networks: s.networks } : {}),
             ...(s.tags.length ? { tags: s.tags } : {}),
           });
-          return { ...s, instanceId: made.id };
+          return { ...s, instanceId: made.id, userDataSet: Boolean(userData) };
         },
         // Nothing undoes a create: deleting needs a person's approval.
       },
@@ -203,10 +222,26 @@ export function createSaga(ctx: FeatureContext, sleep = (ms: number, signal: Abo
         },
       },
       {
+        name: "hooks",
+        async run(s) {
+          const instance = await computeOf(s).get(s.instanceId ?? "");
+          if (!instance) throw new Error("the instance is gone");
+          for (const [name, hook] of hooksOf(ctx)) {
+            try {
+              await hook.created?.(instance);
+            } catch (err) {
+              throw new Error(`hook ${name}: ${(err as Error).message}`);
+            }
+          }
+          return s;
+        },
+      },
+      {
         name: "clear-user-data",
         async run(s) {
-          // cloud-init can carry bootstrap secrets; once the instance runs they must not stay readable.
-          if (section.cloudInit) await computeOf(s).clearUserData(s.instanceId ?? "", "created by stardust");
+          // cloud-init can carry bootstrap secrets, from the template or a hook:
+          // once the instance runs they must not stay readable.
+          if (s.userDataSet) await computeOf(s).clearUserData(s.instanceId ?? "", "created by stardust");
           return s;
         },
       },
@@ -462,7 +497,18 @@ function routes(ctx: FeatureContext): Route[] {
             guards,
           );
           if (!check.ok) throw new Refused(403, `the approval is ${check.reason}: approve the deletion again`);
+          for (const [name, hook] of hooksOf(ctx)) {
+            try {
+              await hook.beforeDestroy?.(i);
+            } catch (err) {
+              throw new Refused(409, `hook ${name} refused the delete: ${(err as Error).message}`);
+            }
+          }
           await c.destroy(i.id, user.username);
+          const hookErrors: string[] = [];
+          for (const [name, hook] of hooksOf(ctx)) {
+            await hook.destroyed?.(i).catch((err: Error) => hookErrors.push(`${name}: ${err.message}`));
+          }
           // Its records go with it: a name pointing at a released address is someone else's later.
           const dns = section.dns ? ctx.ports.dns?.[section.dns.provider] : undefined;
           let removed = 0;
@@ -480,11 +526,11 @@ function routes(ctx: FeatureContext): Route[] {
           }
           await db.query(
             "INSERT INTO instances_ops (id, kind, hostname, instance_id, status, detail, requested_by, finished_at) VALUES ($1, 'delete', $2, $3, 'succeeded', $4::text::jsonb, $5, now())",
-            [randomUUID(), i.hostname, i.id, JSON.stringify({ records: removed }), user.username],
+            [randomUUID(), i.hostname, i.id, JSON.stringify({ records: removed, hookErrors }), user.username],
           );
           return {
-            body: { ok: true, recordsRemoved: removed },
-            audit: { target: i.hostname, detail: { instance: i.id, records: removed } },
+            body: { ok: true, recordsRemoved: removed, hookErrors },
+            audit: { target: i.hostname, detail: { instance: i.id, records: removed, hookErrors } },
           };
         }),
     },
@@ -528,7 +574,7 @@ export const plugin = definePlugin({
     return problems;
   },
   requires: ["compute", "database", "sagas", "guards"],
-  uses: ["dns"],
+  uses: ["dns", "instanceHooks"],
   permissions: [
     { id: "instances:read", description: "See instances and what was done to them", grantedTo: "admins" },
     {

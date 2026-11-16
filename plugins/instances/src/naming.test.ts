@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { plannedRecords, renderCloudInit } from "./naming.ts";
+import { combineUserData, plannedRecords, renderCloudInit } from "./naming.ts";
 
 const dns = { provider: "cloudflare", zone: "example.com", internalSuffix: "internal.example.com" };
 const addresses = { mainIp: "192.0.2.10", ipv6: "2001:db8::10", internalIp: "10.10.0.10" };
@@ -29,4 +29,19 @@ it("writes nothing without DNS settings or addresses, and fills in only the host
     ptr: null,
   });
   assert.equal(renderCloudInit("hostname: {{hostname}}\nkey: {{key}}\n", "web-1"), "hostname: web-1\nkey: {{key}}\n");
+});
+
+it("joins several parts of user data as cloud-init multipart, typing each by its first line", () => {
+  assert.equal(combineUserData([]), undefined);
+  assert.equal(combineUserData(["#cloud-config\n", " "]), "#cloud-config\n");
+  const joined = combineUserData(["#cloud-config\nhostname: a\n", "#!/bin/sh\necho hi"], "b") ?? "";
+  assert.match(joined, /^Content-Type: multipart\/mixed; boundary="b"\n/);
+  assert.match(
+    joined,
+    /--b\nContent-Type: text\/cloud-config; charset="utf-8"\nMIME-Version: 1.0\n\n#cloud-config\nhostname: a\n/,
+  );
+  assert.match(
+    joined,
+    /--b\nContent-Type: text\/x-shellscript; charset="utf-8"\nMIME-Version: 1.0\n\n#!\/bin\/sh\necho hi\n--b--\n$/,
+  );
 });
