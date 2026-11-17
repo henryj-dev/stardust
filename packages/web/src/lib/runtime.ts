@@ -31,4 +31,16 @@ export interface RuntimeView {
       }
     | { kind: string; name: string; error: string }
   >;
+  /** The Services its manifests declare, as they run. Absent from older servers. */
+  services?: ServiceView[];
+}
+
+export interface ServiceView {
+  name: string;
+  namespace: string | null;
+  type?: string;
+  ports?: Array<{ port: number; protocol: string }>;
+  /** The address outside the cluster a LoadBalancer got. */
+  external?: string | null;
+  error?: string;
 }

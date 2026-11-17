@@ -32,6 +32,16 @@ spec:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           env:
             {{- include "stardust.configEnv" . | nindent 12 }}
+            {{- if .Values.runtime.bindings }}
+            # Who the server reads the cluster as, so the dashboard can bind the
+            # read-only runtime ClusterRole in a component's namespace.
+            - name: STARDUST_RUNTIME_CLUSTERROLE
+              value: {{ include "stardust.fullname" . }}-runtime-read
+            - name: STARDUST_SERVICE_ACCOUNT
+              valueFrom: { fieldRef: { fieldPath: spec.serviceAccountName } }
+            - name: STARDUST_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            {{- end }}
           {{- with .Values.extraEnvFrom }}
           envFrom:
             {{- toYaml . | nindent 12 }}

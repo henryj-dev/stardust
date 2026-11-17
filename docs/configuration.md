@@ -259,6 +259,7 @@ the builds namespace.
 | `gitBaseUrl`       | optional | Git host to clone from. Defaults to `https://github.com`.                                                                          |
 | `cloneUsername`    | optional | User name sent with the clone token. GitHub ignores it; Gitea needs the token's owner.                                             |
 | `insecureRegistry` | optional | Push over plain HTTP. For local test registries only.                                                                              |
+| `pull`             | optional | `{ username, password: { env } }`: a read-only login pods pull with. stardust seals it into each component's directory (below).    |
 
 The clone runs in its own container; the build container, which runs the
 Dockerfile, never sees the clone token.
@@ -316,8 +317,12 @@ namespace is the one in their manifests, or the kustomization's.
 
 The server reads the cluster with its own service account. List the
 namespaces in the chart's `runtime.namespaces`: each gets a read-only Role
-(workloads, pods, pod logs, events). Viewers of a project see it; maintainers
-change it.
+(workloads, pods, pod logs, events, Services). Or set `runtime.bindings: true`:
+the chart then ships the same rules as a ClusterRole bound nowhere, and a
+component's page binds it in the component's namespace (below), so a new
+namespace needs no chart change. Viewers of a project see it; maintainers
+change it. The page also shows the component's Services, and for a
+LoadBalancer the address an edge proxy sends its traffic to.
 
 ### `logs-kube` and `logs-loki`
 
@@ -817,6 +822,25 @@ controller applies it; the answer's `listedIn` names that file, or is null when
 none above has a `resources` list. With `"createNamespace": true` it also
 declares the namespace, enforcing the restricted Pod Security standard; it is
 then removed with the component, so leave it off for a shared namespace.
+With `"expose": true` the Service is a LoadBalancer, so it gets an address
+outside the cluster; routing a public host to it, and its DNS record, are set
+at the edge proxy.
+
+A component's namespace can also get, as files next to its manifests (listed
+in its kustomization, so withdrawing removes them) — at scaffolding
+(`"registryPull": true`, `"podView": true`) or later on its page
+(`PUT …/components/<name>/access` with the same fields, administrators):
+
+- `registry-pull.secret.enc.yaml`: the builder's `pull` login as a
+  `kubernetes.io/dockerconfigjson` Secret `<component>-registry-pull`, sealed
+  with SOPS, which its workloads name in `imagePullSecrets` (pull Secrets
+  made by hand are kept and listed). After the login changes,
+  `POST /api/v1/registry/pull/reseal` reseals every one in one commit.
+- `stardust-runtime.rolebinding.yaml`: a RoleBinding of the chart's runtime
+  ClusterRole to the server, so the page can show the namespace (needs
+  `runtime.bindings`).
+
+Both are audited (`project.component.access`, `registry.pull.reseal`).
 
 ### Runs
 

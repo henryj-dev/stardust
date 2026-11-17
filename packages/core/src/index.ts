@@ -7,6 +7,7 @@ export * from "./env/merge.ts";
 export * from "./env/render.ts";
 export * from "./env/secret-guard.ts";
 export * from "./feature.ts";
+export * from "./gitops/access.ts";
 export * from "./gitops/bump.ts";
 export * from "./gitops/cas.ts";
 export * from "./gitops/files.ts";

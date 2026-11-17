@@ -42,8 +42,13 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       if (err instanceof ApiError && err.status === 404) return null;
       throw err;
     });
+    const access = await client.componentAccess(params.id, params.name).catch((err) => {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    });
     return {
       files,
+      access,
       projectId: params.id,
       component: params.name,
       deliveries,
@@ -76,11 +81,40 @@ export const actions: Actions = {
         namespace: String(form.get("namespace") ?? ""),
         ...(Number.isInteger(port) && port > 0 ? { port } : {}),
         ...(form.get("createNamespace") === "on" ? { createNamespace: true } : {}),
+        ...(form.get("expose") === "on" ? { expose: true } : {}),
+        ...(form.get("registryPull") === "on" ? { registryPull: true } : {}),
+        ...(form.get("podView") === "on" ? { podView: true } : {}),
       });
       return { scaffolded: result };
     } catch (err) {
       const r = reason(err);
       return fail(r.status, { scaffoldError: r.message });
+    }
+  },
+  // The pull Secret and pod view, each as the form's checkbox says (administrators; the server checks).
+  access: async ({ locals, params, request, url }) => {
+    const client = requireClient(locals, url);
+    const form = await request.formData();
+    const change: { registryPull?: boolean; podView?: boolean } = {};
+    for (const key of ["registryPull", "podView"] as const) {
+      // Only what the form offered: a hidden marker says the checkbox was there.
+      if (form.get(`${key}.shown`) === "1") change[key] = form.get(key) === "on";
+    }
+    try {
+      return { accessSaved: await client.setComponentAccess(params.id, params.name, change) };
+    } catch (err) {
+      const r = reason(err);
+      return fail(r.status, { accessError: r.message });
+    }
+  },
+  // After the registry login changes: every component's pull Secret, resealed in one commit.
+  reseal: async ({ locals, url }) => {
+    const client = requireClient(locals, url);
+    try {
+      return { resealed: await client.resealRegistryPull() };
+    } catch (err) {
+      const r = reason(err);
+      return fail(r.status, { accessError: r.message });
     }
   },
   // Env secrets mounted as files: the whole list, as one commit. The server checks write access.

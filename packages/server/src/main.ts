@@ -121,9 +121,24 @@ if (ports.source) {
     upstreamBuilds: config.jobs.upstreamBuilds,
     ...buildLogServices(),
     ...envServices(),
+    ...runtimeGrantServices(),
   };
 } else {
   console.warn("source-github is not configured: only /healthz is served");
+}
+
+/**
+ * Who the server reads the cluster as, from the chart: its read-only runtime
+ * ClusterRole, and its own service account (from the downward API). Then the
+ * dashboard can bind that role in a component's namespace.
+ */
+function runtimeGrantServices(): Pick<Services, "runtimeGrant"> {
+  const clusterRole = process.env.STARDUST_RUNTIME_CLUSTERROLE;
+  const serviceAccount = process.env.STARDUST_SERVICE_ACCOUNT;
+  const serviceAccountNamespace = process.env.STARDUST_NAMESPACE;
+  if (!clusterRole || !serviceAccount || !serviceAccountNamespace) return {};
+  log.info("pod view bindings enabled", { clusterRole });
+  return { runtimeGrant: { clusterRole, serviceAccount, serviceAccountNamespace } };
 }
 
 /** Build logs, read from the build pods. */

@@ -40,3 +40,24 @@ it("names images without the Kubernetes API, and builds only with it", async () 
   assert.ok(JSON.stringify(created[0]).includes('"IMAGE","value":"registry.example.com/demo/api:aaaaaaa"'));
   assert.equal(typeof ports?.builder?.logs, "function");
 });
+
+it("gives pods a read-only pull login, read when asked for, and checks its shape", async () => {
+  assert.equal((await plugin.provides?.create(context(section)))?.images?.pull, undefined);
+  const withPull = {
+    ...section,
+    registry: "registry.example.com:5000/team",
+    pull: { username: "puller", password: { env: "P" } },
+  };
+  const pull = (await plugin.provides?.create(context(withPull)))?.images?.pull;
+  assert.equal(pull?.host, "registry.example.com:5000");
+  assert.deepEqual(await pull?.login(), {
+    username: "puller",
+    password: "secret for plugins.builder-buildkit.pull.password",
+  });
+  assert.deepEqual(plugin.validateConfig?.(withPull), []);
+  assert.deepEqual(plugin.validateConfig?.({ ...section, pull: { username: "a b", password: "plain", extra: 1 } }), [
+    'pull: unknown key "extra"',
+    "pull.username must be a user name",
+    "pull.password must be { env: NAME } or { file: PATH }",
+  ]);
+});

@@ -1,5 +1,8 @@
 <script lang="ts">
+import { reachOf } from "$lib/exposure";
+
 let { data, form } = $props();
+const reach = $derived(reachOf(data.runtime?.services ?? []));
 const projectHref = $derived(`/projects/${encodeURIComponent(data.projectId)}`);
 const time = (iso: string) => new Date(iso).toLocaleString();
 const short = (digest: string) => digest.replace(/^sha256:/, "").slice(0, 12);
@@ -120,6 +123,87 @@ const LANDING: Record<string, string> = {
     {/each}
   {/if}
 
+  {#if reach.length > 0}
+    <h2>Reaching it</h2>
+    <p>
+      Where an edge proxy sends this component's traffic. stardust gives a Service an address; routing a public
+      host to it (which paths, body limits, logging) and its DNS record are set at the edge.
+    </p>
+    <ul>
+      {#each reach as r (r.service)}
+        <li data-reach={r.state}>
+          Service <code>{r.service}</code>:
+          {#if r.state === "ready"}
+            send to {#each r.upstreams as u, i (u)}{i > 0 ? ", " : ""}<code>{u}</code>{/each}
+          {:else}
+            {r.note}
+          {/if}
+        </li>
+      {/each}
+    </ul>
+  {/if}
+
+  {#if data.access}
+    <h2>Cluster access</h2>
+    <ul>
+      <li data-access-pull={data.access.registryPull.on ? "on" : "off"}>
+        Registry pull Secret: {data.access.registryPull.on ? "managed by stardust" : "none"}
+        {#if data.access.registryPull.others.length > 0}
+          · also named by hand: {#each data.access.registryPull.others as o, i (o)}{i > 0 ? ", " : ""}<code>{o}</code>{/each}
+          (remove it from the manifests once stardust's works)
+        {/if}
+        {#if !data.access.registryPull.available}
+          · stardust has no pull login configured (<code>plugins.builder-buildkit.pull</code>)
+        {/if}
+      </li>
+      <li data-access-podview={data.access.podView.on ? "on" : "off"}>
+        Pod view: {data.access.podView.on ? "stardust may read this namespace" : "not granted by stardust"}
+        {#if !data.access.podView.available}
+          · the chart's <code>runtime.bindings</code> is off
+        {/if}
+      </li>
+    </ul>
+    {#if data.isAdmin && (data.access.registryPull.available || data.access.podView.available) && data.access.namespace}
+      <form method="POST" action="?/access" data-access>
+        {#if data.access.registryPull.available}
+          <input type="hidden" name="registryPull.shown" value="1" />
+          <label
+            ><input type="checkbox" name="registryPull" checked={data.access.registryPull.on} /> Pull images with stardust's
+            registry login (a sealed Secret in <code>{data.access.namespace}</code>)</label
+          >
+        {/if}
+        {#if data.access.podView.available}
+          <input type="hidden" name="podView.shown" value="1" />
+          <label
+            ><input type="checkbox" name="podView" checked={data.access.podView.on} /> Let stardust read
+            <code>{data.access.namespace}</code> for this page (read-only)</label
+          >
+        {/if}
+        <button type="submit">Save access</button>
+      </form>
+    {/if}
+    {#if data.isAdmin && data.access.registryPull.available}
+      <form method="POST" action="?/reseal" data-reseal>
+        <button type="submit">Reseal every component's pull Secret</button> after the registry login changed
+      </form>
+    {/if}
+    {#if form?.accessError}
+      <p role="alert" data-access-error>{form.accessError}</p>
+    {:else if form?.accessSaved}
+      <p data-access-saved>
+        {form.accessSaved.status === "committed"
+          ? `Committed ${form.accessSaved.deployCommit?.slice(0, 7) ?? ""}; it takes effect when it is applied.`
+          : "Nothing to change."}
+      </p>
+    {:else if form?.resealed}
+      <p data-resealed>
+        {form.resealed.status === "committed"
+          ? `Resealed ${form.resealed.components.join(", ")} (${form.resealed.deployCommit?.slice(0, 7) ?? ""}).`
+          : "Every pull Secret already holds the current login."}
+      </p>
+    {/if}
+  {/if}
+
   {#if data.isAdmin && data.deliveries.length === 0}
     <details data-scaffold>
       <summary>No manifests yet? Create starter manifests</summary>
@@ -135,6 +219,16 @@ const LANDING: Record<string, string> = {
           ><input type="checkbox" name="createNamespace" /> Also create the namespace (restricted Pod Security; removed
           with the component)</label
         >
+        <label
+          ><input type="checkbox" name="expose" /> Give the Service an address outside the cluster (a LoadBalancer),
+          for an edge proxy</label
+        >
+        {#if data.access?.registryPull.available}
+          <label><input type="checkbox" name="registryPull" checked /> Pull with stardust's registry login</label>
+        {/if}
+        {#if data.access?.podView.available}
+          <label><input type="checkbox" name="podView" checked /> Let stardust read the namespace for this page</label>
+        {/if}
         <button type="submit">Create manifests</button>
       </form>
     </details>

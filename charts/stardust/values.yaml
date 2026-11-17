@@ -78,6 +78,12 @@ builds:
 # pod logs, events); restarts and scaling go through the deploy repository.
 runtime:
   namespaces: []
+  # Let the dashboard give a component's namespace this read access itself:
+  # the chart ships a read-only ClusterRole bound nowhere, and scaffolding or
+  # a component's access settings commit a RoleBinding to it in that
+  # namespace (the deploy repository's controller applies it). Then a new
+  # namespace needs no change here.
+  bindings: false
 
 # The databases plugins (config.plugins.db-statefulset): namespaces where
 # database instances live, including the one new instances go to. The server

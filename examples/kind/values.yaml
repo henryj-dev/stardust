@@ -21,3 +21,7 @@ config:
 database:
   existingSecret: stardust-db
   key: url
+
+# The dashboard binds its read-only runtime role in the namespaces it scaffolds.
+runtime:
+  bindings: true

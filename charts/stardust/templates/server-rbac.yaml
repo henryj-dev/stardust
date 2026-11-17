@@ -1,13 +1,36 @@
 {{- if include "stardust.serverReadsCluster" . }}
 # The server's own account, with a token: only when it reads the cluster
 # (build logs, or the runtime plugin's namespaces). It is bound to read-only
-# Roles, never a ClusterRole.
+# roles in single namespaces, never cluster-wide.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ include "stardust.fullname" . }}-server
   labels:
     {{- include "stardust.labels" . | nindent 4 }}
+{{- end }}
+{{- if .Values.runtime.bindings }}
+---
+# The same read access as runtime.namespaces gives, for namespaces the
+# dashboard binds it in: scaffolding or a component's access settings commit
+# a RoleBinding to this role in the component's namespace. Nothing binds it
+# cluster-wide, so on its own it grants nothing.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "stardust.fullname" . }}-runtime-read
+  labels:
+    {{- include "stardust.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "events", "configmaps", "services"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list"]
 {{- end }}
 {{- range .Values.runtime.namespaces }}
 ---
@@ -24,7 +47,7 @@ metadata:
     {{- include "stardust.labels" $ | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: ["pods", "events", "configmaps"]
+    resources: ["pods", "events", "configmaps", "services"]
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods/log"]

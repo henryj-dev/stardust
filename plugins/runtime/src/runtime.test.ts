@@ -83,6 +83,14 @@ const kube: KubeStreamClient = {
           ],
         }),
       };
+    if (path === "/api/v1/namespaces/demo/services/api")
+      return {
+        status: 200,
+        body: JSON.stringify({
+          spec: { type: "LoadBalancer", ports: [{ port: 8788, protocol: "TCP" }] },
+          status: { loadBalancer: { ingress: [{ ip: "10.0.0.9" }] } },
+        }),
+      };
     return { status: 404, body: "" };
   },
   stream: () => Promise.reject(new Error("unused")),
@@ -106,7 +114,9 @@ const source = (kind: "live" | "history") => ({
 function setup(withLogs = true) {
   const repo = new MemoryRepo({
     [`${DIR}/deployment.yaml`]: DEPLOYMENT,
-    [`${DIR}/kustomization.yaml`]: "namespace: demo\nresources:\n  - deployment.yaml\n",
+    [`${DIR}/service.yaml`]:
+      "apiVersion: v1\nkind: Service\nmetadata:\n  name: api\nspec:\n  type: LoadBalancer\n---\napiVersion: v1\nkind: Service\nmetadata:\n  name: api-internal\n",
+    [`${DIR}/kustomization.yaml`]: "namespace: demo\nresources:\n  - deployment.yaml\n  - service.yaml\n",
   });
   const projects = {
     get: async (id: string) =>
@@ -165,6 +175,21 @@ describe("runtime", () => {
       asked.some((p) => p.includes(encodeURIComponent("app=api"))),
       "pods are found by the selector",
     );
+  });
+
+  it("shows the component's Services with the external address a LoadBalancer got", async () => {
+    const { route, call } = setup();
+    const res = await call(route("GET", "/projects/:project/components/:component"), params);
+    assert.deepEqual((res.body as { services: unknown }).services, [
+      {
+        name: "api",
+        namespace: "demo",
+        type: "LoadBalancer",
+        ports: [{ port: 8788, protocol: "TCP" }],
+        external: "10.0.0.9",
+      },
+      { name: "api-internal", namespace: "demo", error: "not applied yet" },
+    ]);
   });
 
   it("restarts by committing a new pod-template annotation, so the controller rolls it out", async () => {
