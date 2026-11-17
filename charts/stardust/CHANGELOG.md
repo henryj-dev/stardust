@@ -1,5 +1,11 @@
 # stardust
 
+## 0.19.0
+
+### Minor Changes
+
+- [#83](https://github.com/henryj-dev/stardust/pull/83) [`57d70a7`](https://github.com/henryj-dev/stardust/commit/57d70a7b68f411364f8ef7821f2d5ff31c811202) Thanks [@mack-erel](https://github.com/mack-erel)! - Starter manifests now read the env page's values as environment variables (an optional `envFrom` for the env ConfigMap and Secret), so values set on the env page reach the process. An existing component can be wired the same way from Cluster access on its page.
+
 ## 0.18.0
 
 ### Minor Changes
