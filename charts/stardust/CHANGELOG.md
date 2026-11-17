@@ -1,5 +1,11 @@
 # stardust
 
+## 0.20.1
+
+### Patch Changes
+
+- [#87](https://github.com/henryj-dev/stardust/pull/87) [`6b607d9`](https://github.com/henryj-dev/stardust/commit/6b607d9255ca03e16c9181b8ffbea8a2373b05ec) Thanks [@mack-erel](https://github.com/mack-erel)! - A mirror (pipeline M) is reported as delivered: its Job's container is named like a build's, so the executor finds the digest line and the log reader the log. Before, every mirror failed with "printed no image digest" after copying the image.
+
 ## 0.20.0
 
 ### Minor Changes
