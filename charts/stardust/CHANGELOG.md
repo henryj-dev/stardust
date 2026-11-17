@@ -1,5 +1,13 @@
 # stardust
 
+## 0.18.0
+
+### Minor Changes
+
+- [#81](https://github.com/henryj-dev/stardust/pull/81) [`6d39a8f`](https://github.com/henryj-dev/stardust/commit/6d39a8f739d8e999f42fd0b4674a6fe5c8d3c65d) Thanks [@mack-erel](https://github.com/mack-erel)! - The dashboard has a look of its own instead of the browser's defaults: a top bar that marks the current section, pages with a set width, tables, forms and buttons styled alike, messages in colored boxes, and a dark theme that follows the system. A project's pages (runs, environment, audit log, settings) are tabs under its name, its components are chips, pulling a ref is one row, and the project form puts short fields side by side.
+
+- [#81](https://github.com/henryj-dev/stardust/pull/81) [`6d39a8f`](https://github.com/henryj-dev/stardust/commit/6d39a8f739d8e999f42fd0b4674a6fe5c8d3c65d) Thanks [@mack-erel](https://github.com/mack-erel)! - A component's deploy directory can be filled in for you: set `gitops-git.deployDirTemplate` (for example `deploy/apps/{project}/{component}`), and the project form suggests the directory as the project id and component name are typed, while a directory typed by hand is kept. A component created through the API without a `deployDir` gets the template's (`GET /api/v1/deploy/defaults` tells administrators the template).
+
 ## 0.17.0
 
 ### Minor Changes
