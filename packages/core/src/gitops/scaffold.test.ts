@@ -29,6 +29,10 @@ it("scaffolds a deliverable component: the image a delivery will bump, a Service
   const deployment = parseAllDocuments(files.get("deployment.yaml") ?? "")[0]?.toJS();
   assert.equal(deployment.spec.template.spec.containers[0].image, "registry.example.com/demo/api:pending");
   assert.equal(deployment.spec.template.spec.securityContext.runAsNonRoot, true);
+  assert.deepEqual(deployment.spec.template.spec.containers[0].envFrom, [
+    { configMapRef: { name: "api-env", optional: true } },
+    { secretRef: { name: "api-env-secret", optional: true } },
+  ]);
   assert.deepEqual(parseAllDocuments(files.get("kustomization.yaml") ?? "")[0]?.toJS().resources, [
     "deployment.yaml",
     "service.yaml",

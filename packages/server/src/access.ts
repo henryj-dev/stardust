@@ -1,7 +1,8 @@
 /**
  * A component's cluster access, read from and written to its deploy
  * directory: the registry pull Secret its workloads pull with, and the
- * RoleBinding that lets the dashboard read its namespace (see
+ * RoleBinding that lets the dashboard read its namespace, and whether its
+ * containers read the env page's values as environment variables (see
  * @stardust/core gitops/access). Both are files next to its manifests,
  * listed in its kustomization, so withdrawing the component removes them.
  */
@@ -9,6 +10,8 @@ import {
   addResource,
   type BoundRepo,
   commitWithCas,
+  envConfigMapName,
+  envSecretName,
   findWorkloads,
   type ImageNaming,
   REGISTRY_PULL_FILE,
@@ -16,11 +19,13 @@ import {
   RUNTIME_ACCESS_FILE,
   type RuntimeGrant,
   readPullSecrets,
+  readsEnv,
   registryPullDocument,
   registryPullSecretName,
   removeResource,
   runtimeBindingDocument,
   type SecretCipher,
+  setEnvFrom,
   setPullSecret,
 } from "@stardust/core";
 import type { Component, Project } from "@stardust/db";
@@ -48,12 +53,26 @@ export interface ComponentAccess {
     others: string[];
   };
   podView: { available: boolean; on: boolean };
+  /**
+   * Whether every container reads the env ConfigMap and Secret (envFrom), so
+   * values set on the env page reach the process. Always manageable.
+   */
+  envVars: { available: boolean; on: boolean };
 }
 
 export interface AccessChange {
   registryPull?: boolean;
   podView?: boolean;
+  envVars?: boolean;
 }
+
+const envNames = (component: string) => ({
+  configMap: envConfigMapName(component),
+  secret: envSecretName(component),
+});
+/** stardust's own files in a deploy directory, which run nothing. */
+const ownFile = (path: string) =>
+  path.endsWith(`/${REGISTRY_PULL_FILE}`) || path.endsWith(`/${RUNTIME_ACCESS_FILE}`) || /\/env\.[^/]+$/.test(path);
 
 const MANIFEST = /\.ya?ml$/;
 const KUSTOMIZATIONS = ["kustomization.yaml", "kustomization.yml"];
@@ -105,6 +124,16 @@ export async function readAccess(repo: RepoIO, component: Component, svc: Access
       // An unparseable manifest names nothing stardust can tell.
     }
   }
+  const reads: boolean[] = [];
+  for (const [path, text] of files) {
+    if (ownFile(path)) continue;
+    try {
+      const r = readsEnv(text, envNames(component.name));
+      if (r !== null) reads.push(r);
+    } catch {
+      // As above.
+    }
+  }
   const available = accessAvailable(svc);
   return {
     namespace: typeof ns === "string" ? ns : null,
@@ -114,6 +143,7 @@ export async function readAccess(repo: RepoIO, component: Component, svc: Access
       others: [...named].filter((n) => n !== ours).sort(),
     },
     podView: { available: available.podView, on: files.has(`${dir}/${RUNTIME_ACCESS_FILE}`) },
+    envVars: { available: true, on: reads.length > 0 && reads.every(Boolean) },
   };
 }
 
@@ -205,9 +235,33 @@ export async function planAccess(
     list(RUNTIME_ACCESS_FILE, change.podView);
   }
 
+  if (change.envVars !== undefined) {
+    let workloads = 0;
+    for (const [p, text] of files) {
+      if (ownFile(p) || p === kustomization) continue;
+      let edited: ReturnType<typeof setEnvFrom>;
+      try {
+        edited = setEnvFrom(out.get(p) ?? text, envNames(component.name), change.envVars);
+      } catch (err) {
+        throw new AccessInputError(`${p}: ${(err as Error).message}`);
+      }
+      workloads += edited.workloads;
+      if (edited.changed) out.set(p, edited.text);
+    }
+    if (change.envVars && workloads === 0) {
+      throw new AccessInputError(`${dir} has no Deployment, StatefulSet or DaemonSet to read the env`);
+    }
+  }
+
   if (kustomization && listing !== null && listing !== files.get(kustomization)) out.set(kustomization, listing);
   return out;
 }
+
+const ACCESS_LABEL: Record<keyof AccessChange, string> = {
+  registryPull: "registry pull",
+  podView: "pod view",
+  envVars: "env variables",
+};
 
 const conflictOrThrow = (result: Awaited<ReturnType<typeof commitWithCas>>, what: string) => {
   if (result.status !== "error") return;
@@ -227,7 +281,7 @@ export async function writeAccess(
     const files = await planAccess(at, input.component, input.change, svc);
     if (files.size === 0) return null;
     const what = Object.entries(input.change)
-      .map(([k, v]) => `${k === "registryPull" ? "registry pull" : "pod view"} ${v ? "on" : "off"}`)
+      .map(([k, v]) => `${ACCESS_LABEL[k as keyof AccessChange]} ${v ? "on" : "off"}`)
       .join(", ");
     return { files, message: `chore(${input.project}/${input.component.name}): ${what}\n\nBy ${input.by}.` };
   });

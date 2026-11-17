@@ -162,8 +162,13 @@ const LANDING: Record<string, string> = {
           · the chart's <code>runtime.bindings</code> is off
         {/if}
       </li>
+      <li data-access-env={data.access.envVars.on ? "on" : "off"}>
+        Env variables: {data.access.envVars.on
+          ? "the containers read the env page's values"
+          : "the containers do not read the env page's values; values set there do not reach the process"}
+      </li>
     </ul>
-    {#if data.isAdmin && (data.access.registryPull.available || data.access.podView.available) && data.access.namespace}
+    {#if data.isAdmin && data.access.namespace}
       <form method="POST" action="?/access" data-access>
         {#if data.access.registryPull.available}
           <input type="hidden" name="registryPull.shown" value="1" />
@@ -179,6 +184,11 @@ const LANDING: Record<string, string> = {
             <code>{data.access.namespace}</code> for this page (read-only)</label
           >
         {/if}
+        <input type="hidden" name="envVars.shown" value="1" />
+        <label
+          ><input type="checkbox" name="envVars" checked={data.access.envVars.on} /> Read the env page's values as
+          environment variables (<code>envFrom</code> in each container)</label
+        >
         <button type="submit">Save access</button>
       </form>
     {/if}

@@ -84,7 +84,10 @@ const as = (who: string, method: string, path: string, body?: unknown) =>
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 const file = (path: string) => repo.files()[path];
-type Pod = { imagePullSecrets?: Array<{ name: string }> };
+type Pod = {
+  imagePullSecrets?: Array<{ name: string }>;
+  containers: Array<{ envFrom?: Array<Record<string, { name: string; optional?: boolean }>> }>;
+};
 const podOf = (path: string) => (parse(file(path) ?? "") as { spec: { template: { spec: Pod } } }).spec.template.spec;
 
 describe("a component's cluster access", () => {
@@ -131,6 +134,7 @@ describe("a component's cluster access", () => {
       namespace: "pico",
       registryPull: { available: true, on: true, others: [] },
       podView: { available: true, on: true },
+      envVars: { available: true, on: true },
     });
   });
 
@@ -187,6 +191,25 @@ describe("a component's cluster access", () => {
     assert.deepEqual((parse(file(`${APPS}/hub/kustomization.yaml`) ?? "") as { resources: string[] }).resources, [
       "deployment.yaml",
     ]);
+  });
+
+  it("wires an existing workload to read the env page's values", async () => {
+    const path = "/api/v1/projects/hub/components/hub/access";
+    const before = (await (await as("admin", "GET", path)).json()) as { envVars: unknown };
+    assert.deepEqual(before.envVars, { available: true, on: false }, "a hand-made Deployment reads nothing");
+    const res = await as("admin", "PUT", path, { envVars: true });
+    assert.equal(res.status, 200);
+    assert.equal(((await res.json()) as { status: string }).status, "committed");
+    assert.deepEqual(podOf(`${APPS}/hub/deployment.yaml`).containers[0]?.envFrom, [
+      { configMapRef: { name: "hub-env", optional: true } },
+      { secretRef: { name: "hub-env-secret", optional: true } },
+    ]);
+    assert.deepEqual(podOf(`${APPS}/hub/deployment.yaml`).imagePullSecrets, [{ name: "zot-pull-auth" }]);
+    const after = (await (await as("admin", "GET", path)).json()) as { envVars: unknown };
+    assert.deepEqual(after.envVars, { available: true, on: true });
+    const off = await as("admin", "PUT", path, { envVars: false });
+    assert.equal(off.status, 200);
+    assert.equal(podOf(`${APPS}/hub/deployment.yaml`).containers[0]?.envFrom, undefined);
   });
 
   it("is for administrators, and checks what it is given", async () => {
