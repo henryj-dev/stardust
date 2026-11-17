@@ -279,6 +279,13 @@ buildctl-daemonless.sh build \\
 ${DIGEST_FROM_METADATA}`;
 
 /** The line the build prints with the pushed image's digest; the executor reads it from the log. */
+/**
+ * The container whose log holds a Job's outcome (the digest line) and its
+ * build log, whatever the Job does: the executor and the log reader read it
+ * by this name, so a Job that names it otherwise reports no digest.
+ */
+export const BUILD_CONTAINER = "build";
+
 export const DIGEST_LINE = /^\[stardust-image-digest\] (sha256:[0-9a-f]{64})$/m;
 
 const env = (pairs: Record<string, string>) => Object.entries(pairs).map(([name, value]) => ({ name, value }));
@@ -382,7 +389,7 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
           ],
           containers: [
             {
-              name: "build",
+              name: BUILD_CONTAINER,
               image: images.buildkit,
               command: ["sh", "-c", BUILD_SCRIPT],
               env: env({
@@ -494,7 +501,7 @@ function mirrorJob(input: BuildInput, options: BuilderOptions): Record<string, u
           },
           containers: [
             {
-              name: "mirror",
+              name: BUILD_CONTAINER,
               image: images.crane ?? DEFAULT_IMAGES.crane,
               command: ["/busybox/sh", "-c", MIRROR_SCRIPT],
               env: env({

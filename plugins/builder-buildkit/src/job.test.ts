@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
+  BUILD_CONTAINER,
   BUILD_SCRIPT,
   type BuildInput,
   buildJob,
@@ -325,6 +326,7 @@ describe("someone else's code", () => {
   type Pod = {
     initContainers?: Array<{ env?: Array<{ name: string }> }>;
     containers: Array<{
+      name: string;
       image: string;
       command: string[];
       env?: Array<{ name: string; value?: string }>;
@@ -338,6 +340,7 @@ describe("someone else's code", () => {
     const pod = podOf(buildJob({ ...base, kind: "mirror", source: `docker.io/upstream/counter:2.7@${DIGEST}` }, opts));
     assert.equal(pod.initContainers, undefined, "nothing is cloned");
     const [c] = pod.containers;
+    assert.equal(c?.name, BUILD_CONTAINER, "the executor reads the digest line from this container");
     assert.match(c?.image ?? "", /crane\/debug:v0\.22\.1@sha256:/);
     const env = Object.fromEntries((c?.env ?? []).map((e) => [e.name, e.value]));
     assert.equal(env.EXPECT, DIGEST);
