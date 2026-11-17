@@ -14,6 +14,7 @@ let { data, form } = $props();
     fields={form?.fields ?? data.fields}
     errors={form?.errors ?? []}
     creating={true}
+    deployDirTemplate={data.deployDirTemplate}
     action="?/create"
     access={form && "access" in form ? form.access : null}
   />

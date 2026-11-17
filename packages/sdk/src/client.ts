@@ -321,6 +321,8 @@ export interface Client {
   capabilities(): Promise<Capabilities>;
   /** Whether stardust can read a repository (`owner/name`), and how. Administrators only. */
   sourceAccess(repo: string): Promise<RepoAccess>;
+  /** Defaults the project form fills in (administrators): where a component's manifests go, `{project}` and `{component}` to fill. */
+  deployDefaults(): Promise<{ deployDirTemplate: string | null }>;
   /**
    * A plugin's own API, under /api/v1/plugins/<name>. An ApiError carries the
    * server's reason; 404 also means the plugin is not enabled.
@@ -597,6 +599,9 @@ export function createClient(options: ClientOptions): Client {
     },
     async capabilities() {
       return (await (await get("/api/v1/capabilities")).json()) as Capabilities;
+    },
+    async deployDefaults() {
+      return (await (await get("/api/v1/deploy/defaults")).json()) as { deployDirTemplate: string | null };
     },
     async sourceAccess(repo) {
       const path = `/api/v1/source/access?repo=${encodeURIComponent(repo)}`;

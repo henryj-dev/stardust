@@ -1,5 +1,6 @@
 <script lang="ts">
 import AuditTable from "$lib/components/AuditTable.svelte";
+import ProjectNav from "$lib/components/ProjectNav.svelte";
 
 let { data } = $props();
 </script>
@@ -9,9 +10,9 @@ let { data } = $props();
 </svelte:head>
 
 <main>
-  <p><a href={`/projects/${encodeURIComponent(data.projectId)}`}>{data.projectId}</a></p>
-  <h1>Audit log</h1>
-  <form method="GET" data-audit-filter>
+  <div class="page-head"><h1>{data.projectId}</h1></div>
+  <ProjectNav projectId={data.projectId} current="audit" isAdmin={data.user?.isAdmin === true} />
+  <form method="GET" class="toolbar" data-audit-filter>
     <label>Who <input name="actor" value={data.filter.actor ?? ""} placeholder="username" /></label>
     <label>Action <input name="action" value={data.filter.action ?? ""} placeholder="run, project…" /></label>
     <label>From (UTC) <input type="datetime-local" name="since" value={data.filter.since?.replace(/Z$/, "") ?? ""} /></label>

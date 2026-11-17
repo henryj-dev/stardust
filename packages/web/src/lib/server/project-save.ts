@@ -14,7 +14,7 @@ export function requireAdmin(locals: App.Locals): void {
  */
 export async function saveProject(client: Client, id: string, form: FormData, stored: ProjectView | null) {
   const fields = readFields(form, id);
-  const parsed = parseFields(fields);
+  const parsed = parseFields(fields, { deployDirTemplate: await deployDirTemplate(client) });
   if (!parsed.ok) return fail(400, { fields, errors: parsed.errors });
   try {
     await client.putProject(id, {
@@ -29,6 +29,16 @@ export async function saveProject(client: Client, id: string, form: FormData, st
     throw err;
   }
   redirect(303, `/projects/${encodeURIComponent(id)}`);
+}
+
+/** The configured default deploy directory, or null (also when the server is older and has no such route). */
+export async function deployDirTemplate(client: Client): Promise<string | null> {
+  try {
+    return (await client.deployDefaults()).deployDirTemplate;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
 }
 
 /** The stored project, or null when there is none (404). */

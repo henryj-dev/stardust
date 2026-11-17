@@ -48,3 +48,11 @@ it("accepts an env root inside the repository and refuses one that is not", () =
     );
   }
 });
+
+it("accepts a deploy directory template and says why it refuses one", () => {
+  const base = { url: "https://github.com/acme/deploy.git", branch: "main", token: { env: "T" } };
+  assert.deepEqual(plugin.validateConfig({ ...base, deployDirTemplate: "apps/{project}/{component}" }), []);
+  assert.deepEqual(plugin.validateConfig({ ...base, deployDirTemplate: "apps/{project}" }), [
+    "deployDirTemplate must contain {component}, so components get directories of their own",
+  ]);
+});

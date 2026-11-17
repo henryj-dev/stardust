@@ -1,4 +1,6 @@
 <script lang="ts">
+import ProjectNav from "$lib/components/ProjectNav.svelte";
+
 let { data, form } = $props();
 
 const title = (layer: string) => (layer === "_shared" ? "Every component" : layer);
@@ -12,8 +14,8 @@ const confirmRemove = (e: SubmitEvent, name: string) => {
 </svelte:head>
 
 <main>
-  <p><a href={`/projects/${encodeURIComponent(data.projectId)}`}>{data.projectId}</a></p>
-  <h1>Environment</h1>
+  <div class="page-head"><h1>{data.projectId}</h1></div>
+  <ProjectNav projectId={data.projectId} current="env" isAdmin={data.user?.isAdmin === true} />
   {#if data.off}
     <p data-env-off>{data.off}. An administrator enables it by giving the server the deploy repository and SOPS.</p>
   {:else if data.env}

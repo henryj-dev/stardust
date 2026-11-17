@@ -25,7 +25,7 @@ const from = (e: AuditEventView) => e.forwardedFor ?? e.ip ?? "";
     <tbody>
       {#each events as e (e.id)}
         <tr data-audit-event={e.action}>
-          <td><time datetime={e.at}>{new Date(e.at).toLocaleString()}</time></td>
+          <td class="nowrap"><time datetime={e.at}>{new Date(e.at).toLocaleString()}</time></td>
           <td>
             {who(e)}{#if e.actor.kind === "token"}<br /><small>API token</small>{/if}
           </td>
@@ -33,9 +33,9 @@ const from = (e: AuditEventView) => e.forwardedFor ?? e.ip ?? "";
             {#if linkEvents}<a href={`/admin/audit/${encodeURIComponent(e.id)}`}><code>{e.action}</code></a>{:else}<code>{e.action}</code>{/if}
           </td>
           {#if showProject}<td>{e.projectId ?? ""}</td>{/if}
-          <td>{e.target ?? ""}</td>
+          <td class="wrap">{e.target ?? ""}</td>
           <!-- Text, never HTML. -->
-          <td><code>{Object.keys(e.detail).length ? JSON.stringify(e.detail) : ""}</code></td>
+          <td class="wrap"><code>{Object.keys(e.detail).length ? JSON.stringify(e.detail) : ""}</code></td>
           <td title={e.userAgent ?? ""}>{from(e)}</td>
         </tr>
       {/each}

@@ -19,7 +19,7 @@ const LANDING: Record<string, string> = {
 </svelte:head>
 
 <main>
-  <p><a href={projectHref}>← {data.projectId}</a></p>
+  <p class="crumb"><a href={projectHref}>{data.projectId}</a> /</p>
   <h1>{data.component}</h1>
 
   {#if form?.rollbackError}

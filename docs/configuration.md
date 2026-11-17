@@ -278,6 +278,7 @@ so concurrent writers never overwrite each other.
 | `buildRevAnnotation` | optional | Annotation key (for example `example.com/build-rev`). Where a manifest already carries it, it is set to the job id so a rebuild of the same commit rolls out.   |
 | `githubApp`          | optional | Push as a GitHub App instead of with `token`: `appId`, `privateKey` (a reference) and optionally `apiBaseUrl`. Needs a `https://github.com/<owner>/<name>` url. |
 | `envRoot`            | optional | Directory of the env layers in the repository. Defaults to `deploy/env`. See "Environment and secrets".                                                         |
+| `deployDirTemplate`  | optional | Where a component's manifests go when it names no directory, e.g. `deploy/apps/{project}/{component}`. The project form fills it in as the names are typed.     |
 
 With `githubApp`, stardust finds the App's installation on the deploy
 repository and asks for installation tokens narrowed to that repository and

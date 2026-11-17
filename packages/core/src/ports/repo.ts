@@ -52,4 +52,6 @@ export interface DeployRepo {
   envRoot?: string;
   /** Pod template annotation that records the build, e.g. `example.com/build-rev`. */
   buildRevAnnotation?: string;
+  /** Where a component's manifests go unless it names a directory: `{project}` and `{component}` filled in. */
+  deployDirTemplate?: string;
 }

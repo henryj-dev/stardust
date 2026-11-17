@@ -21,15 +21,18 @@ it("provides the deploy repository with where env lives and the build annotation
       token: { env: "T" },
       envRoot: "deploy/clusters/a/env",
       buildRevAnnotation: "example.com/build-rev",
+      deployDirTemplate: "deploy/clusters/a/apps/{project}/{component}",
     }),
   );
   assert.equal(typeof ports?.deployRepo?.repo.headSha, "function");
   assert.equal(ports?.deployRepo?.envRoot, "deploy/clusters/a/env");
   assert.equal(ports?.deployRepo?.buildRevAnnotation, "example.com/build-rev");
+  assert.equal(ports?.deployRepo?.deployDirTemplate, "deploy/clusters/a/apps/{project}/{component}");
 });
 
 it("leaves the env root and annotation unset when not configured", async () => {
   const ports = await plugin.provides?.create(context({ url: "/srv/deploy.git", branch: "main" }));
   assert.equal(ports?.deployRepo?.envRoot, undefined);
   assert.equal(ports?.deployRepo?.buildRevAnnotation, undefined);
+  assert.equal(ports?.deployRepo?.deployDirTemplate, undefined);
 });

@@ -19,10 +19,12 @@ let { data } = $props();
       </ul>
     </section>
   {/if}
-  <h1>Projects</h1>
-  {#if data.user?.isAdmin}
-    <p><a href="/admin/projects/new" data-new-project>New project</a></p>
-  {/if}
+  <div class="page-head">
+    <h1>Projects</h1>
+    {#if data.user?.isAdmin}
+      <div class="actions"><a class="button" href="/admin/projects/new" data-new-project>New project</a></div>
+    {/if}
+  </div>
   {#if data.projects.length === 0}
     <p>No projects you can see yet.</p>
   {:else}
@@ -35,7 +37,7 @@ let { data } = $props();
           <tr data-project={project.id}>
             <td>
               <a href={`/projects/${encodeURIComponent(project.id)}`}>{project.name}</a>
-              {#if project.region}<small data-region={project.region}>{project.region}{project.regionUnreachable ? " (not answering)" : ""}</small>{/if}
+              {#if project.region}<span class="pill" data-region={project.region}>{project.region}{project.regionUnreachable ? " (not answering)" : ""}</span>{/if}
             </td>
             <td>{project.githubRepo ?? "—"}</td>
             {#if project.lastRun}

@@ -1,5 +1,6 @@
 <script lang="ts">
 import { untrack } from "svelte";
+import { suggestedDir } from "$lib/deploy-dir";
 import { type ComponentFields, emptyComponent, type ProjectFields } from "$lib/project-fields";
 import { type AccessView, accessNote } from "$lib/source-access";
 
@@ -9,23 +10,32 @@ let {
   creating,
   action,
   access = null,
+  deployDirTemplate = null,
 }: {
   fields: ProjectFields;
   errors: string[];
   creating: boolean;
   action?: string;
   access?: AccessView | null;
+  /** The server's default deploy directory, filled in while the names are typed. */
+  deployDirTemplate?: string | null;
 } = $props();
+// The id as typed, for the suggested directories.
+let projectId = $state(untrack(() => fields.id));
+// A directory someone typed is theirs; one left empty follows the names.
+type Row = ComponentFields & { dirTyped: boolean };
 // What stardust can do with the repository, when it was asked.
 const note = $derived(access ? accessNote(access) : null);
 
-const copy = (f: ProjectFields): ComponentFields[] => f.components.map((c) => ({ ...c }));
+const copy = (f: ProjectFields): Row[] => f.components.map((c) => ({ ...c, dirTyped: c.deployDir !== "" }));
 // Filled before the first render so the rows are in the server's HTML (the form works without JavaScript),
 // then refilled when the page gets other fields (a refused save, another project).
-let components = $state<ComponentFields[]>(untrack(() => copy(fields)));
+let components = $state<Row[]>(untrack(() => copy(fields)));
 $effect(() => {
   components = copy(fields);
+  projectId = fields.id;
 });
+const dirOf = (c: Row) => (c.dirTyped ? c.deployDir : suggestedDir(deployDirTemplate, projectId, c.name));
 </script>
 
 {#if errors.length > 0}
@@ -38,10 +48,11 @@ $effect(() => {
 {/if}
 
 <form method="POST" {action} data-project-form>
+  <div class="fields">
   <label>
     Id
     {#if creating}
-      <input name="id" value={fields.id} required pattern="[a-z][a-z0-9\-]{'{0,62}'}" autocomplete="off" />
+      <input name="id" bind:value={projectId} required pattern="[a-z][a-z0-9\-]{'{0,62}'}" autocomplete="off" />
       <small>Lower-case letters, digits and dashes, starting with a letter. It cannot be changed later.</small>
     {:else}
       <code>{fields.id}</code>
@@ -55,6 +66,7 @@ $effect(() => {
     Repository
     <input name="githubRepo" value={fields.githubRepo} placeholder="owner/name" autocomplete="off" />
   </label>
+  </div>
   <button type="submit" formaction="?/check" formnovalidate data-check-access>Check access</button>
   {#if note}
     <p data-access={note.warn ? "warn" : "ok"} role={note.warn ? "alert" : "status"}>{note.text}</p>
@@ -65,6 +77,7 @@ $effect(() => {
     {#each components as component, i (i)}
       <fieldset data-component={i}>
         <legend>Component {i + 1}</legend>
+        <div class="fields">
         <label>Name <input name={`components.${i}.name`} bind:value={component.name} required /></label>
         <label>
           Pipeline
@@ -84,11 +97,29 @@ $effect(() => {
         {:else}
           <label>Dockerfile <input name={`components.${i}.dockerfile`} bind:value={component.dockerfile} placeholder="Dockerfile" /></label>
         {/if}
-        <label>Deploy directory <input name={`components.${i}.deployDir`} bind:value={component.deployDir} required placeholder="path in the deploy repository" /></label>
+        </div>
+        <label>
+          Deploy directory
+          <input
+            name={`components.${i}.deployDir`}
+            value={dirOf(component)}
+            oninput={(e) => {
+              component.deployDir = e.currentTarget.value;
+              component.dirTyped = e.currentTarget.value !== "";
+            }}
+            required={!deployDirTemplate}
+            placeholder={deployDirTemplate ? deployDirTemplate : "path in the deploy repository"}
+          />
+          {#if deployDirTemplate && !component.dirTyped}
+            <small data-dir-suggested>Filled from the id and the component's name; type to choose another.</small>
+          {/if}
+        </label>
         <button type="button" onclick={() => components.splice(i, 1)}>Remove component</button>
       </fieldset>
     {/each}
-    <button type="button" onclick={() => components.push(emptyComponent())} data-add-component>Add component</button>
+    <button type="button" onclick={() => components.push({ ...emptyComponent(), dirTyped: false })} data-add-component
+      >Add component</button
+    >
   </fieldset>
 
   <button type="submit">{creating ? "Create project" : "Save"}</button>
