@@ -2,7 +2,7 @@ import { ApiError } from "@stardust/sdk";
 import { error, fail, redirect } from "@sveltejs/kit";
 import { requireClient } from "$lib/server/api";
 import { projectFields, readFields } from "$lib/server/project-form";
-import { findProject, requireAdmin, saveProject } from "$lib/server/project-save";
+import { deployDirTemplate, findProject, requireAdmin, saveProject } from "$lib/server/project-save";
 import { needsReauth, reauthFrom } from "$lib/server/reauth";
 import { checkAccess } from "$lib/server/source-access";
 import type { Actions, PageServerLoad } from "./$types";
@@ -13,7 +13,11 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   const stored = await findProject(client, params.id);
   if (!stored) error(404, "No such project.");
   const fields = projectFields(stored);
-  return { fields, access: await checkAccess(client, fields.githubRepo) };
+  return {
+    fields,
+    access: await checkAccess(client, fields.githubRepo),
+    deployDirTemplate: await deployDirTemplate(client),
+  };
 };
 
 export const actions: Actions = {

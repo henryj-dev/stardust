@@ -1,0 +1,625 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: element defaults come first and the cases that refine them after, by section */
+/*
+ * The dashboard's one stylesheet. Pages are plain, semantic HTML (forms,
+ * tables, details, role="alert"), so styling those elements styles every
+ * page alike; a page adds a class only for what is its own.
+ */
+
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --border: #dfe3e8;
+  --text: #1c2128;
+  --muted: #5f6b7a;
+  --accent: #3b5bdb;
+  --accent-text: #ffffff;
+  --accent-soft: #e8edff;
+  --danger: #c92a2a;
+  --danger-soft: #fff0f0;
+  --ok: #2b8a3e;
+  --ok-soft: #ebfbee;
+  --warn: #b35c00;
+  --warn-soft: #fff6e6;
+  --radius: 8px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216;
+    --surface: #171b21;
+    --surface-2: #1f242c;
+    --border: #2c333d;
+    --text: #e6e9ee;
+    --muted: #97a1ae;
+    --accent: #7c95ff;
+    --accent-text: #0f1216;
+    --accent-soft: #222b47;
+    --danger: #ff7b7b;
+    --danger-soft: #3a1d1f;
+    --ok: #69db7c;
+    --ok-soft: #1a3322;
+    --warn: #ffb35c;
+    --warn-soft: #3a2a14;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    15px / 1.5 system-ui,
+    -apple-system,
+    "Segoe UI",
+    "Apple SD Gothic Neo",
+    "Noto Sans KR",
+    sans-serif;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* ---------------------------------------------------------------- the bar */
+
+header:has(> nav[aria-label="Main"]) {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  min-height: 52px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+header nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+header nav a {
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+header nav a:hover {
+  background: var(--surface-2);
+  color: var(--text);
+  text-decoration: none;
+}
+header nav a[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+header nav a:first-child {
+  margin-right: 10px;
+  padding-left: 0;
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+header nav a:first-child:hover {
+  background: none;
+}
+header [data-user] {
+  color: var(--muted);
+  font-size: 14px;
+  white-space: nowrap;
+}
+header form {
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------- the page */
+
+main {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 28px 16px 64px;
+}
+
+h1 {
+  margin: 4px 0 20px;
+  font-size: 24px;
+  line-height: 1.25;
+}
+h2 {
+  margin: 36px 0 12px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  font-size: 17px;
+}
+h1 + h2,
+main > h2:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+p {
+  margin: 0 0 12px;
+}
+main > p:first-child a {
+  color: var(--muted);
+  font-size: 14px;
+}
+small {
+  color: var(--muted);
+  font-size: 13px;
+}
+code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+ul {
+  margin: 0 0 12px;
+  padding-left: 20px;
+}
+li + li {
+  margin-top: 4px;
+}
+
+/* Sections a page groups: a workload, costs. */
+main section {
+  margin: 0 0 16px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+main section > :last-child {
+  margin-bottom: 0;
+}
+
+details {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+details > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+details[open] > summary {
+  margin-bottom: 12px;
+}
+section details {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+/* ---------------------------------------------------------------- tables */
+
+table {
+  width: 100%;
+  margin: 0 0 16px;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+section table {
+  border-radius: 6px;
+}
+th,
+td {
+  padding: 9px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+th {
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+tbody tr:hover td {
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+td form {
+  display: inline;
+  margin: 0;
+}
+td.nowrap {
+  white-space: nowrap;
+}
+/* Long values (ids, JSON) wrap inside their cell instead of widening the table. */
+td.wrap {
+  overflow-wrap: anywhere;
+  min-width: 140px;
+}
+td.wrap code {
+  font-size: 12px;
+}
+
+/* Wide tables scroll on their own instead of widening the page. */
+@media (max-width: 760px) {
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}
+
+/* Run and job states, where a cell or a label says one (a row only carries it). */
+:not(tr)[data-status] {
+  font-weight: 600;
+}
+:not(tr)[data-status="success"],
+:not(tr)[data-status="passed"] {
+  color: var(--ok);
+}
+:not(tr)[data-status="failed"],
+:not(tr)[data-status="failure"],
+:not(tr)[data-status="error"],
+:not(tr)[data-status="cancelled"] {
+  color: var(--danger);
+}
+:not(tr)[data-status="running"],
+:not(tr)[data-status="queued"],
+:not(tr)[data-status="pending"] {
+  color: var(--warn);
+}
+span[data-job] {
+  display: inline-block;
+  margin: 0 10px 2px 0;
+  font-size: 13px;
+}
+
+/* ---------------------------------------------------------------- forms */
+
+form {
+  margin: 0 0 16px;
+}
+main > form,
+section > form,
+details > form,
+main > form fieldset {
+  display: grid;
+  gap: 12px;
+  max-width: 680px;
+}
+label {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 500;
+}
+label > small {
+  font-weight: 400;
+}
+/* A checkbox or radio reads as one line: the box, then what it means. */
+label:has(> input[type="checkbox"]),
+label:has(> input[type="radio"]) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-weight: 400;
+}
+label > input[type="checkbox"],
+label > input[type="radio"] {
+  margin: 3px 0 0;
+  flex: none;
+}
+
+input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="file"]),
+select,
+textarea {
+  width: 100%;
+  padding: 7px 10px;
+  font: inherit;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+input[type="number"] {
+  max-width: 140px;
+}
+input[type="file"] {
+  font: inherit;
+  font-size: 14px;
+}
+textarea {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+td input:not([type="checkbox"], [type="radio"], [type="hidden"]),
+td select {
+  min-width: 160px;
+}
+
+fieldset {
+  margin: 0;
+  padding: 14px 16px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+fieldset fieldset {
+  background: var(--surface-2);
+}
+legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+
+button {
+  justify-self: start;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+button[type="submit"] {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+button[type="submit"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, black);
+}
+/* Secondary submits: checking, signing out, small actions in a row. */
+button[formaction],
+header button[type="submit"],
+td button[type="submit"],
+form[data-reauth-sso] button[type="submit"] {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--border);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* Destructive forms say so. */
+form[data-delete-project] button[type="submit"] {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+/* ---------------------------------------------------------------- messages */
+
+[role="alert"] {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--radius);
+}
+[role="alert"] ul {
+  margin: 4px 0 0;
+}
+[role="status"],
+[data-access="ok"],
+p[data-scaffolded],
+p[data-files-saved],
+p[data-access-saved],
+p[data-resealed],
+p[data-restarted],
+p[data-scaled],
+p[data-rolled-back] {
+  padding: 10px 14px;
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
+  border-radius: var(--radius);
+}
+[data-access="warn"] {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+}
+
+/* ---------------------------------------------------------------- page parts */
+
+/* A page's title with what it is about, and its main action on the right. */
+.page-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin: 4px 0 16px;
+}
+.page-head h1 {
+  margin: 0;
+}
+.page-head .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+.crumb {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+.crumb a {
+  color: var(--muted);
+}
+
+/* A link that does what a button does. */
+a.button {
+  display: inline-block;
+  padding: 7px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent);
+  border-radius: 6px;
+}
+a.button:hover {
+  text-decoration: none;
+  background: color-mix(in srgb, var(--accent) 88%, black);
+}
+
+/* A project's pages. */
+nav.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 20px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+nav.tabs a {
+  padding: 8px 12px;
+  margin-bottom: -1px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+nav.tabs a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+nav.tabs a[aria-current="page"] {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+/* Small labels: a region, whether a page is live. */
+.pill {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  vertical-align: middle;
+}
+.pill.live {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: color-mix(in srgb, var(--ok) 30%, transparent);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.chips a {
+  padding: 3px 10px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.chips a:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+/* A form that fits on one line: a few inputs and its button. */
+form.toolbar,
+main > form.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  max-width: none;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+form.toolbar > label {
+  flex: 1 1 160px;
+}
+form.toolbar select,
+form.toolbar input {
+  width: auto;
+}
+form.toolbar input:not([type="checkbox"]) {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+form.toolbar button {
+  flex: none;
+}
+
+/* A short form on its own: signing in. */
+main.narrow {
+  max-width: 400px;
+  padding-top: 12vh;
+}
+main.narrow > form {
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+main.narrow > form button[type="submit"] {
+  justify-self: stretch;
+}
+
+/* Fields side by side where there is room. */
+.fields {
+  display: grid;
+  align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}

@@ -10,7 +10,7 @@ let { data } = $props();
 
 <main>
   <h1>Audit log</h1>
-  <form method="GET" data-audit-filter>
+  <form method="GET" class="toolbar" data-audit-filter>
     <label>Who <input name="actor" value={data.filter.actor ?? ""} placeholder="username" /></label>
     <label>Action <input name="action" value={data.filter.action ?? ""} placeholder="project, auth.login…" /></label>
     <label>Project <input name="project" value={data.filter.project ?? ""} /></label>

@@ -1,5 +1,6 @@
 <script lang="ts">
 import ProjectForm from "$lib/components/ProjectForm.svelte";
+import ProjectNav from "$lib/components/ProjectNav.svelte";
 
 let { data, form } = $props();
 </script>
@@ -9,12 +10,13 @@ let { data, form } = $props();
 </svelte:head>
 
 <main>
-  <h1>{data.fields.id}: settings</h1>
-  <p><a href={`/projects/${encodeURIComponent(data.fields.id)}`}>Back to runs</a></p>
+  <div class="page-head"><h1>{data.fields.id}</h1></div>
+  <ProjectNav projectId={data.fields.id} current="settings" isAdmin={true} />
   <ProjectForm
     fields={(form && "fields" in form ? form.fields : undefined) ?? data.fields}
     errors={(form && "errors" in form ? form.errors : undefined) ?? []}
     creating={false}
+    deployDirTemplate={data.deployDirTemplate}
     action="?/save"
     access={form && "access" in form ? form.access : data.access}
   />

@@ -6,7 +6,7 @@ let { data, form } = $props();
   <title>Sign in · stardust</title>
 </svelte:head>
 
-<main>
+<main class="narrow">
   <h1>Sign in</h1>
   {#if form?.secondFactor}
     <form method="POST" action={`?/code&next=${encodeURIComponent(data.next)}`} data-second-factor>

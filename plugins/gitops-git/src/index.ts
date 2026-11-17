@@ -1,4 +1,4 @@
-import { type DeployRepo, definePlugin, isEnvRoot } from "@stardust/core";
+import { checkDeployDirTemplate, type DeployRepo, definePlugin, isEnvRoot } from "@stardust/core";
 import { GitCliRepo } from "./git-cli.ts";
 import { installationTokens, repoFromUrl } from "./github-app.ts";
 
@@ -12,6 +12,7 @@ import { installationTokens, repoFromUrl } from "./github-app.ts";
  *     username: x-access-token                    # optional
  *     buildRevAnnotation: example.com/build-rev   # optional
  *     envRoot: deploy/env                         # optional: where the env layers live
+ *     deployDirTemplate: deploy/apps/{project}/{component}   # optional: a component's default directory
  *
  * Or, for a GitHub repository, as a GitHub App instead of a token:
  *
@@ -49,6 +50,7 @@ export const plugin = definePlugin({
           ...(config.username ? { username: config.username as string } : {}),
         }),
         ...(config.envRoot ? { envRoot: config.envRoot as string } : {}),
+        ...(config.deployDirTemplate ? { deployDirTemplate: config.deployDirTemplate as string } : {}),
         ...(config.buildRevAnnotation ? { buildRevAnnotation: config.buildRevAnnotation as string } : {}),
       };
       return { deployRepo };
@@ -59,7 +61,18 @@ export const plugin = definePlugin({
     const s = section as Record<string, unknown>;
     const problems: string[] = [];
     for (const key of Object.keys(s)) {
-      if (!["url", "branch", "token", "username", "buildRevAnnotation", "githubApp", "envRoot"].includes(key))
+      if (
+        ![
+          "url",
+          "branch",
+          "token",
+          "username",
+          "buildRevAnnotation",
+          "githubApp",
+          "envRoot",
+          "deployDirTemplate",
+        ].includes(key)
+      )
         problems.push(`unknown key "${key}"`);
     }
     if (typeof s.url !== "string" || !/^(https?:\/\/|file:\/\/|\/)\S+$/.test(s.url)) {
@@ -70,6 +83,10 @@ export const plugin = definePlugin({
     if (typeof s.branch !== "string" || s.branch === "") problems.push("branch must be a non-empty string");
     if (s.envRoot !== undefined && !isEnvRoot(s.envRoot))
       problems.push("envRoot must be a directory in the repository, like deploy/env (no leading slash, no ..)");
+    if (s.deployDirTemplate !== undefined) {
+      const why = checkDeployDirTemplate(s.deployDirTemplate);
+      if (why) problems.push(`deployDirTemplate ${why}`);
+    }
     if (s.token !== undefined && !isRef(s.token))
       problems.push("token must be a reference: { env: NAME } or { file: PATH }");
     if (s.username !== undefined && typeof s.username !== "string") problems.push("username must be a string");

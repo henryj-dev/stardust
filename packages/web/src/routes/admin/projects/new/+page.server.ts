@@ -1,15 +1,15 @@
 import { fail } from "@sveltejs/kit";
 import { requireClient } from "$lib/server/api";
 import { emptyComponent, type ProjectFields, readFields } from "$lib/server/project-form";
-import { findProject, requireAdmin, saveProject } from "$lib/server/project-save";
+import { deployDirTemplate, findProject, requireAdmin, saveProject } from "$lib/server/project-save";
 import { checkAccess } from "$lib/server/source-access";
 import type { Actions, PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = ({ locals, url }) => {
-  requireClient(locals, url);
+export const load: PageServerLoad = async ({ locals, url }) => {
+  const client = requireClient(locals, url);
   requireAdmin(locals);
   const fields: ProjectFields = { id: "", name: "", githubRepo: "", components: [emptyComponent()] };
-  return { fields };
+  return { fields, deployDirTemplate: await deployDirTemplate(client) };
 };
 
 export const actions: Actions = {

@@ -66,7 +66,7 @@ export type Parsed =
  * Fields that do not apply to a pipeline are dropped, so switching a component from C to N
  * does not send a Dockerfile the server would refuse.
  */
-export function parseFields(fields: ProjectFields): Parsed {
+export function parseFields(fields: ProjectFields, options: { deployDirTemplate?: string | null } = {}): Parsed {
   const errors: string[] = [];
   if (!PROJECT_ID.test(fields.id))
     errors.push("The project id must start with a letter and use only lower-case letters, digits and dashes.");
@@ -76,7 +76,8 @@ export function parseFields(fields: ProjectFields): Parsed {
       ? (c.pipeline as ProjectComponent["pipeline"])
       : null;
     if (!pipeline) errors.push(`${at}: choose a pipeline.`);
-    if (c.deployDir === "") errors.push(`${at}: the deploy directory is required.`);
+    // Left empty with a template, the server fills it in.
+    if (c.deployDir === "" && !options.deployDirTemplate) errors.push(`${at}: the deploy directory is required.`);
     const out: ProjectComponent = { name: c.name, pipeline: pipeline ?? "C", deployDir: c.deployDir };
     if (c.context !== "") out.context = c.context;
     if (pipeline === "N") {

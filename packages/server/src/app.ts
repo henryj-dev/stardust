@@ -11,6 +11,7 @@ import {
   commitWithCas,
   type DeployRepo,
   decideAccess,
+  deployDirFor,
   type Feature,
   type FileMount,
   type Identity,
@@ -846,6 +847,21 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     return c.json({ ok: true });
   });
 
+  // A component that names no deploy directory gets the template's, when there is one.
+  const withDeployDir = <T extends { name?: unknown; deployDir?: unknown }>(project: string, component: T): T => {
+    const template = services.deployRepo?.deployDirTemplate;
+    if (!template || (typeof component.deployDir === "string" && component.deployDir !== "")) return component;
+    if (typeof component.name !== "string" || component.name === "") return component;
+    return { ...component, deployDir: deployDirFor(template, project, component.name) };
+  };
+
+  // What the project form fills in for an administrator: where a component's manifests go by default.
+  app.get("/api/v1/deploy/defaults", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    return c.json({ deployDirTemplate: services.deployRepo?.deployDirTemplate ?? null });
+  });
+
   app.put("/api/v1/projects/:id", async (c) => {
     const denied = await deny(c, "admin");
     if (denied) return denied;
@@ -860,7 +876,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       name: body.name ?? c.req.param("id"),
       githubRepo: body.githubRepo ?? null,
       pipelineDef: body.pipelineDef ?? null,
-      components: body.components ?? [],
+      components: (body.components ?? []).map((x) => withDeployDir(c.req.param("id"), x)),
       metadata: body.metadata ?? {},
     };
     const before = await getProject(globalSql, project.id);
@@ -920,7 +936,10 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (!project) return c.json({ error: "unknown project" }, 404);
     const body = (await c.req.json().catch(() => null)) as Partial<Project["components"][number]> | null;
     if (!body || typeof body !== "object") return c.json({ error: "body is not JSON" }, 400);
-    const component = { ...body, name: c.req.param("name") } as Project["components"][number];
+    const component = withDeployDir(project.id, {
+      ...body,
+      name: c.req.param("name"),
+    } as Project["components"][number]);
     const existed = project.components.some((x) => x.name === component.name);
     const components = existed
       ? project.components.map((x) => (x.name === component.name ? component : x))

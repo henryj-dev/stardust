@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { RunView } from "@stardust/sdk";
+import ProjectNav from "$lib/components/ProjectNav.svelte";
 
 let { data, form } = $props();
 let runs = $state<RunView[]>([]);
@@ -30,27 +31,20 @@ $effect(() => {
 </svelte:head>
 
 <main>
-  <h1>{data.projectId}</h1>
-  {#if data.user?.isAdmin}
-    <p><a href={`/projects/${encodeURIComponent(data.projectId)}/settings`} data-settings>Settings</a></p>
-  {/if}
-  <!-- For maintainers and administrators; the page says so to anyone else. -->
-  <p>
-    <a href={`/projects/${encodeURIComponent(data.projectId)}/env`} data-env-link>Environment</a> ·
-    <a href={`/projects/${encodeURIComponent(data.projectId)}/audit`} data-audit-link>Audit log</a>
-  </p>
+  <div class="page-head">
+    <h1>{data.projectId}</h1>
+    <span class="pill" class:live data-live={live}>{live ? "Live" : "Connecting…"}</span>
+  </div>
+  <ProjectNav projectId={data.projectId} current="runs" isAdmin={data.user?.isAdmin === true} />
   {#if data.components.length > 0}
-    <p data-components>
-      Components:
-      {#each data.components as name, i (name)}
-        {i > 0 ? " · " : ""}<a href={`/projects/${encodeURIComponent(data.projectId)}/components/${encodeURIComponent(name)}`}
-          >{name}</a
-        >
+    <p class="chips" data-components>
+      Components
+      {#each data.components as name (name)}
+        <a href={`/projects/${encodeURIComponent(data.projectId)}/components/${encodeURIComponent(name)}`}>{name}</a>
       {/each}
     </p>
   {/if}
-  <p data-live={live}>{live ? "Live" : "Connecting…"}</p>
-  <form method="POST" action="?/pull" data-pull>
+  <form method="POST" action="?/pull" class="toolbar" data-pull>
     <select name="kind" aria-label="What to pull">
       <option value="branch">Branch</option>
       <option value="tag">Tag</option>
@@ -81,7 +75,7 @@ $effect(() => {
             </td>
             <td>{run.ref}{#if run.requestedBy}<br /><small>pulled by {run.requestedBy}</small>{/if}</td>
             <td><code>{run.sha.slice(0, 7)}</code></td>
-            <td>{run.status}</td>
+            <td data-status={run.status}>{run.status}</td>
             <td>
               {#each run.jobs as job (job.name)}
                 <span data-job={job.name} data-status={job.status}>{job.name}: {job.status}</span>
