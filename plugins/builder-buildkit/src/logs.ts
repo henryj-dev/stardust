@@ -5,7 +5,7 @@
  */
 
 import type { BuildLogReader, KubeStreamClient } from "@stardust/core";
-import { LABEL_PREFIX } from "./job.ts";
+import { BUILD_CONTAINER, LABEL_PREFIX } from "./job.ts";
 
 export interface BuildLogOptions {
   /** Lines from the end the log starts with. */
@@ -48,11 +48,11 @@ export function buildLogReader(
     const pod = pods[0];
     const name = pod?.metadata?.name;
     if (!name) return { state: "none" };
-    const build = pod.status?.containerStatuses?.find((c) => c.name === "build");
+    const build = pod.status?.containerStatuses?.find((c) => c.name === BUILD_CONTAINER);
     if (!build?.state || "waiting" in build.state) return { state: "waiting" };
 
     const query = new URLSearchParams({
-      container: "build",
+      container: BUILD_CONTAINER,
       follow: String(follow),
       tailLines: String(tailLines),
       limitBytes: String(limitBytes),

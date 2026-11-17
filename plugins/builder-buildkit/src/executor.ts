@@ -6,7 +6,7 @@
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { BuildOutcome, KubeClient } from "@stardust/core";
-import { DIGEST_LINE } from "./job.ts";
+import { BUILD_CONTAINER, DIGEST_LINE } from "./job.ts";
 
 export interface RunBuildOptions {
   signal: AbortSignal;
@@ -93,7 +93,7 @@ async function buildLog(kube: KubeClient, ns: string, jobName: string, tailLines
   if (!pod) return "";
   const res = await kube.request(
     "GET",
-    `/api/v1/namespaces/${ns}/pods/${encodeURIComponent(pod)}/log?container=build&tailLines=${tailLines}`,
+    `/api/v1/namespaces/${ns}/pods/${encodeURIComponent(pod)}/log?container=${BUILD_CONTAINER}&tailLines=${tailLines}`,
   );
   return ok(res.status) ? res.body : "";
 }
