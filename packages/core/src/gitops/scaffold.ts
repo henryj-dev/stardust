@@ -4,6 +4,7 @@
  * start from when it has none. A build whose image no manifest uses cannot
  * be delivered, so a run checks this before building.
  */
+import { envConfigMapName, envSecretName } from "../env/render.ts";
 import { imageTagPattern } from "./image-tag.ts";
 
 /** Whether any manifest (path → text) references `<host>/<project>/<component>:<tag>`. */
@@ -97,6 +98,10 @@ spec:
         - name: ${name}
           # stardust replaces the tag with each delivery.
           image: ${input.imageRepository}:pending
+          # The values set on stardust's env page. Optional: it starts before any are set.
+          envFrom:
+            - configMapRef: { name: ${envConfigMapName(name)}, optional: true }
+            - secretRef: { name: ${envSecretName(name)}, optional: true }
 ${
   input.port
     ? `          ports:

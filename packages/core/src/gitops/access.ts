@@ -9,6 +9,9 @@
  * - a RoleBinding that lets stardust's server read the namespace (pods, logs,
  *   events, workloads, Services) for the dashboard. The role is a read-only
  *   ClusterRole the chart ships; it is bound per namespace, never cluster-wide.
+ * - an envFrom in each container, so the values set on the env page reach the
+ *   process as environment variables. Both references are optional: a
+ *   component without env values yet still starts.
  */
 import { type Document, isMap, isSeq, parseAllDocuments, stringify, type YAMLMap } from "yaml";
 
@@ -90,6 +93,82 @@ export function readPullSecrets(text: string): string[] {
   return [...new Set(podSpecs(text).specs.flatMap((s) => pullNames(s.spec)))];
 }
 
+const envRefs = (configMap: string, secret: string) => [
+  { key: "configMapRef", name: configMap },
+  { key: "secretRef", name: secret },
+];
+
+const containersOf = (spec: YAMLMap): YAMLMap[] => {
+  const list = spec.get("containers", true);
+  return isSeq(list) ? list.items.filter(isMap) : [];
+};
+
+const envFromNames = (container: YAMLMap, key: string): string[] => {
+  const list = container.get("envFrom", true);
+  if (!isSeq(list)) return [];
+  return list.items.flatMap((item) => {
+    if (!isMap(item)) return [];
+    const ref = item.get(key, true);
+    return isMap(ref) && typeof ref.get("name") === "string" ? [String(ref.get("name"))] : [];
+  });
+};
+
+/**
+ * Whether every container of every workload in a manifest reads the env
+ * ConfigMap and Secret whole; null when the manifest runs no container.
+ */
+export function readsEnv(text: string, names: { configMap: string; secret: string }): boolean | null {
+  const containers = podSpecs(text).specs.flatMap((s) => containersOf(s.spec));
+  if (containers.length === 0) return null;
+  return containers.every((c) =>
+    envRefs(names.configMap, names.secret).every((r) => envFromNames(c, r.key).includes(r.name)),
+  );
+}
+
+/**
+ * Adds or removes the envFrom references to the env ConfigMap and Secret in
+ * every container of every workload, leaving other envFrom entries, env and
+ * the rest of each document as they are. Init containers are left alone.
+ */
+export function setEnvFrom(
+  text: string,
+  names: { configMap: string; secret: string },
+  on: boolean,
+): { text: string; workloads: number; changed: boolean } {
+  const { docs, specs } = podSpecs(text);
+  let changed = false;
+  for (const { doc, spec } of specs) {
+    for (const container of containersOf(spec)) {
+      for (const ref of envRefs(names.configMap, names.secret)) {
+        const has = envFromNames(container, ref.key).includes(ref.name);
+        if (on === has) continue;
+        changed = true;
+        const list = container.get("envFrom", true);
+        if (on) {
+          const entry = { [ref.key]: { name: ref.name, optional: true } };
+          if (isSeq(list)) list.items.push(doc.createNode(entry));
+          else container.set("envFrom", doc.createNode([entry]));
+        } else if (isSeq(list)) {
+          list.items = list.items.filter((item) => {
+            const r = isMap(item) ? item.get(ref.key, true) : null;
+            return !(isMap(r) && r.get("name") === ref.name);
+          });
+          if (list.items.length === 0) container.delete("envFrom");
+        }
+      }
+    }
+  }
+  return { text: changed ? printAll(docs) : text, workloads: specs.length, changed };
+}
+
+const printAll = (docs: Document[]) =>
+  docs
+    .map((d, i) => {
+      const s = d.toString();
+      return i > 0 && !s.startsWith("---") ? `---\n${s}` : s;
+    })
+    .join("");
+
 /**
  * Adds or removes one pull Secret in every workload of a manifest, leaving
  * the others it names and the rest of each document as they are.
@@ -115,12 +194,5 @@ export function setPullSecret(
       if (list.items.length === 0) spec.delete("imagePullSecrets");
     }
   }
-  if (!changed) return { text, workloads: specs.length, changed };
-  const out = docs
-    .map((d, i) => {
-      const s = d.toString();
-      return i > 0 && !s.startsWith("---") ? `---\n${s}` : s;
-    })
-    .join("");
-  return { text: out, workloads: specs.length, changed };
+  return { text: changed ? printAll(docs) : text, workloads: specs.length, changed };
 }

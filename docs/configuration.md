@@ -636,7 +636,12 @@ ever needs to open the files under its root.
 From the layers stardust renders, in each component's `deployDir`,
 `env.configmap.yaml` (ConfigMap `<component>-env`) and `env.secret.enc.yaml`
 (Secret `<component>-env-secret`, encrypted), and lists both in the
-directory's `kustomization.yaml`. Use them from the workload with `envFrom`.
+directory's `kustomization.yaml`. Use them from the workload with `envFrom`:
+starter manifests already do (both references `optional`, so a component
+starts before any value is set), and an existing component can be wired from
+Cluster access on its page (`PUT …/components/<name>/access` with
+`"envVars": true`). Until a workload reads them, a change commits but reaches
+no process.
 
 - **Reading** (`/projects/<id>/env`, `GET /api/v1/projects/<id>/env`) is for
   anyone who can read the project: plain values, and the **names** of
@@ -841,7 +846,10 @@ in its kustomization, so withdrawing removes them) — at scaffolding
   ClusterRole to the server, so the page can show the namespace (needs
   `runtime.bindings`).
 
-Both are audited (`project.component.access`, `registry.pull.reseal`).
+The same call's `"envVars"` adds or removes the `envFrom` references to the
+component's env ConfigMap and Secret in each container, keeping any others.
+
+All are audited (`project.component.access`, `registry.pull.reseal`).
 
 ### Runs
 

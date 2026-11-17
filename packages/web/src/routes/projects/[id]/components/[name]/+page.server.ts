@@ -91,12 +91,12 @@ export const actions: Actions = {
       return fail(r.status, { scaffoldError: r.message });
     }
   },
-  // The pull Secret and pod view, each as the form's checkbox says (administrators; the server checks).
+  // The pull Secret, pod view and env variables, each as the form's checkbox says (administrators; the server checks).
   access: async ({ locals, params, request, url }) => {
     const client = requireClient(locals, url);
     const form = await request.formData();
-    const change: { registryPull?: boolean; podView?: boolean } = {};
-    for (const key of ["registryPull", "podView"] as const) {
+    const change: { registryPull?: boolean; podView?: boolean; envVars?: boolean } = {};
+    for (const key of ["registryPull", "podView", "envVars"] as const) {
       // Only what the form offered: a hidden marker says the checkbox was there.
       if (form.get(`${key}.shown`) === "1") change[key] = form.get(key) === "on";
     }

@@ -98,6 +98,7 @@ import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import {
+  type AccessChange,
   AccessConflict,
   AccessInputError,
   type AccessServices,
@@ -1085,13 +1086,15 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (!project || !component) return c.json({ error: "unknown component" }, 404);
     if (!services.deployRepo) return c.json({ error: "access needs a deploy repository (gitops-git)" }, 404);
     const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
-    const change: { registryPull?: boolean; podView?: boolean } = {};
+    const change: AccessChange = {};
     for (const key of Object.keys(body ?? {})) {
-      if (key !== "registryPull" && key !== "podView") return c.json({ error: `unknown field ${key}` }, 400);
+      if (key !== "registryPull" && key !== "podView" && key !== "envVars") {
+        return c.json({ error: `unknown field ${key}` }, 400);
+      }
       if (typeof body?.[key] !== "boolean") return c.json({ error: `${key} must be true or false` }, 400);
       change[key] = body[key] as boolean;
     }
-    if (Object.keys(change).length === 0) return c.json({ error: "set registryPull or podView" }, 400);
+    if (Object.keys(change).length === 0) return c.json({ error: "set registryPull, podView or envVars" }, 400);
     let result: Awaited<ReturnType<typeof writeAccess>>;
     try {
       result = await writeAccess(

@@ -55,6 +55,8 @@ export interface ComponentAccess {
   registryPull: { available: boolean; on: boolean; others: string[] };
   /** A RoleBinding that lets the dashboard read the namespace. */
   podView: { available: boolean; on: boolean };
+  /** Whether its containers read the env page's values as environment variables (envFrom). */
+  envVars: { available: boolean; on: boolean };
 }
 
 /** One entry of the audit log: who did what. Details name things, never secret values. */
@@ -389,7 +391,7 @@ export interface Client {
   setComponentAccess(
     projectId: string,
     component: string,
-    change: { registryPull?: boolean; podView?: boolean },
+    change: { registryPull?: boolean; podView?: boolean; envVars?: boolean },
   ): Promise<{ status: "committed" | "no_change"; deployCommit: string | null }>;
   /** Seals the current pull login into every component's pull Secret, as one commit. Administrators only. */
   resealRegistryPull(): Promise<{

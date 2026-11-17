@@ -3,9 +3,11 @@ import { describe, it } from "node:test";
 import { parse } from "yaml";
 import {
   readPullSecrets,
+  readsEnv,
   registryPullDocument,
   registryPullSecretName,
   runtimeBindingDocument,
+  setEnvFrom,
   setPullSecret,
 } from "./access.ts";
 import { scaffoldComponent } from "./scaffold.ts";
@@ -19,7 +21,8 @@ const deployment =
     port: 8788,
   }).get("deployment.yaml") ?? "";
 
-type Spec = { imagePullSecrets?: Array<{ name: string }> };
+type EnvFrom = Array<Record<string, { name: string; optional?: boolean }>>;
+type Spec = { imagePullSecrets?: Array<{ name: string }>; containers: Array<{ envFrom?: EnvFrom }> };
 const specOf = (text: string) => (parse(text) as { spec: { template: { spec: Spec } } }).spec.template.spec;
 
 describe("a component's cluster access", () => {
@@ -119,5 +122,33 @@ describe("a component's cluster access", () => {
         }),
       /exposing needs a port/,
     );
+  });
+
+  it("wires the env ConfigMap and Secret into each container, keeping other envFrom entries", () => {
+    const names = { configMap: "push-env", secret: "push-env-secret" };
+    assert.equal(readsEnv(deployment, names), true, "a scaffolded workload reads them already");
+    const bare = setEnvFrom(deployment, names, false);
+    assert.equal(bare.changed, true);
+    assert.equal(specOf(bare.text).containers[0]?.envFrom, undefined);
+    assert.equal(readsEnv(bare.text, names), false);
+    const own = bare.text.replace(
+      "          securityContext:\n            allowPrivilegeEscalation",
+      "          envFrom:\n            - configMapRef: { name: legacy }\n          securityContext:\n            allowPrivilegeEscalation",
+    );
+    const on = setEnvFrom(own, names, true);
+    assert.equal(on.changed, true);
+    assert.deepEqual(specOf(on.text).containers[0]?.envFrom, [
+      { configMapRef: { name: "legacy" } },
+      { configMapRef: { name: "push-env", optional: true } },
+      { secretRef: { name: "push-env-secret", optional: true } },
+    ]);
+    assert.equal(readsEnv(on.text, names), true);
+    assert.equal(setEnvFrom(on.text, names, true).changed, false);
+    assert.deepEqual(specOf(setEnvFrom(on.text, names, false).text).containers[0]?.envFrom, [
+      { configMapRef: { name: "legacy" } },
+    ]);
+    const service = "apiVersion: v1\nkind: Service\nmetadata:\n  name: push\n";
+    assert.equal(readsEnv(service, names), null);
+    assert.equal(setEnvFrom(service, names, true).changed, false);
   });
 });
