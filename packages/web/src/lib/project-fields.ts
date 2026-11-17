@@ -9,6 +9,8 @@ export interface ComponentFields {
   port: string;
   /** One `KEY=VALUE` per line. */
   buildEnv: string;
+  /** Pipeline M: the published image to mirror, pinned by digest. */
+  image: string;
   deployDir: string;
 }
 
@@ -21,5 +23,5 @@ export interface ProjectFields {
 
 /** A new component row: pipeline C until someone picks another. */
 export function emptyComponent(): ComponentFields {
-  return { name: "", pipeline: "C", context: "", dockerfile: "", port: "", buildEnv: "", deployDir: "" };
+  return { name: "", pipeline: "C", context: "", dockerfile: "", port: "", buildEnv: "", image: "", deployDir: "" };
 }

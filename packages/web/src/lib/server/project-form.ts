@@ -17,6 +17,7 @@ export function projectFields(p: ProjectView): ProjectFields {
       buildEnv: Object.entries(c.buildEnv ?? {})
         .map(([k, v]) => `${k}=${v}`)
         .join("\n"),
+      image: c.image ?? "",
       deployDir: c.deployDir,
     })),
   };
@@ -24,7 +25,10 @@ export function projectFields(p: ProjectView): ProjectFields {
 
 /** The same rule as the server's: lower-case letters, digits and dashes, starting with a letter. */
 const PROJECT_ID = /^[a-z][a-z0-9-]{0,62}$/;
-const PIPELINES = ["W", "C", "N"] as const;
+const PIPELINES = ["W", "C", "N", "M"] as const;
+/** The server's rule (core PINNED_IMAGE): a registry path, an optional tag, and the digest. */
+const PINNED_IMAGE =
+  /^[a-z0-9]+([._-][a-z0-9]+)*(:[0-9]+)?(\/[a-z0-9]+([._-][a-z0-9]+)*)+(:[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?@sha256:[0-9a-f]{64}$/;
 
 const text = (form: FormData, key: string): string => {
   const v = form.get(key);
@@ -50,6 +54,7 @@ export function readFields(form: FormData, id: string): ProjectFields {
         dockerfile: f("dockerfile"),
         port: f("port"),
         buildEnv: f("buildEnv"),
+        image: f("image"),
         deployDir: f("deployDir"),
       };
     });
@@ -64,7 +69,8 @@ export type Parsed =
  * Checks what the form can tell by itself and turns the text into a project.
  * The server checks the rest (names, repository, paths) and its answer is shown as it comes.
  * Fields that do not apply to a pipeline are dropped, so switching a component from C to N
- * does not send a Dockerfile the server would refuse.
+ * does not send a Dockerfile the server would refuse. Pipeline M builds nothing: it takes
+ * only the image to mirror.
  */
 export function parseFields(fields: ProjectFields, options: { deployDirTemplate?: string | null } = {}): Parsed {
   const errors: string[] = [];
@@ -79,6 +85,13 @@ export function parseFields(fields: ProjectFields, options: { deployDirTemplate?
     // Left empty with a template, the server fills it in.
     if (c.deployDir === "" && !options.deployDirTemplate) errors.push(`${at}: the deploy directory is required.`);
     const out: ProjectComponent = { name: c.name, pipeline: pipeline ?? "C", deployDir: c.deployDir };
+    if (pipeline === "M") {
+      if (c.image === "") errors.push(`${at}: give the published image to mirror.`);
+      else if (!PINNED_IMAGE.test(c.image))
+        errors.push(`${at}: the image must be pinned by digest, like registry.example.com/org/app:1.2@sha256:….`);
+      else out.image = c.image;
+      return out;
+    }
     if (c.context !== "") out.context = c.context;
     if (pipeline === "N") {
       if (c.port !== "") {
