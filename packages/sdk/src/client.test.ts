@@ -331,3 +331,41 @@ it("reads and sets a component's files, passing on the server's reason", async (
     (err: Error) => err.message === "NOPE is not a secret push reads",
   );
 });
+
+it("reads and sets a component's access, and reseals pull Secrets", async () => {
+  const seen: Array<{ url: string; method: string; body: unknown }> = [];
+  const client = createClient({
+    baseUrl: "http://api.test",
+    token: "t0k",
+    fetch: async (input, init) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      seen.push({ url: String(input), method: init?.method ?? "GET", body });
+      if (String(input).endsWith("/reseal"))
+        return Response.json({ status: "committed", deployCommit: "def", components: ["pico/push"] });
+      if (init?.method !== "PUT")
+        return Response.json({
+          namespace: "pico",
+          registryPull: { available: true, on: false, others: [] },
+          podView: { available: true, on: false },
+        });
+      if (body.podView === "x") return Response.json({ error: "podView must be true or false" }, { status: 400 });
+      return Response.json({ status: "committed", deployCommit: "abc" });
+    },
+  });
+  assert.equal((await client.componentAccess("pico", "push")).namespace, "pico");
+  assert.deepEqual(await client.setComponentAccess("pico", "push", { registryPull: true }), {
+    status: "committed",
+    deployCommit: "abc",
+  });
+  assert.deepEqual(seen[1], {
+    url: "http://api.test/api/v1/projects/pico/components/push/access",
+    method: "PUT",
+    body: { registryPull: true },
+  });
+  assert.deepEqual((await client.resealRegistryPull()).components, ["pico/push"]);
+  assert.equal(seen[2]?.method, "POST");
+  await assert.rejects(
+    client.setComponentAccess("pico", "push", { podView: "x" as unknown as boolean }),
+    (err: Error) => err.message === "podView must be true or false",
+  );
+});

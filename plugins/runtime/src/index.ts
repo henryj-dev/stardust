@@ -6,9 +6,9 @@
  *
  *   runtime: {}
  *
- * The server's service account needs read access to pods, pod logs, events
- * and the workloads in the components' namespaces (the chart's
- * `runtime.namespaces`). Pod logs come from the `logs` port: logs-kube for
+ * The server's service account needs read access to pods, pod logs, events,
+ * Services and the workloads in the components' namespaces (the chart's
+ * `runtime.namespaces`, or `runtime.bindings` and a component's pod view). Pod logs come from the `logs` port: logs-kube for
  * live pods, logs-loki for pods that are gone.
  */
 import {
@@ -31,7 +31,7 @@ import {
   type Workload,
   WorkloadEditError,
 } from "@stardust/core";
-import { parse } from "yaml";
+import { parse, parseAllDocuments } from "yaml";
 import { readWorkload } from "./live.ts";
 
 /** Pod-template annotation a restart writes; changing it rolls the workload out. */
@@ -71,6 +71,54 @@ function kustomizeNamespace(files: ReadonlyMap<string, string>, dir: string): st
 }
 
 const notFound = (what: string): RouteResponse => ({ status: 404, body: { error: `unknown ${what}` } });
+
+/** The Services a component's manifests declare: name and namespace, if they say. */
+function findServices(files: ReadonlyMap<string, string>): Array<{ name: string; namespace: string | null }> {
+  const out: Array<{ name: string; namespace: string | null }> = [];
+  for (const text of files.values()) {
+    for (const doc of parseAllDocuments(text)) {
+      if (doc.errors.length > 0 || doc.get("kind") !== "Service") continue;
+      const name = doc.getIn(["metadata", "name"]);
+      const namespace = doc.getIn(["metadata", "namespace"]);
+      if (typeof name === "string") out.push({ name, namespace: typeof namespace === "string" ? namespace : null });
+    }
+  }
+  return out;
+}
+
+export interface ServiceView {
+  name: string;
+  namespace: string | null;
+  type?: string;
+  ports?: Array<{ port: number; protocol: string }>;
+  /** The address outside the cluster a LoadBalancer got, once it has one. */
+  external?: string | null;
+  error?: string;
+}
+
+/** A Service as it runs: its type, ports and the external address it was given. */
+async function readService(kube: Needs["kube"], name: string, namespace: string | null): Promise<ServiceView> {
+  if (!namespace) return { name, namespace, error: "the manifests name no namespace" };
+  const res = await kube.request(
+    "GET",
+    `/api/v1/namespaces/${encodeURIComponent(namespace)}/services/${encodeURIComponent(name)}`,
+  );
+  if (res.status === 404) return { name, namespace, error: "not applied yet" };
+  if (res.status === 403) return { name, namespace, error: "stardust cannot read this namespace" };
+  if (res.status !== 200) return { name, namespace, error: `the cluster answered ${res.status}` };
+  const live = JSON.parse(res.body) as {
+    spec?: { type?: string; ports?: Array<{ port: number; protocol?: string }> };
+    status?: { loadBalancer?: { ingress?: Array<{ ip?: string; hostname?: string }> } };
+  };
+  const ingress = live.status?.loadBalancer?.ingress?.[0];
+  return {
+    name,
+    namespace,
+    type: live.spec?.type ?? "ClusterIP",
+    ports: (live.spec?.ports ?? []).map((p) => ({ port: p.port, protocol: p.protocol ?? "TCP" })),
+    external: ingress?.ip ?? ingress?.hostname ?? null,
+  };
+}
 
 function routes(needs: Needs): Route[] {
   const { kube, deployRepo, projects } = needs;
@@ -274,7 +322,10 @@ function routes(needs: Needs): Route[] {
           }
           views.push(await readWorkload(kube, w, namespace));
         }
-        return { status: 200, body: { component: c.name, deployDir: c.deployDir, workloads: views } };
+        const services: ServiceView[] = [];
+        for (const svc of findServices(files))
+          services.push(await readService(kube, svc.name, svc.namespace ?? fallback));
+        return { status: 200, body: { component: c.name, deployDir: c.deployDir, workloads: views, services } };
       },
     },
     {

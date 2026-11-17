@@ -22,6 +22,9 @@ const DNS_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
  *     registry: registry.example.com/team
  *     cloneSecret: github-clone       # optional: without it, public repositories only
  *     pushSecret: registry-push
+ *     pull:                           # optional: a read-only login for pods,
+ *       username: puller              #   sealed into each component's directory
+ *       password: { env: REGISTRY_PULL_PASSWORD }
  */
 export const plugin = definePlugin({
   manifest: {
@@ -30,9 +33,24 @@ export const plugin = definePlugin({
   },
   provides: {
     ports: ["builder", "images"],
-    async create({ config, ports }) {
+    async create({ config, ports, resolveSecret }) {
       const registry = config.registry as string;
-      const images = { repository: (project: string, component: string) => `${registry}/${project}/${component}` };
+      const pull = config.pull as { username: string; password: unknown } | undefined;
+      const images = {
+        repository: (project: string, component: string) => `${registry}/${project}/${component}`,
+        // Only the server writes pull Secrets: the password is read then, not when the worker starts.
+        ...(pull
+          ? {
+              pull: {
+                host: registry.split("/")[0] as string,
+                login: async () => ({
+                  username: pull.username,
+                  password: await resolveSecret(pull.password, "plugins.builder-buildkit.pull.password"),
+                }),
+              },
+            }
+          : {}),
+      };
       // Building needs the Kubernetes API; naming images does not.
       const kube = ports.kube;
       if (!kube) return { images };
@@ -65,6 +83,7 @@ export const plugin = definePlugin({
           "gitBaseUrl",
           "insecureRegistry",
           "cloneUsername",
+          "pull",
         ].includes(key)
       ) {
         problems.push(`unknown key "${key}"`);
@@ -88,6 +107,21 @@ export const plugin = definePlugin({
       (typeof s.cloneUsername !== "string" || !/^[A-Za-z0-9._-]+$/.test(s.cloneUsername))
     ) {
       problems.push("cloneUsername must be a user name");
+    }
+    if (s.pull !== undefined) {
+      const pull = s.pull as Record<string, unknown> | null;
+      if (typeof pull !== "object" || pull === null) problems.push("pull must be a mapping");
+      else {
+        for (const key of Object.keys(pull)) {
+          if (!["username", "password"].includes(key)) problems.push(`pull: unknown key "${key}"`);
+        }
+        if (typeof pull.username !== "string" || !/^[A-Za-z0-9._@-]+$/.test(pull.username)) {
+          problems.push("pull.username must be a user name");
+        }
+        if (typeof pull.password !== "object" || pull.password === null) {
+          problems.push("pull.password must be { env: NAME } or { file: PATH }");
+        }
+      }
     }
     if (s.insecureRegistry !== undefined && typeof s.insecureRegistry !== "boolean") {
       problems.push("insecureRegistry must be true or false");

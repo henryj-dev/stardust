@@ -48,6 +48,15 @@ export interface ComponentFiles {
   secrets: string[];
 }
 
+/** What a component's namespace gets from stardust beyond its own manifests. */
+export interface ComponentAccess {
+  namespace: string | null;
+  /** A sealed registry pull Secret its workloads name. `others`: pull Secrets named by hand. */
+  registryPull: { available: boolean; on: boolean; others: string[] };
+  /** A RoleBinding that lets the dashboard read the namespace. */
+  podView: { available: boolean; on: boolean };
+}
+
 /** One entry of the audit log: who did what. Details name things, never secret values. */
 export interface AuditEventView {
   id: string;
@@ -345,7 +354,17 @@ export interface Client {
   scaffold(
     projectId: string,
     component: string,
-    input: { namespace: string; port?: number; createNamespace?: boolean },
+    input: {
+      namespace: string;
+      port?: number;
+      createNamespace?: boolean;
+      /** A LoadBalancer Service: an address outside the cluster for an edge proxy. */
+      expose?: boolean;
+      /** A sealed registry pull Secret, which the Deployment names. */
+      registryPull?: boolean;
+      /** A RoleBinding that lets the dashboard read the namespace. */
+      podView?: boolean;
+    },
   ): Promise<{ deployCommit: string | null; files: string[]; listedIn: string | null }>;
   /** Cancels a job that has not finished. ApiError 409 when it already has. */
   cancelJob(projectId: string, runId: string, job: string): Promise<void>;
@@ -362,6 +381,20 @@ export interface Client {
     component: string,
     mounts: FileMount[],
   ): Promise<{ status: "committed" | "no_change"; deployCommit: string | null; mounts: FileMount[] }>;
+  /** A component's registry pull Secret and pod view, and whether stardust can manage them. */
+  componentAccess(projectId: string, component: string): Promise<ComponentAccess>;
+  /** Turns them on or off, as one commit. Administrators only. */
+  setComponentAccess(
+    projectId: string,
+    component: string,
+    change: { registryPull?: boolean; podView?: boolean },
+  ): Promise<{ status: "committed" | "no_change"; deployCommit: string | null }>;
+  /** Seals the current pull login into every component's pull Secret, as one commit. Administrators only. */
+  resealRegistryPull(): Promise<{
+    status: "committed" | "no_change";
+    deployCommit: string | null;
+    components: string[];
+  }>;
   /**
    * Points a component back at an earlier delivery: the one before the latest,
    * or the one `job` names. ApiError 409 when there is nothing to go back to.
@@ -701,6 +734,33 @@ export function createClient(options: ClientOptions): Client {
         status: "committed" | "no_change";
         deployCommit: string | null;
         mounts: FileMount[];
+      };
+    },
+    async componentAccess(projectId, component) {
+      const p = (x: string) => encodeURIComponent(x);
+      return (await (
+        await get(`/api/v1/projects/${p(projectId)}/components/${p(component)}/access`)
+      ).json()) as ComponentAccess;
+    },
+    async setComponentAccess(projectId, component, change) {
+      const p = (x: string) => encodeURIComponent(x);
+      const path = `/api/v1/projects/${p(projectId)}/components/${p(component)}/access`;
+      const res = await doFetch(`${base}${path}`, {
+        method: "PUT",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify(change),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `PUT ${path} failed: ${res.status}`);
+      }
+      return (await res.json()) as { status: "committed" | "no_change"; deployCommit: string | null };
+    },
+    async resealRegistryPull() {
+      return (await post("/api/v1/registry/pull/reseal", {})) as {
+        status: "committed" | "no_change";
+        deployCommit: string | null;
+        components: string[];
       };
     },
     async deliveries(projectId, component) {

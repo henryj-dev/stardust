@@ -1,6 +1,7 @@
 import {
   type Action,
   addResource,
+  type BoundRepo,
   type BuildLogReader,
   buildDecision,
   buildLogKey,
@@ -27,6 +28,7 @@ import {
   pipelineDefFromComponents,
   type RepoAccess,
   type ResolvedTarget,
+  type RuntimeGrant,
   removeResource,
   scaffoldComponent,
   TargetError,
@@ -94,6 +96,15 @@ import {
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
+import {
+  AccessConflict,
+  AccessInputError,
+  type AccessServices,
+  planAccess,
+  readAccess,
+  resealPulls,
+  writeAccess,
+} from "./access.ts";
 import { changeEnv, checkChange, EnvConflict, type EnvEditor, EnvInputError, readEnv } from "./env.ts";
 import type { RunEvents } from "./events.ts";
 import { mountFeatures } from "./features.ts";
@@ -132,6 +143,11 @@ export interface Services {
   auth?: AuthPolicy;
   /** Where a component's builds are pushed, for scaffolding its manifests. Optional. */
   images?: ImageNaming;
+  /**
+   * Who the server reads the cluster as, to bind the chart's read-only
+   * ClusterRole in a component's namespace for the dashboard. Optional.
+   */
+  runtimeGrant?: RuntimeGrant;
   /** Kept build logs, served once the cluster has cleaned a build up. Optional. */
   store?: ObjectStore;
   /** The deploy repository, for rolling a component back. Without it rollback answers 404. */
@@ -1018,6 +1034,95 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     return c.json({ status: result.status, deployCommit: result.commit, mounts });
   });
 
+  const accessServices = (): AccessServices => ({
+    ...(services.images ? { images: services.images } : {}),
+    ...(services.env ? { cipher: services.env.codec } : {}),
+    ...(services.runtimeGrant ? { runtimeGrant: services.runtimeGrant } : {}),
+  });
+
+  // What a component's namespace gets from stardust: a registry pull Secret, and read access for the dashboard.
+  app.get("/api/v1/projects/:id/components/:name/access", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:read", id);
+    if (denied) return denied;
+    const project = await getProject(sql, id);
+    const component = project?.components.find((x) => x.name === c.req.param("name"));
+    if (!project || !component) return c.json({ error: "unknown component" }, 404);
+    if (!services.deployRepo) return c.json({ error: "access needs a deploy repository (gitops-git)" }, 404);
+    try {
+      return c.json(await readAccess(services.deployRepo.repo, component, accessServices()));
+    } catch (err) {
+      return c.json({ error: `deploy repository: ${(err as Error).message}` }, 502);
+    }
+  });
+
+  // Turns a component's pull Secret or pod view on or off, as one commit. Both reach into
+  // the cluster beyond the component's own manifests, so only an administrator does it.
+  app.put("/api/v1/projects/:id/components/:name/access", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const project = await getProject(sql, c.req.param("id"));
+    const component = project?.components.find((x) => x.name === c.req.param("name"));
+    if (!project || !component) return c.json({ error: "unknown component" }, 404);
+    if (!services.deployRepo) return c.json({ error: "access needs a deploy repository (gitops-git)" }, 404);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const change: { registryPull?: boolean; podView?: boolean } = {};
+    for (const key of Object.keys(body ?? {})) {
+      if (key !== "registryPull" && key !== "podView") return c.json({ error: `unknown field ${key}` }, 400);
+      if (typeof body?.[key] !== "boolean") return c.json({ error: `${key} must be true or false` }, 400);
+      change[key] = body[key] as boolean;
+    }
+    if (Object.keys(change).length === 0) return c.json({ error: "set registryPull or podView" }, 400);
+    let result: Awaited<ReturnType<typeof writeAccess>>;
+    try {
+      result = await writeAccess(
+        services.deployRepo.repo,
+        { project: project.id, component, change, by: c.get("user").username },
+        accessServices(),
+      );
+    } catch (err) {
+      if (err instanceof AccessInputError) return c.json({ error: err.message }, 400);
+      if (err instanceof AccessConflict) return c.json({ error: err.message }, 409);
+      return c.json({ error: `deploy repository: ${(err as Error).message}` }, 502);
+    }
+    if (result.status === "committed") {
+      await audit(c, {
+        action: "project.component.access",
+        projectId: project.id,
+        target: component.name,
+        detail: { ...change, deployCommit: result.commit },
+      });
+    }
+    return c.json({ status: result.status, deployCommit: result.commit });
+  });
+
+  // After the pull login changes: seal it into every component that has a pull Secret, in one commit.
+  app.post("/api/v1/registry/pull/reseal", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    if (!services.deployRepo) return c.json({ error: "resealing needs a deploy repository (gitops-git)" }, 404);
+    let result: Awaited<ReturnType<typeof resealPulls>>;
+    try {
+      result = await resealPulls(
+        services.deployRepo.repo,
+        await listProjects(sql),
+        accessServices(),
+        c.get("user").username,
+      );
+    } catch (err) {
+      if (err instanceof AccessInputError) return c.json({ error: err.message }, 400);
+      if (err instanceof AccessConflict) return c.json({ error: err.message }, 409);
+      return c.json({ error: `deploy repository: ${(err as Error).message}` }, 502);
+    }
+    if (result.status === "committed") {
+      await audit(c, {
+        action: "registry.pull.reseal",
+        detail: { components: result.components, deployCommit: result.commit },
+      });
+    }
+    return c.json({ status: result.status, deployCommit: result.commit, components: result.components });
+  });
+
   app.post("/api/v1/projects/:id/components/:name/scaffold", async (c) => {
     const denied = await deny(c, "admin");
     if (denied) return denied;
@@ -1035,12 +1140,21 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       namespace?: unknown;
       port?: unknown;
       createNamespace?: unknown;
+      expose?: unknown;
+      registryPull?: unknown;
+      podView?: unknown;
     } | null;
     if (typeof body?.namespace !== "string") return c.json({ error: "namespace is required" }, 400);
     if (body.port !== undefined && typeof body.port !== "number")
       return c.json({ error: "port must be a number" }, 400);
-    if (body.createNamespace !== undefined && typeof body.createNamespace !== "boolean")
-      return c.json({ error: "createNamespace must be true or false" }, 400);
+    for (const key of ["createNamespace", "expose", "registryPull", "podView"] as const) {
+      if (body[key] !== undefined && typeof body[key] !== "boolean")
+        return c.json({ error: `${key} must be true or false` }, 400);
+    }
+    const access = {
+      ...(body.registryPull === true ? { registryPull: true } : {}),
+      ...(body.podView === true ? { podView: true } : {}),
+    };
     let files: Map<string, string>;
     try {
       files = scaffoldComponent({
@@ -1050,16 +1164,40 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
         imageRepository: services.images.repository(project.id, component.name),
         ...(typeof body.port === "number" ? { port: body.port } : {}),
         ...(body.createNamespace === true ? { createNamespace: true } : {}),
+        ...(body.expose === true ? { expose: true } : {}),
       });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }
     let occupied = false;
+    let accessError: string | null = null;
     let listedIn: string | null = null;
     const result = await commitWithCas(repo, async (_head, at) => {
       occupied = (await at.list(component.deployDir)).length > 0;
       if (occupied) return null;
-      const commit = new Map([...files].map(([name, text]) => [`${component.deployDir}/${name}`, text]));
+      const commit = new Map<string, string | null>(
+        [...files].map(([name, text]) => [`${component.deployDir}/${name}`, text]),
+      );
+      if (Object.keys(access).length > 0) {
+        // The directory as it will be: the scaffolded files, then the access they get.
+        const scaffolded: BoundRepo = {
+          read: async (path) => {
+            const content = commit.get(path);
+            return typeof content === "string" ? { content, sha: "" } : null;
+          },
+          list: async (dir) =>
+            [...commit.keys()].filter((p) => p.startsWith(`${dir}/`)).map((p) => p.slice(dir.length + 1)),
+        };
+        try {
+          for (const [path, text] of await planAccess(scaffolded, component, access, accessServices())) {
+            commit.set(path, text);
+          }
+        } catch (err) {
+          if (!(err instanceof AccessInputError)) throw err;
+          accessError = err.message;
+          return null;
+        }
+      }
       // The GitOps controller applies what a kustomization lists: list the new directory in the
       // nearest one above it, by its path from there, as withdrawing a project removes it.
       listedIn = null;
@@ -1084,6 +1222,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     });
     if (occupied)
       return c.json({ error: `${component.deployDir} is not empty; stardust does not overwrite manifests` }, 409);
+    if (accessError) return c.json({ error: accessError }, 400);
     if (result.status === "error") return c.json({ error: `deploy repository: ${result.message}` }, 502);
     const deployCommit = result.status === "committed" ? result.sha : null;
     await audit(c, {

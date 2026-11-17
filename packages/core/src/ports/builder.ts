@@ -83,4 +83,16 @@ export interface Builder {
 export interface ImageNaming {
   /** `<registry>/<project>/<component>`, without a tag. */
   repository(projectId: string, component: string): string;
+  /**
+   * The read-only login pods pull these images with, when the registry asks
+   * for one. Without it, components' pull Secrets are not managed.
+   */
+  pull?: RegistryPull;
+}
+
+export interface RegistryPull {
+  /** The registry host (and port) the images are named under. */
+  host: string;
+  /** Read each time a pull Secret is written, so a changed credential is picked up. */
+  login(): Promise<{ username: string; password: string }>;
 }

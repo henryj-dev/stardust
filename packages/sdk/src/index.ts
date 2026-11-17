@@ -6,6 +6,7 @@ export type {
   Capabilities,
   Client,
   ClientOptions,
+  ComponentAccess,
   ComponentFiles,
   Delivery,
   EnvChangeInput,

@@ -85,9 +85,9 @@ affinity:
       key: {{ .Values.database.key }}
 {{- end -}}
 
-{{/* Non-empty when the server reads the Kubernetes API: build logs, runtime or database namespaces. */}}
+{{/* Non-empty when the server reads the Kubernetes API: build logs, runtime namespaces or bindings, database namespaces. */}}
 {{- define "stardust.serverReadsCluster" -}}
-{{- if or (and .Values.builds.enabled .Values.builds.logs) .Values.runtime.namespaces .Values.databases.namespaces -}}true{{- end -}}
+{{- if or (and .Values.builds.enabled .Values.builds.logs) .Values.runtime.namespaces .Values.runtime.bindings .Values.databases.namespaces -}}true{{- end -}}
 {{- end }}
 
 {{- /* The worker talks to the cluster for builds, and to follow the database jobs (restore checks) it asked for. */}}

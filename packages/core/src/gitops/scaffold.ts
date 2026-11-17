@@ -29,6 +29,11 @@ export interface ScaffoldInput {
    * with everything in it: leave it off for a namespace other things share.
    */
   createNamespace?: boolean;
+  /**
+   * Make the Service a LoadBalancer, so it gets an address outside the
+   * cluster for an edge proxy to send traffic to. Needs a port.
+   */
+  expose?: boolean;
 }
 
 const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -51,6 +56,7 @@ export function scaffoldComponent(input: ScaffoldInput): Map<string, string> {
   if (input.port !== undefined && (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535)) {
     throw new Error("port must be 1-65535");
   }
+  if (input.expose && input.port === undefined) throw new Error("exposing needs a port");
   const name = input.component;
   const files = new Map<string, string>();
   if (input.createNamespace) {
@@ -111,7 +117,7 @@ metadata:
   name: ${name}
   namespace: ${input.namespace}
 spec:
-  selector:
+${input.expose ? "  # An address outside the cluster, for an edge proxy to send traffic to.\n  type: LoadBalancer\n" : ""}  selector:
     app.kubernetes.io/name: ${name}
   ports:
     - port: ${input.port}
