@@ -1,5 +1,11 @@
 # stardust
 
+## 0.20.0
+
+### Minor Changes
+
+- [#85](https://github.com/henryj-dev/stardust/pull/85) [`e51277a`](https://github.com/henryj-dev/stardust/commit/e51277ad761ce655e8b486eebe5c26030f1a1ce8) Thanks [@mack-erel](https://github.com/mack-erel)! - The project form offers pipeline M: give a published image pinned by digest, and each delivery copies exactly that image into the registry without building anything.
+
 ## 0.19.0
 
 ### Minor Changes
