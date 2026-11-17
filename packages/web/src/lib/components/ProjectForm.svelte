@@ -84,11 +84,28 @@ const dirOf = (c: Row) => (c.dirTyped ? c.deployDir : suggestedDir(deployDirTemp
           <select name={`components.${i}.pipeline`} bind:value={component.pipeline}>
             <option value="C">C: the repository's Dockerfile</option>
             <option value="N">N: a Node app, no Dockerfile needed</option>
+            <option value="M">M: copy a published image, build nothing</option>
             <option value="W">W</option>
           </select>
         </label>
+        {#if component.pipeline === "M"}
+          <label>
+            Published image
+            <input
+              name={`components.${i}.image`}
+              bind:value={component.image}
+              required
+              autocomplete="off"
+              placeholder="docker.io/org/app:1.2@sha256:…"
+            />
+            <small>Pinned by digest. Each delivery copies exactly this image into the registry and runs none of its code; change the digest to move to another release.</small>
+          </label>
+        {:else}
         <label>Build context <input name={`components.${i}.context`} bind:value={component.context} placeholder="repository root" /></label>
-        {#if component.pipeline === "N"}
+        {/if}
+        {#if component.pipeline === "M"}
+          <!-- Nothing is built. -->
+        {:else if component.pipeline === "N"}
           <label>Port <input name={`components.${i}.port`} bind:value={component.port} inputmode="numeric" placeholder="3000" /></label>
           <label>
             Build environment

@@ -43,6 +43,7 @@ it("keeps only the fields of each pipeline: N gets port and build environment, C
         dockerfile: "Dockerfile",
         port: "3000",
         buildEnv: "BUILD_TARGET=node\n\nQUERY=a=b",
+        image: "",
         deployDir: "apps/web",
       },
       {
@@ -52,6 +53,7 @@ it("keeps only the fields of each pipeline: N gets port and build environment, C
         dockerfile: "api/Dockerfile",
         port: "8080",
         buildEnv: "X=1",
+        image: "",
         deployDir: "apps/api",
       },
     ],
@@ -80,8 +82,17 @@ it("refuses what the form can tell is wrong, one message per problem", () => {
     name: "",
     githubRepo: "",
     components: [
-      { name: "web", pipeline: "N", context: "", dockerfile: "", port: "80a", buildEnv: "NOEQUALS", deployDir: "" },
-      { name: "", pipeline: "X", context: "", dockerfile: "", port: "", buildEnv: "", deployDir: "d" },
+      {
+        name: "web",
+        pipeline: "N",
+        context: "",
+        dockerfile: "",
+        port: "80a",
+        buildEnv: "NOEQUALS",
+        image: "",
+        deployDir: "",
+      },
+      { name: "", pipeline: "X", context: "", dockerfile: "", port: "", buildEnv: "", image: "", deployDir: "d" },
     ],
   });
   assert.equal(parsed.ok, false);
@@ -102,7 +113,7 @@ it("refuses a port out of range and a name given twice", () => {
     name: "x",
     githubRepo: "",
     components: [
-      { name: "w", pipeline: "N", context: "", dockerfile: "", port: "70000", buildEnv: "", deployDir: "d" },
+      { name: "w", pipeline: "N", context: "", dockerfile: "", port: "70000", buildEnv: "", image: "", deployDir: "d" },
     ],
   });
   assert.equal(parsed.ok, false);
@@ -118,6 +129,7 @@ it("fills the form from a stored project and reads it back to the same component
     components: [
       { name: "web", pipeline: "N" as const, port: 3000, buildEnv: { A: "1", B: "x=y" }, deployDir: "apps/web" },
       { name: "api", pipeline: "C" as const, context: "api", dockerfile: "Dockerfile.prod", deployDir: "apps/api" },
+      { name: "count", pipeline: "M" as const, image: IMAGE, deployDir: "apps/count" },
     ],
   };
   const fields = projectFields(stored);
@@ -126,4 +138,33 @@ it("fills the form from a stored project and reads it back to the same component
   assert.ok(parsed.ok);
   assert.deepEqual(parsed.components, stored.components);
   assert.equal(parsed.githubRepo, "acme/demo");
+});
+
+const IMAGE = `docker.io/arp242/goatcounter:2.6@sha256:${"a".repeat(64)}`;
+
+it("takes only the image for a mirror, and refuses one not pinned by digest", () => {
+  const row = { name: "count", pipeline: "M", context: "src", dockerfile: "Dockerfile", port: "80", buildEnv: "A=1" };
+  const ok = parseFields({
+    id: "count",
+    name: "",
+    githubRepo: "",
+    components: [{ ...row, image: IMAGE, deployDir: "d" }],
+  });
+  assert.ok(ok.ok);
+  assert.deepEqual(ok.components, [{ name: "count", pipeline: "M", image: IMAGE, deployDir: "d" }]);
+  for (const [image, message] of [
+    ["", "Component 1 (count): give the published image to mirror."],
+    [
+      "docker.io/arp242/goatcounter:2.6",
+      "Component 1 (count): the image must be pinned by digest, like registry.example.com/org/app:1.2@sha256:….",
+    ],
+  ] as const) {
+    const bad = parseFields({ id: "count", name: "", githubRepo: "", components: [{ ...row, image, deployDir: "d" }] });
+    assert.deepEqual(bad, { ok: false, errors: [message] });
+  }
+  const read = readFields(
+    form({ "components.0.name": "count", "components.0.pipeline": "M", "components.0.image": ` ${IMAGE} ` }),
+    "count",
+  );
+  assert.equal(read.components[0]?.image, IMAGE);
 });
