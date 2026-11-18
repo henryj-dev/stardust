@@ -677,11 +677,12 @@ describe("state cache", () => {
     }
   });
 
-  // rclone stand-in: "copyto SRC DST" succeeds for a remote listed in $HAVE (fetch) or always (store); calls are logged.
+  // rclone stand-in: "copyto SRC DST" writes DST for a remote listed in $HAVE; like the real one, it exits 0 and
+  // writes nothing for a remote that does not exist. A store always succeeds. Calls are logged.
   const fakeRclone = (dir: string) =>
     writeFileSync(
       join(dir, "bin", "rclone"),
-      `#!/bin/sh\necho "$*" >> "${dir}/calls"\ncmd=""; src=""; dst=""\nfor a; do case "$a" in --*|[0-9]*) ;; *) if [ -z "$cmd" ]; then cmd=$a; elif [ -z "$src" ]; then src=$a; else dst=$a; fi;; esac; done\n[ "$cmd" = copyto ] || exit 0\ncase "$src" in state:*) case " $HAVE " in *" $src "*) echo data > "$dst"; exit 0;; esac; exit 1;; esac\nexit 0\n`,
+      `#!/bin/sh\necho "$*" >> "${dir}/calls"\ncmd=""; src=""; dst=""\nfor a; do case "$a" in --*|[0-9]*) ;; *) if [ -z "$cmd" ]; then cmd=$a; elif [ -z "$src" ]; then src=$a; else dst=$a; fi;; esac; done\n[ "$cmd" = copyto ] || exit 0\ncase "$src" in state:*) case " $HAVE " in *" $src "*) echo data > "$dst"; exit 0;; esac; exit 0;; esac\nexit 0\n`,
       { mode: 0o755 },
     );
   const transfer = (script: string, setup: (dir: string) => void, extra: Record<string, string> = {}) => {
@@ -706,6 +707,13 @@ describe("state cache", () => {
   };
 
   it("fetches the compressed archive first, then a plain one, with several streams", () => {
+    const none = transfer(STATE_RESTORE_SCRIPT, () => {}, { HAVE: "" });
+    try {
+      assert.match(none.run.stdout, /none yet: a cold build/, "a missing object is not a fetched one");
+      assert.ok(!existsSync(join(none.dir, "in.tar.gz")) && !existsSync(join(none.dir, "in.tar")));
+    } finally {
+      none.done();
+    }
     const both = transfer(STATE_RESTORE_SCRIPT, () => {}, { HAVE: "state:b/p/c.tar.gz state:b/p/c.tar" });
     try {
       assert.ok(existsSync(join(both.dir, "in.tar.gz")));
