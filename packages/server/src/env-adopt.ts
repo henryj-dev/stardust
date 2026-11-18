@@ -147,7 +147,17 @@ export async function adoptHandEnv(
     const raw = splitDocuments(original);
     const sealed = raw.some((d) => (parse(d) as Doc | null)?.sops !== undefined);
     // One MAC covers every document of a SOPS file: decrypt it whole, never a document alone.
-    const docs = sealed ? splitDocuments(await input.decrypt(original)) : raw;
+    let docs = raw;
+    if (sealed) {
+      try {
+        docs = splitDocuments(await input.decrypt(original));
+      } catch {
+        // Made by hand, it is often encrypted only to the cluster's and the operator's keys.
+        throw new EnvInputError(
+          `stardust cannot decrypt ${path} to adopt ${[...indices].map((i) => found.find((h) => h.path === path && h.index === i)?.name).join(", ")}: the file is not encrypted to stardust's key. Add stardust's age recipient to it (sops updatekeys, or encrypt it again with that recipient too), or move the env Secret to a file of its own encrypted to it, and try again`,
+        );
+      }
+    }
     if (docs.length !== raw.length) throw new Error(`${path}: decrypting changed the number of documents`);
     for (const index of indices) {
       const doc = parse(docs[index] ?? "") as Doc;
