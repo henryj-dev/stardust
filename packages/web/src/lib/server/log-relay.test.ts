@@ -7,6 +7,7 @@ it("passes the log through as plain text that is never sniffed", async () => {
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
   assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(res.headers.get("x-accel-buffering"), "no", "an nginx in front streams it as it comes");
   assert.equal(await res.text(), "<script>x</script>\n");
 });
 

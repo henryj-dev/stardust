@@ -7,6 +7,6 @@ export const GET: RequestHandler = async ({ locals, params, request }) => {
   if (!locals.token) error(401, "sign in first");
   const upstream = await apiClient(locals.token).events(params.id, request.signal);
   return new Response(upstream.body, {
-    headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
+    headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "x-accel-buffering": "no" },
   });
 };
