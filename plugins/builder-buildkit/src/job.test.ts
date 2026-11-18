@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -364,5 +364,59 @@ describe("someone else's code", () => {
     const trusted = podOf(buildJob(base, opts));
     assert.ok((trusted.initContainers?.[0]?.env ?? []).some((e) => e.name === "GITHUB_TOKEN"));
     assert.ok(trusted.volumes.some((v) => v.name === "project-secret"));
+  });
+});
+
+describe("layer cache", () => {
+  const cacheRef = (m: ReturnType<typeof manifest>) =>
+    build(m).env.find((e: { name: string }) => e.name === "CACHE_REF")?.value;
+
+  it("keeps a cache per component in the registry, unless it is off or the code is someone else's", () => {
+    assert.equal(cacheRef(manifest()), "registry.example.com/demo/api:buildcache");
+    assert.equal(cacheRef(buildJob(input, { ...options, cache: "off" }) as ReturnType<typeof manifest>), undefined);
+    assert.equal(cacheRef(manifest({ ...input, trusted: false })), undefined);
+  });
+
+  // Runs the build script with a stand-in for buildctl that records its arguments.
+  const argsOf = (env: Record<string, string>): string[] => {
+    const dir = mkdtempSync(join(tmpdir(), "build-script-"));
+    try {
+      mkdirSync(join(dir, "src"));
+      mkdirSync(join(dir, "bin"));
+      writeFileSync(join(dir, "build-time"), "2026-01-01T00:00:00Z");
+      writeFileSync(
+        join(dir, "bin", "buildctl-daemonless.sh"),
+        `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done > "${dir}/args"\nprintf '{"containerimage.digest":"sha256:%s"}' "${"a".repeat(64)}" > "${dir}/metadata.json"\n`,
+        { mode: 0o755 },
+      );
+      const script = BUILD_SCRIPT.replaceAll("/workspace", dir);
+      execFileSync("sh", ["-c", script], {
+        env: {
+          PATH: `${join(dir, "bin")}:/usr/bin:/bin`,
+          IMAGE: "r/x:1",
+          SHA: "s",
+          CONTEXT: ".",
+          DOCKERFILE: "Dockerfile",
+          BUILD_KIND: "dockerfile",
+          ...env,
+        },
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+      return readFileSync(join(dir, "args"), "utf8").trim().split("\n");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("imports the cache and exports every layer to it, never failing the build on the export", () => {
+    const args = argsOf({ CACHE_REF: "r/x:buildcache" });
+    assert.equal(args[args.indexOf("--import-cache") + 1], "type=registry,ref=r/x:buildcache");
+    assert.equal(
+      args[args.indexOf("--export-cache") + 1],
+      "type=registry,ref=r/x:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true",
+    );
+    const insecure = argsOf({ CACHE_REF: "r/x:buildcache", REGISTRY_INSECURE: "true" });
+    assert.match(insecure[insecure.indexOf("--import-cache") + 1] ?? "", /,registry\.insecure=true$/);
+    assert.ok(!argsOf({}).includes("--import-cache"), "no cache without a reference");
   });
 });

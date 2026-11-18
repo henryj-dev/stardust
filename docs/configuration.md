@@ -260,9 +260,24 @@ the builds namespace.
 | `cloneUsername`    | optional | User name sent with the clone token. GitHub ignores it; Gitea needs the token's owner.                                             |
 | `insecureRegistry` | optional | Push over plain HTTP. For local test registries only.                                                                              |
 | `pull`             | optional | `{ username, password: { env } }`: a read-only login pods pull with. stardust seals it into each component's directory (below).    |
+| `cache`            | optional | `registry` (default) or `off`: the layer cache between builds, below.                                                              |
 
 The clone runs in its own container; the build container, which runs the
 Dockerfile, never sees the clone token.
+
+Builds start in a fresh Job, so a layer is reused only through the cache in
+the registry: before building, the layers of the component's last build are
+imported from `<registry>/<project>/<component>:buildcache`, and after it
+every layer is exported there (`mode=max`). A component that has no cache yet
+builds from scratch; a failed export does not fail the build. Each component
+has its own cache, and the code of an external project never reads or writes
+one. The push login writes the cache, so it needs no other credential.
+
+What the cache reuses are Dockerfile layers. `RUN --mount=type=cache` mounts
+live in the BuildKit instance and are gone with the Job, so put slow,
+rarely-changing work in a layer of its own: for Rust, build the dependencies
+before copying the sources (for example with cargo-chef), so a source change
+recompiles only the crate.
 
 ### `gitops-git`
 

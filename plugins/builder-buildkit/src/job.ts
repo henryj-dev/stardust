@@ -73,6 +73,14 @@ export interface BuilderOptions {
   /** Push over plain HTTP. Only for local registries such as a kind test cluster. */
   insecureRegistry?: boolean;
   /**
+   * Layer cache between builds, kept in the registry next to the image as
+   * `<repository>:buildcache` (one per component, so projects never share one).
+   * "registry" (the default) imports it before building and exports every layer
+   * after; "off" builds from scratch each time. A build of someone else's code
+   * (trusted: false) never reads or writes it.
+   */
+  cache?: "registry" | "off";
+  /**
    * Secret with key `token`: a GitHub token that can read the repository.
    * Without it the clone is anonymous, which works for public repositories only.
    */
@@ -265,7 +273,13 @@ if [ "\${BUILD_KIND}" = node ]; then
   printf '%s' "\${NODE_DOCKERFILE}" > "\${DOCKERFILE_DIR}/Dockerfile"
   set -- --opt "build-arg:NODE_IMAGE=\${NODE_IMAGE}" --opt "build-arg:PORT=\${PORT}" --opt "build-arg:BUILD_ENV=\${BUILD_ENV_B64}"
 fi
-echo "[build] \${IMAGE} kind=\${BUILD_KIND} context=\${CONTEXT} dockerfile=\${DOCKERFILE}"
+# The layer cache in the registry: a missing one is only a warning, and a failed
+# export does not fail the build (the image is what matters).
+if [ -n "\${CACHE_REF:-}" ]; then
+  set -- "$@" --import-cache "type=registry,ref=\${CACHE_REF}\${REGISTRY_INSECURE:+,registry.insecure=true}" \\
+    --export-cache "type=registry,ref=\${CACHE_REF},mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true\${REGISTRY_INSECURE:+,registry.insecure=true}"
+fi
+echo "[build] \${IMAGE} kind=\${BUILD_KIND} context=\${CONTEXT} dockerfile=\${DOCKERFILE} cache=\${CACHE_REF:-off}"
 buildctl-daemonless.sh build \\
   --frontend dockerfile.v0 \\
   --local "context=\${CONTEXT}" \\
@@ -413,6 +427,9 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
                 BUILDKITD_FLAGS: "--oci-worker-no-process-sandbox",
                 DOCKER_CONFIG: "/home/user/.docker",
                 ...(options.insecureRegistry ? { REGISTRY_INSECURE: "true" } : {}),
+                ...((options.cache ?? "registry") === "registry" && input.trusted !== false
+                  ? { CACHE_REF: `${input.imageRepository}:buildcache` }
+                  : {}),
               }),
               // Rootless BuildKit needs unconfined seccomp and AppArmor to set up
               // its user namespace; it still runs as uid 1000 without privilege.
