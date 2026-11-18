@@ -11,10 +11,12 @@ let { data, form } = $props();
   {#if form?.error}
     <p role="alert" data-users-error>{form.error}</p>
     {#if form.reauth}
+{#if data.sso}
       <form method="POST" action="/login?/oidc&next=/admin/users" data-reauth-sso>
         <input type="hidden" name="reauth" value="1" />
         <button type="submit">Confirm through single sign-on</button>
       </form>
+{/if}
       <form method="POST" action="?/reauth" data-reauth>
         <label>Your password, or a code from your app <input name="proof" type="password" autocomplete="current-password" required /></label>
         <button type="submit">Confirm</button>

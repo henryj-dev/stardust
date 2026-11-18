@@ -1,3 +1,4 @@
+import { ApiError } from "@stardust/sdk";
 import { fail, redirect } from "@sveltejs/kit";
 import { apiClient, LOGIN_ERROR_COOKIE, OIDC_NEXT_COOKIE, OIDC_STATE_COOKIE, setSession } from "$lib/server/api";
 import { safeNext } from "$lib/server/safe-next";
@@ -69,7 +70,22 @@ export const actions: Actions = {
   oidc: async ({ cookies, url, locals, request }) => {
     // `reauth`: confirming it is you, from a page that asked; the provider signs you in again.
     const reauth = (await request.formData().catch(() => new FormData())).get("reauth") === "1";
-    const { url: providerUrl, state } = await apiClient(undefined, locals).oidcStart({ reauth });
+    let started: { url: string; state: string };
+    try {
+      started = await apiClient(undefined, locals).oidcStart({ reauth });
+    } catch (err) {
+      // Not set up here: say so on the sign-in page instead of failing.
+      if (!(err instanceof ApiError) || err.status >= 500) throw err;
+      cookies.set(LOGIN_ERROR_COOKIE, "Single sign-on is not set up on this server: use your password.", {
+        path: "/login",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: url.protocol === "https:",
+        maxAge: 60,
+      });
+      redirect(303, "/login");
+    }
+    const { url: providerUrl, state } = started;
     // Lax, not Strict: the provider sends the browser back with a cross-site
     // navigation, and a Strict cookie would not come along with it.
     cookies.set(OIDC_STATE_COOKIE, state, {
