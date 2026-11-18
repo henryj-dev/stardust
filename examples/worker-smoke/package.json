@@ -1,0 +1,9 @@
+{
+  "name": "stardust-worker-smoke",
+  "private": true,
+  "type": "module",
+  "description": "A Cloudflare Worker that stardust's pipeline W can release end to end: a D1 migration, a secret and a deploy.",
+  "scripts": {
+    "build": "node --check src/index.js"
+  }
+}
