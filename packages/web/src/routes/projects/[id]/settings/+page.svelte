@@ -35,10 +35,12 @@ let { data, form } = $props();
     </label>
     <button type="submit">Delete</button>
   </form>
+{#if data.sso}
   <form method="POST" action={`/login?/oidc&next=${encodeURIComponent(`/projects/${data.fields.id}/settings`)}`} data-reauth-sso>
     <input type="hidden" name="reauth" value="1" />
     <button type="submit">Signed in through single sign-on? Confirm there first</button>
   </form>
+{/if}
   {#if form && "deleteError" in form}
     <p role="alert" data-delete-error>{form.deleteError}</p>
   {/if}
