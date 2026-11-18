@@ -433,6 +433,9 @@ describe("state cache", () => {
   };
   // biome-ignore lint/suspicious/noExplicitAny: walking a plain manifest object in tests
   const withState = (i: BuildInput = input) => buildJob(i, { ...options, stateCache }) as any;
+  const withStateConfig = (s: typeof stateCache & { keepDuration?: string }) =>
+    // biome-ignore lint/suspicious/noExplicitAny: walking a plain manifest object in tests
+    buildJob(input, { ...options, stateCache: s }) as any;
   const names = (list: Array<{ name: string }> = []) => list.map((c) => c.name);
 
   it("restores before the build and saves after it, for a listed component only", () => {
@@ -447,6 +450,18 @@ describe("state cache", () => {
         .map((e: { name: string; value: string }) => [e.name, e.value]),
     );
     assert.equal(vars.STATE_KEY, "demo/api", "the scripts add the format");
+    const buildVars = Object.fromEntries(
+      spec.initContainers[2].env
+        .filter((e: { value?: string }) => e.value)
+        .map((e: { name: string; value: string }) => [e.name, e.value]),
+    );
+    assert.equal(buildVars.STATE_KEEP_DURATION, "168h", "seven days unless configured");
+    assert.equal(
+      withStateConfig({ ...stateCache, keepDuration: "72h" }).spec.template.spec.initContainers[2].env.find(
+        (e: { name: string }) => e.name === "STATE_KEEP_DURATION",
+      ).value,
+      "72h",
+    );
     const build = spec.initContainers[2];
     assert.ok(build.env.some((e: { name: string; value?: string }) => e.name === "STATE_GZIP" && e.value === "pigz"));
     assert.equal(vars.STATE_BUCKET, "buildcache");
@@ -513,7 +528,7 @@ describe("state cache", () => {
     writeFileSync(join(dir, "bin", "rootlesskit"), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
     writeFileSync(
       join(dir, "bin", "buildctl-daemonless.sh"),
-      `#!/bin/sh\n[ "$1" = prune ] && exit 0\n[ -n "\${NOWRITE:-}" ] || touch "${dir}/state/built"\nfor f in \${ALSO:-}; do mkdir -p "$(dirname "${dir}/state/$f")"; echo x > "${dir}/state/$f"; done\nprintf '{"containerimage.digest":"sha256:%s"}' "${"a".repeat(64)}" > "${dir}/metadata.json"\n`,
+      `#!/bin/sh\n[ "$1" = prune ] && { echo "$*" > "${dir}/prune-args"; exit 0; }\n[ -n "\${NOWRITE:-}" ] || touch "${dir}/state/built"\nfor f in \${ALSO:-}; do mkdir -p "$(dirname "${dir}/state/$f")"; echo x > "${dir}/state/$f"; done\nprintf '{"containerimage.digest":"sha256:%s"}' "${"a".repeat(64)}" > "${dir}/metadata.json"\n`,
       { mode: 0o755 },
     );
     setup(dir);
@@ -541,7 +556,7 @@ describe("state cache", () => {
         writeFileSync(join(dir, "old", "cached"), "layer");
         execFileSync("sh", ["-c", `tar -cf "${dir}/archive/in.tar" -C "${dir}/old" .`]);
       },
-      { STATE_MAX_BYTES: "1073741824" },
+      { STATE_MAX_BYTES: "1073741824", STATE_KEEP_DURATION: "168h" },
     );
     try {
       assert.equal(b.run.status, 0, b.run.stderr);
@@ -551,6 +566,11 @@ describe("state cache", () => {
       assert.match(packed, /cached/);
       assert.match(packed, /built/);
       assert.match(b.run.stdout, /\[stardust-image-digest\] sha256:a{64}/);
+      assert.equal(
+        readFileSync(join(b.dir, "prune-args"), "utf8").trim(),
+        "prune --keep-storage 1024 --keep-duration 168h",
+        "unused cache records age out, not only an oversized state",
+      );
     } finally {
       b.done();
     }
