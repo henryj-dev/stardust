@@ -1,5 +1,11 @@
 # stardust
 
+## 0.23.5
+
+### Patch Changes
+
+- [#110](https://github.com/henryj-dev/stardust/pull/110) [`a98744b`](https://github.com/henryj-dev/stardust/commit/a98744b6352f9b66419eb934ea9272e2ee2155dc) Thanks [@mack-erel](https://github.com/mack-erel)! - A job whose worker stopped (an upgrade or an evicted pod) is queued again and the next worker takes over the build or release Job already running, instead of the job being recorded as `unknown` while the Job went on to succeed. Only an operator's cancellation deletes the Job; after three stopped workers the job is `unknown`, with the reason on the run's page.
+
 ## 0.23.4
 
 ### Patch Changes
