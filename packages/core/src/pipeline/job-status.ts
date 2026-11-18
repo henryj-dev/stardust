@@ -22,12 +22,13 @@ export const TERMINAL: ReadonlySet<JobStatus> = new Set<JobStatus>([
 /**
  * Allowed transitions.
  * - queued → running (claimed), cancelled (by an operator) or failed (could not start)
- * - running → success, failed, unknown or cancelled
+ * - running → success, failed, unknown or cancelled, or back to queued when its
+ *   worker stopped (lease expired) and another worker should pick it up
  * - skipped is only ever written when a job is created; terminal states are final.
  */
 export const ALLOWED_TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
   queued: ["running", "cancelled", "failed"],
-  running: ["success", "failed", "unknown", "cancelled"],
+  running: ["success", "failed", "unknown", "cancelled", "queued"],
   success: [],
   failed: [],
   unknown: [],

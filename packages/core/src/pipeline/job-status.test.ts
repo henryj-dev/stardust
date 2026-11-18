@@ -17,6 +17,7 @@ it("the misspelling 'canceled' is not a terminal state", () => {
 it("allows the documented transitions only", () => {
   assert.equal(canTransition("queued", "running"), true);
   assert.equal(canTransition("running", "unknown"), true);
+  assert.equal(canTransition("running", "queued"), true, "a job whose worker stopped is queued again");
   assert.equal(canTransition("queued", "success"), false);
   assert.equal(canTransition("success", "running"), false);
   assert.equal(canTransition("skipped", "running"), false);

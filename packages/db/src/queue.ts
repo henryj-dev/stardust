@@ -5,7 +5,7 @@
  * only from the worker that still holds the lease on a running job. The
  * number of rows changed is the answer to "did I do this?".
  */
-import { canTransition, type JobDef, type JobStatus } from "@stardust/core";
+import { canTransition, isTerminal, type JobDef, type JobStatus } from "@stardust/core";
 import type { Sql, TransactionSql } from "postgres";
 import { advanceRun } from "./runs.ts";
 
@@ -108,7 +108,8 @@ export async function finishJob(
   result: JobResult,
   detail: Record<string, unknown> = {},
 ): Promise<boolean> {
-  if (!canTransition("running", result)) throw new Error(`running -> ${result} is not an allowed transition`);
+  if (!isTerminal(result) || !canTransition("running", result))
+    throw new Error(`running -> ${result} is not an allowed transition for a result`);
   return sql.begin(async (tx) => {
     const [row] = await tx<{ run_id: string }[]>`
       UPDATE jobs SET status = ${result}, finished_at = now(), lease_owner = NULL, lease_expires_at = NULL,
@@ -121,19 +122,39 @@ export async function finishJob(
   });
 }
 
+/** Attempts a job gets before a stopped worker is taken as its end: the first and two take-overs. */
+export const MAX_ATTEMPTS = 3;
+
 /**
- * Marks running jobs whose lease expired as `unknown` — their worker is gone —
- * and advances their runs. Returns how many jobs were reclaimed.
+ * Takes back running jobs whose lease expired: their worker stopped (restarted,
+ * evicted, rolled to a new version), which says nothing about the work itself —
+ * a build Job usually runs on. Such a job is queued again, and the next worker
+ * takes over the Job the last attempt left (see `adoptableJob` in core) instead
+ * of building again. After MAX_ATTEMPTS it is marked `unknown`, with the reason,
+ * and its run advances. Returns how many jobs were taken back.
  */
 export async function reclaimExpired(sql: Sql): Promise<number> {
   return sql.begin(async (tx) => {
-    const rows = await tx<{ run_id: string }[]>`
-      UPDATE jobs SET status = 'unknown', finished_at = now(), lease_owner = NULL, lease_expires_at = NULL
+    const requeued = await tx<{ id: string }[]>`
+      UPDATE jobs SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL,
+        detail = jobs.detail || jsonb_build_object('reclaimed', jsonb_build_object('at', now(), 'attempt', jobs.attempt))
+      WHERE status = 'running' AND lease_expires_at < now() AND attempt < ${MAX_ATTEMPTS}
+      RETURNING id`;
+    const lost = await tx<{ run_id: string }[]>`
+      UPDATE jobs SET status = 'unknown', finished_at = now(), lease_owner = NULL, lease_expires_at = NULL,
+        detail = jobs.detail || jsonb_build_object('reason',
+          format('the worker running it stopped %s times (its lease expired); the build Job may still have finished', jobs.attempt))
       WHERE status = 'running' AND lease_expires_at < now()
       RETURNING run_id`;
-    for (const runId of [...new Set(rows.map((r) => r.run_id))].sort()) {
+    for (const runId of [...new Set(lost.map((r) => r.run_id))].sort()) {
       await advanceRun(tx, runId);
     }
-    return rows.length;
+    return requeued.length + lost.length;
   });
+}
+
+/** The status of a job, or null when it does not exist. */
+export async function jobStatusOf(sql: Sql, jobId: string): Promise<string | null> {
+  const [row] = await sql<{ status: string }[]>`SELECT status FROM jobs WHERE id = ${jobId}`;
+  return row?.status ?? null;
 }

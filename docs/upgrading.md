@@ -49,6 +49,13 @@ in one transaction under an advisory lock, so several pods starting together
 apply each migration exactly once. A pod whose migrations fail does not start;
 the previous pods keep running until the new ones are ready.
 
+A job that was running when its worker stopped (an upgrade, an evicted pod) is
+taken back once the worker's lease expires, about half a minute, and queued
+again. The next worker takes over the Kubernetes Job the stopped one started,
+by its `stardust/run` and `stardust/job` labels, so a build is watched to its
+end rather than run twice. A job whose worker stops three times is recorded as
+`unknown`, with that reason on the run's page.
+
 ## Upgrade notes
 
 - **0.12.x → 0.13.0**: **add `region` to `stardust.yaml`** (under Helm:

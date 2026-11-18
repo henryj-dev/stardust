@@ -5,12 +5,13 @@
  * another worker or the reclaimer owns the job now.
  */
 import { setTimeout as sleep } from "node:timers/promises";
-import type { Logger } from "@stardust/core";
+import { LeaseHandoff, type Logger } from "@stardust/core";
 import {
   type ClaimedJob,
   claimJob,
   finishJob,
   type JobResult,
+  jobStatusOf,
   reclaimExpired,
   renewLease,
   type Sql,
@@ -45,8 +46,12 @@ export async function runJob(
   const renew = setInterval(
     () => {
       renewLease(sql, job.id, workerId, leaseMs).then(
-        (held) => {
-          if (!held) lost.abort(new Error("lease lost"));
+        async (held) => {
+          if (held || lost.signal.aborted) return;
+          // Cancelled: the handler deletes its Kubernetes Job. Anything else (queued again for another
+          // worker after this one's lease expired): leave the Job for the worker that takes over.
+          const status = await jobStatusOf(sql, job.id).catch(() => null);
+          lost.abort(status === "cancelled" ? new Error("cancelled") : new LeaseHandoff());
         },
         (err: unknown) => log.warn("lease renewal failed", { job: job.id, error: String(err) }),
       );

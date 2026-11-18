@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import type { Sql } from "postgres";
-import { claimJob, finishJob, reclaimExpired, renewLease } from "./queue.ts";
+import { claimJob, finishJob, jobStatusOf, MAX_ATTEMPTS, reclaimExpired, renewLease } from "./queue.ts";
 import { startRun } from "./runs.ts";
 import { connectToSchema, createTestDb, type TestDb } from "./testing.ts";
 
@@ -167,7 +167,7 @@ describe("leases", () => {
     assert.equal(await runStatus(runId), "success");
   });
 
-  it("an expired lease is reclaimed as unknown, its dependents skip, and the late worker is ignored", async () => {
+  it("an expired lease queues the job again for another worker, and the late worker is ignored", async () => {
     const runId = await start();
     const first = await claimJob(sql, "w1", 30_000);
     assert.ok(first);
@@ -175,8 +175,38 @@ describe("leases", () => {
     assert.equal(build?.name, "build");
     await sql`UPDATE jobs SET lease_expires_at = now() - interval '1 second' WHERE id = ${build.id}`;
     assert.equal(await reclaimExpired(sql), 1);
+    assert.equal(await jobStatusOf(sql, build.id), "queued", "its worker stopped; the work itself may be fine");
     assert.equal(await finishJob(sql, build.id, "w1", "success"), false, "the old holder cannot finish it");
     assert.equal(await renewLease(sql, build.id, "w1", 30_000), false);
+    const again = await claimJob(sql, "w2", 30_000);
+    assert.equal(again?.id, build.id);
+    assert.equal(again?.attempt, 2);
+    assert.equal(await finishJob(sql, build.id, "w2", "success"), true, "the taking-over worker records the result");
+    const [row] = await sql<
+      { detail: { reclaimed?: { attempt: number } } }[]
+    >`SELECT detail FROM jobs WHERE id = ${build.id}`;
+    assert.equal(row?.detail.reclaimed?.attempt, 1, "the take-over is on record");
+    await sql`UPDATE jobs SET lease_expires_at = now() - interval '1 second' WHERE run_id = ${runId} AND status = 'running'`;
+    await sql`UPDATE jobs SET status = 'cancelled', finished_at = now(), lease_owner = NULL WHERE run_id = ${runId} AND status IN ('queued', 'running')`;
+  });
+
+  it(`after ${MAX_ATTEMPTS} stopped workers the job is unknown, with the reason, and its dependents skip`, async () => {
+    const runId = await start();
+    let build = await claimJob(sql, "w1", 30_000);
+    if (build?.name !== "build") build = await claimJob(sql, "w1", 30_000);
+    assert.equal(build?.name, "build");
+    assert.equal(build?.runId, runId);
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      if (attempt > 1) {
+        const next = await claimJob(sql, `w${attempt}`, 30_000);
+        assert.equal(next?.id, build.id);
+      }
+      await sql`UPDATE jobs SET lease_expires_at = now() - interval '1 second' WHERE id = ${build.id}`;
+      await reclaimExpired(sql);
+    }
+    assert.equal(await jobStatusOf(sql, build.id), "unknown");
+    const [row] = await sql<{ detail: { reason?: string } }[]>`SELECT detail FROM jobs WHERE id = ${build.id}`;
+    assert.match(row?.detail.reason ?? "", new RegExp(`stopped ${MAX_ATTEMPTS} times`));
     await drain(runId, () => "success");
     assert.deepEqual(await statuses(runId), {
       build: "unknown",

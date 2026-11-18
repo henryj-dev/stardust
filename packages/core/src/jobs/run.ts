@@ -1,8 +1,9 @@
 /**
- * Runs a Kubernetes Job to its end through the kube port: create it, poll
- * until it succeeds or fails (deleting it when the signal aborts), and keep
- * the last lines of its pod's log. What success means beyond the Job's own
- * status (a digest, a version line) is the caller's to read from the tail.
+ * Runs a Kubernetes Job to its end through the kube port: create it (or take
+ * over the one an earlier attempt of the same job left running), poll until it
+ * succeeds or fails (deleting it when the job is cancelled), and keep the last
+ * lines of its pod's log. What success means beyond the Job's own status (a
+ * digest, a version line) is the caller's to read from the tail.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { KubeClient } from "../ports/kube.ts";
@@ -30,6 +31,62 @@ interface JobStatus {
   };
 }
 
+/**
+ * The reason a worker aborts a job it no longer holds because another worker
+ * will carry it on (the job was queued again after the worker's lease expired).
+ * Unlike a cancellation, the Kubernetes Job is left running for that worker.
+ */
+export class LeaseHandoff extends Error {
+  constructor() {
+    super("the job was handed to another worker");
+    this.name = "LeaseHandoff";
+  }
+}
+
+/** Whether an abort means "stop watching, leave the Job" rather than "cancel it". */
+export const isHandoff = (signal: AbortSignal): boolean => signal.reason instanceof LeaseHandoff;
+
+interface ListedJob {
+  metadata?: { name?: string; uid?: string; creationTimestamp?: string; deletionTimestamp?: string };
+  spec?: { suspend?: boolean };
+}
+
+/**
+ * The Job an earlier attempt of the same stardust job left behind, found by its
+ * `stardust/run` and `stardust/job` labels: the newest one that is not being
+ * deleted and was released (not suspended). A suspended leftover never got what
+ * it needed to start and is deleted. Null when there is none, or the manifest
+ * has no such labels, and a new Job is made.
+ */
+export async function adoptableJob(
+  kube: KubeClient,
+  namespace: string,
+  manifest: Record<string, unknown>,
+): Promise<{ name: string; uid: string } | null> {
+  const labels = (manifest.metadata as { labels?: Record<string, string> } | undefined)?.labels ?? {};
+  const run = labels["stardust/run"];
+  const job = labels["stardust/job"];
+  if (!run || !job) return null;
+  const ns = encodeURIComponent(namespace);
+  const selector = encodeURIComponent(`stardust/run=${run},stardust/job=${job}`);
+  const res = await kube.request("GET", `/apis/batch/v1/namespaces/${ns}/jobs?labelSelector=${selector}`);
+  if (res.status < 200 || res.status >= 300) return null;
+  const items = ((JSON.parse(res.body) as { items?: ListedJob[] }).items ?? []).filter(
+    (j) => j.metadata?.name && !j.metadata.deletionTimestamp,
+  );
+  for (const j of items.filter((x) => x.spec?.suspend)) {
+    await kube.request(
+      "DELETE",
+      `/apis/batch/v1/namespaces/${ns}/jobs/${encodeURIComponent(j.metadata?.name ?? "")}?propagationPolicy=Background`,
+    );
+  }
+  const live = items
+    .filter((j) => !j.spec?.suspend)
+    .sort((a, b) => (a.metadata?.creationTimestamp ?? "").localeCompare(b.metadata?.creationTimestamp ?? ""));
+  const newest = live.at(-1)?.metadata;
+  return newest?.name ? { name: newest.name, uid: newest.uid ?? "" } : null;
+}
+
 async function api<T>(kube: KubeClient, method: string, path: string, body?: unknown): Promise<T> {
   const res = await kube.request(method, path, body);
   if (res.status < 200 || res.status >= 300) {
@@ -45,14 +102,17 @@ export async function runJob(
   options: JobRunOptions,
 ): Promise<JobRun> {
   const ns = encodeURIComponent(namespace);
-  const created = await api<JobStatus>(kube, "POST", `/apis/batch/v1/namespaces/${ns}/jobs`, manifest);
-  const jobName = created.metadata?.name;
+  const adopted = await adoptableJob(kube, namespace, manifest);
+  const jobName = adopted
+    ? adopted.name
+    : (await api<JobStatus>(kube, "POST", `/apis/batch/v1/namespaces/${ns}/jobs`, manifest)).metadata?.name;
   if (!jobName) throw new Error("the created Job has no name");
   const path = `/apis/batch/v1/namespaces/${ns}/jobs/${encodeURIComponent(jobName)}`;
   let result: JobRun["result"] | null = null;
   let reason: string | undefined;
   while (result === null) {
     if (options.signal.aborted) {
+      if (isHandoff(options.signal)) return { result: "cancelled", jobName, reason: "handed off", logTail: "" };
       await kube.request("DELETE", `${path}?propagationPolicy=Background`);
       return { result: "cancelled", jobName, reason: "cancelled", logTail: "" };
     }
