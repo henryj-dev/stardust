@@ -25,7 +25,7 @@ const LABEL_VALUE = /^(([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9])$/;
 type Status = { name?: string; state?: { terminated?: { exitCode?: number } } & Record<string, unknown> };
 interface Pod {
   metadata?: { name?: string; creationTimestamp?: string };
-  spec?: { containers?: Array<{ name?: string }> };
+  spec?: { containers?: Array<{ name?: string }>; initContainers?: Array<{ name?: string }> };
   status?: { containerStatuses?: Status[]; initContainerStatuses?: Status[] };
 }
 interface PodList {
@@ -34,9 +34,14 @@ interface PodList {
 
 /** The container whose log to read, or null while nothing has started printing. */
 function containerOf(pod: Pod): string | null {
-  const main = (pod.spec?.containers ?? []).flatMap((c) => (c.name ? [c.name] : []));
-  const target = main.length === 0 || main.includes(BUILD_CONTAINER) ? BUILD_CONTAINER : (main[0] as string);
-  const state = pod.status?.containerStatuses?.find((c) => c.name === target)?.state;
+  const names = (list?: Array<{ name?: string }>) => (list ?? []).flatMap((c) => (c.name ? [c.name] : []));
+  const main = names(pod.spec?.containers);
+  // The build container may be an init container (a build with a state cache saves after it).
+  const hasBuild = main.includes(BUILD_CONTAINER) || names(pod.spec?.initContainers).includes(BUILD_CONTAINER);
+  const target = main.length === 0 || hasBuild ? BUILD_CONTAINER : (main[0] as string);
+  const state = [...(pod.status?.containerStatuses ?? []), ...(pod.status?.initContainerStatuses ?? [])].find(
+    (c) => c.name === target,
+  )?.state;
   if (state && !("waiting" in state)) return target;
   for (const init of pod.status?.initContainerStatuses ?? []) {
     const s = init.state;

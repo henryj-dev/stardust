@@ -1,5 +1,6 @@
 import { definePlugin } from "@stardust/core";
 import { createBuilder } from "./builder.ts";
+import type { StateCacheOptions } from "./job.ts";
 
 export type { BuilderOptions, BuildInput } from "./job.ts";
 export {
@@ -66,6 +67,7 @@ export const plugin = definePlugin({
           ...(config.insecureRegistry === true ? { insecureRegistry: true } : {}),
           ...(config.cloneUsername ? { cloneUsername: config.cloneUsername as string } : {}),
           ...(config.cache === "off" ? { cache: "off" as const } : {}),
+          ...(config.stateCache ? { stateCache: config.stateCache as StateCacheOptions } : {}),
         }),
       };
     },
@@ -86,6 +88,7 @@ export const plugin = definePlugin({
           "cloneUsername",
           "pull",
           "cache",
+          "stateCache",
         ].includes(key)
       ) {
         problems.push(`unknown key "${key}"`);
@@ -125,6 +128,7 @@ export const plugin = definePlugin({
         }
       }
     }
+    if (s.stateCache !== undefined) problems.push(...stateCacheProblems(s.stateCache));
     if (s.cache !== undefined && s.cache !== "registry" && s.cache !== "off") {
       problems.push('cache must be "registry" or "off"');
     }
@@ -140,3 +144,29 @@ export type { RunBuildOptions } from "./executor.ts";
 export { runBuild } from "./executor.ts";
 export type { BuildLogOptions } from "./logs.ts";
 export { buildLogReader } from "./logs.ts";
+
+function stateCacheProblems(value: unknown): string[] {
+  if (typeof value !== "object" || value === null) return ["stateCache must be a mapping"];
+  const c = value as Record<string, unknown>;
+  const problems: string[] = [];
+  for (const key of Object.keys(c)) {
+    if (!["endpoint", "bucket", "secret", "region", "maxBytes", "components"].includes(key))
+      problems.push(`stateCache: unknown key "${key}"`);
+  }
+  if (typeof c.endpoint !== "string" || !/^https?:\/\/[^\s/]+\/?$/.test(c.endpoint))
+    problems.push("stateCache.endpoint must be an http(s) URL without a path");
+  if (typeof c.bucket !== "string" || !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(c.bucket))
+    problems.push("stateCache.bucket must be a bucket name");
+  if (typeof c.secret !== "string" || !DNS_NAME.test(c.secret))
+    problems.push("stateCache.secret must name a Secret with keys access-key and secret-key");
+  if (c.region !== undefined && (typeof c.region !== "string" || !/^[a-z0-9-]+$/.test(c.region)))
+    problems.push("stateCache.region must be a region name");
+  if (c.maxBytes !== undefined && !(Number.isInteger(c.maxBytes) && (c.maxBytes as number) > 0))
+    problems.push("stateCache.maxBytes must be a positive whole number of bytes");
+  if (
+    !Array.isArray(c.components) ||
+    c.components.some((x) => typeof x !== "string" || !/^[a-z0-9-]+\/[a-z0-9-]+$/.test(x))
+  )
+    problems.push("stateCache.components must list <project>/<component> entries");
+  return problems;
+}
