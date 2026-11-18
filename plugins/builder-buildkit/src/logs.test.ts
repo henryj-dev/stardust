@@ -83,4 +83,48 @@ describe("buildLogReader", () => {
     const { kube } = fakeKube([{ name: "p", created: "x", build: "running" }], { status: 403, chunks: ["denied"] });
     await assert.rejects(read(kube), /returned 403/);
   });
+
+  it("reads a Worker release's deploy container, or the init step that runs or failed before it", async () => {
+    const release = (deploy: Record<string, unknown> | null, init: Array<[string, Record<string, unknown>]>) => {
+      const calls: string[] = [];
+      const kube: KubeStreamClient = {
+        async request() {
+          const item = {
+            metadata: { name: "r", creationTimestamp: "x" },
+            spec: { containers: [{ name: "deploy" }] },
+            status: {
+              initContainerStatuses: init.map(([name, state]) => ({ name, state })),
+              containerStatuses: deploy ? [{ name: "deploy", state: deploy }] : [],
+            },
+          };
+          return { status: 200, body: JSON.stringify({ items: [item] }) };
+        },
+        async stream(path) {
+          calls.push(decodeURIComponent(path));
+          return { status: 200, body: (async function* () {})() };
+        },
+      };
+      return { kube, calls };
+    };
+    const done = { terminated: { exitCode: 0 } };
+    const finished = release(done, [
+      ["clone", done],
+      ["build", done],
+    ]);
+    assert.equal((await read(finished.kube, "web", false)).state, "open");
+    assert.match(finished.calls[0] ?? "", /container=deploy&/);
+    const building = release({ waiting: {} }, [
+      ["clone", done],
+      ["build", { running: {} }],
+    ]);
+    await read(building.kube);
+    assert.match(building.calls[0] ?? "", /container=build&/);
+    const failed = release({ waiting: {} }, [
+      ["clone", done],
+      ["build", { terminated: { exitCode: 1 } }],
+    ]);
+    await read(failed.kube, "web", false);
+    assert.match(failed.calls[0] ?? "", /container=build&/);
+    assert.deepEqual(await read(release(null, [["clone", { waiting: {} }]]).kube), { state: "waiting" });
+  });
 });

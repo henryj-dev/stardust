@@ -2,6 +2,11 @@
  * Reads a build's log from its pod while Kubernetes still has it: live while
  * the build runs, in full until the finished Job is cleaned up. stardust keeps
  * no copy, so a cleaned-up build has no log.
+ *
+ * The container read is the build container when the pod has one, else the
+ * pod's main container (a Worker release's is `deploy`, after `clone` and
+ * `build` init containers). Until it starts, an init step that is running or
+ * has failed is read instead, so a release that stops early still shows why.
  */
 
 import type { BuildLogReader, KubeStreamClient } from "@stardust/core";
@@ -17,11 +22,28 @@ export interface BuildLogOptions {
 // Label values: what Kubernetes accepts, so a query cannot widen the selector.
 const LABEL_VALUE = /^(([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9])$/;
 
+type Status = { name?: string; state?: { terminated?: { exitCode?: number } } & Record<string, unknown> };
+interface Pod {
+  metadata?: { name?: string; creationTimestamp?: string };
+  spec?: { containers?: Array<{ name?: string }> };
+  status?: { containerStatuses?: Status[]; initContainerStatuses?: Status[] };
+}
 interface PodList {
-  items?: Array<{
-    metadata?: { name?: string; creationTimestamp?: string };
-    status?: { containerStatuses?: Array<{ name?: string; state?: Record<string, unknown> }> };
-  }>;
+  items?: Pod[];
+}
+
+/** The container whose log to read, or null while nothing has started printing. */
+function containerOf(pod: Pod): string | null {
+  const main = (pod.spec?.containers ?? []).flatMap((c) => (c.name ? [c.name] : []));
+  const target = main.length === 0 || main.includes(BUILD_CONTAINER) ? BUILD_CONTAINER : (main[0] as string);
+  const state = pod.status?.containerStatuses?.find((c) => c.name === target)?.state;
+  if (state && !("waiting" in state)) return target;
+  for (const init of pod.status?.initContainerStatuses ?? []) {
+    const s = init.state;
+    if (!init.name || !s) continue;
+    if ("running" in s || ("terminated" in s && (s.terminated?.exitCode ?? 0) !== 0)) return init.name;
+  }
+  return null;
 }
 
 export function buildLogReader(
@@ -48,11 +70,11 @@ export function buildLogReader(
     const pod = pods[0];
     const name = pod?.metadata?.name;
     if (!name) return { state: "none" };
-    const build = pod.status?.containerStatuses?.find((c) => c.name === BUILD_CONTAINER);
-    if (!build?.state || "waiting" in build.state) return { state: "waiting" };
+    const container = containerOf(pod);
+    if (!container) return { state: "waiting" };
 
     const query = new URLSearchParams({
-      container: BUILD_CONTAINER,
+      container,
       follow: String(follow),
       tailLines: String(tailLines),
       limitBytes: String(limitBytes),
