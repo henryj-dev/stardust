@@ -1,5 +1,11 @@
 # stardust
 
+## 0.23.1
+
+### Patch Changes
+
+- [#102](https://github.com/henryj-dev/stardust/pull/102) [`bc1de57`](https://github.com/henryj-dev/stardust/commit/bc1de574e85c221f5a7bfce027dbd86997291f18) Thanks [@mack-erel](https://github.com/mack-erel)! - Live build logs, pod logs and the project event stream reach the browser as they are written when an nginx sits in front: their responses say `X-Accel-Buffering: no`, so the proxy no longer holds them back until its buffer fills.
+
 ## 0.23.0
 
 ### Minor Changes
