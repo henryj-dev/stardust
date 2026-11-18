@@ -11,6 +11,8 @@ export async function relayLog(upstream: Response): Promise<Response> {
         "content-type": "text/plain; charset=utf-8",
         "x-content-type-options": "nosniff",
         "cache-control": "no-store",
+        // An nginx in front (an edge proxy) would otherwise hold the stream back until its buffer fills.
+        "x-accel-buffering": "no",
       },
     });
   }
