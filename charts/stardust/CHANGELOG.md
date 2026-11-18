@@ -1,5 +1,11 @@
 # stardust
 
+## 0.21.3
+
+### Patch Changes
+
+- [#96](https://github.com/henryj-dev/stardust/pull/96) [`f8cfc44`](https://github.com/henryj-dev/stardust/commit/f8cfc44a051a35e0a185718f825ddf32faa0a791) Thanks [@mack-erel](https://github.com/mack-erel)! - Pages that ask you to confirm it is you offer "confirm through single sign-on" only when the server has single sign-on set up; started anyway, it sends you to the sign-in page with a message instead of a 500.
+
 ## 0.21.2
 
 ### Patch Changes
