@@ -1,5 +1,11 @@
 # stardust
 
+## 0.23.3
+
+### Patch Changes
+
+- [#106](https://github.com/henryj-dev/stardust/pull/106) [`c4213d7`](https://github.com/henryj-dev/stardust/commit/c4213d7060a975d77083792141a5b980f0961241) Thanks [@mack-erel](https://github.com/mack-erel)! - The build state cache is compressed with pigz on every core and fetched over several streams, and a rebuild that reused the state no longer re-uploads it because an export wrote a runc log and a few small blobs. On pico's Rust image (a 3.15 GB state) a rebuild of the same commit spent about three of its four minutes moving the state; pigz halves it in 22 seconds.
+
 ## 0.23.2
 
 ### Patch Changes
