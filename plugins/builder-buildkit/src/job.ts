@@ -322,7 +322,7 @@ STATE_DIR="${BUILDKIT_STATE_DIR}"
 # The state's files belong to users of BuildKit's user namespace, so it is
 # unpacked and packed inside one (rootlesskit), where their owners are real.
 if [ -n "\${STATE_ARCHIVE:-}" ] && [ -f "\${STATE_ARCHIVE}/in.tgz" ]; then
-  if rootlesskit sh -c 'set -o pipefail; gzip -dc "$1/in.tgz" | tar -xf - -C "$2"' sh "\${STATE_ARCHIVE}" "\${STATE_DIR}"; then
+  if rootlesskit sh -c 'gzip -t "$1/in.tgz" && gzip -dc "$1/in.tgz" | tar -xf - -C "$2"' sh "\${STATE_ARCHIVE}" "\${STATE_DIR}"; then
     echo "[state-cache] unpacked"
   else
     echo "[state-cache] unpacking failed: a cold build"
@@ -362,7 +362,7 @@ buildctl-daemonless.sh build \\
 if [ -n "\${STATE_ARCHIVE:-}" ]; then
   KEEP_MB=$(( \${STATE_MAX_BYTES} / 1048576 ))
   buildctl-daemonless.sh prune --keep-storage "\${KEEP_MB}" >/dev/null 2>&1 || echo "[state-cache] prune failed"
-  if rootlesskit sh -c 'set -o pipefail; tar -cf - -C "$1" . | gzip -1 > "$2/out.tgz"' sh "\${STATE_DIR}" "\${STATE_ARCHIVE}"; then
+  if rootlesskit sh -c 'tar -cf "$2/out.tar" -C "$1" . && gzip -1 -c "$2/out.tar" > "$2/out.tgz" && rm -f "$2/out.tar"' sh "\${STATE_DIR}" "\${STATE_ARCHIVE}"; then
     SIZE="$(wc -c < "\${STATE_ARCHIVE}/out.tgz" | tr -d ' ')"
     if [ "\${SIZE}" -gt "\${STATE_MAX_BYTES}" ]; then
       rm -f "\${STATE_ARCHIVE}/out.tgz"; echo "[state-cache] \${SIZE}B is over the limit: not saved"
@@ -370,7 +370,7 @@ if [ -n "\${STATE_ARCHIVE:-}" ]; then
       echo "[state-cache] packed \${SIZE}B"
     fi
   else
-    rm -f "\${STATE_ARCHIVE}/out.tgz"; echo "[state-cache] packing failed: not saved"
+    rm -f "\${STATE_ARCHIVE}/out.tgz" "\${STATE_ARCHIVE}/out.tar"; echo "[state-cache] packing failed: not saved"
   fi
 fi
 ${DIGEST_FROM_METADATA}`;
