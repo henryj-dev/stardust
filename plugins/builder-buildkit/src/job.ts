@@ -102,10 +102,11 @@ export interface BuilderOptions {
    * Restored before the build and saved after it, each by a container of its
    * own that holds the storage credential; the build container never sees it.
    * The state is packed and unpacked inside BuildKit's user namespace, where
-   * its files' owners are real, as a plain tar (storage is meant to be close:
-   * compressing gigabytes costs more than sending them), and a build that
-   * wrote nothing new into it saves nothing. A missing, broken or failed transfer means a
-   * cold build, never a failed one. Builds of someone else's code use none.
+   * its files' owners are real, as a tar compressed by pigz on every core when
+   * the BuildKit image has it (a plain tar otherwise), and a build that wrote
+   * nothing new into its layers or cache mounts saves nothing. A missing,
+   * broken or failed transfer means a cold build, never a failed one. Builds
+   * of someone else's code use none.
    */
   stateCache?: StateCacheOptions;
   /**
@@ -297,23 +298,36 @@ export RCLONE_CONFIG_STATE_ENDPOINT="\${STATE_ENDPOINT}" RCLONE_CONFIG_STATE_REG
 export RCLONE_CONFIG_STATE_ACCESS_KEY_ID="\${STATE_ACCESS_KEY}" RCLONE_CONFIG_STATE_SECRET_ACCESS_KEY="\${STATE_SECRET_KEY}"
 export HOME=/state-archive RCLONE_CACHE_DIR=/state-archive/.rclone`;
 
-/** Fetches the packed state, as an opaque file. Never fails: without it the build is cold. */
+/**
+ * Fetches the packed state, as an opaque file: the compressed archive, or a
+ * plain one an older release or a BuildKit image without pigz saved. Several
+ * streams at once: one stream did not fill the link (59s against 34s for 3 GB).
+ * Never fails: without it the build is cold.
+ */
 export const STATE_RESTORE_SCRIPT = `set -u
 ${RCLONE_ENV}
-if rclone copyto --s3-no-check-bucket "state:\${STATE_BUCKET}/\${STATE_KEY}" /state-archive/in.tar 2>/dev/null; then
-  echo "[state-cache] fetched $(wc -c < /state-archive/in.tar | tr -d ' ')B"
-else
-  rm -f /state-archive/in.tar
-  echo "[state-cache] none yet: a cold build"
-fi
+for EXT in tar.gz tar; do
+  if rclone copyto --s3-no-check-bucket --multi-thread-streams 8 --multi-thread-cutoff 64M "state:\${STATE_BUCKET}/\${STATE_KEY}.\${EXT}" "/state-archive/in.\${EXT}" 2>/dev/null; then
+    echo "[state-cache] fetched \${STATE_KEY}.\${EXT} $(wc -c < "/state-archive/in.\${EXT}" | tr -d ' ')B"
+    exit 0
+  fi
+  rm -f "/state-archive/in.\${EXT}"
+done
+echo "[state-cache] none yet: a cold build"
 exit 0`;
 
-/** Stores what the build packed. Never fails: the image is what matters. */
+/**
+ * Stores what the build packed, then removes the archive of the other format,
+ * which the restore would otherwise prefer or fall back to. Never fails: the image is what matters.
+ */
 export const STATE_SAVE_SCRIPT = `set -u
 ${RCLONE_ENV}
-if [ ! -f /state-archive/out.tar ]; then echo "[state-cache] nothing to save"; exit 0; fi
-if rclone copyto --s3-no-check-bucket /state-archive/out.tar "state:\${STATE_BUCKET}/\${STATE_KEY}"; then
-  echo "[state-cache] saved $(wc -c < /state-archive/out.tar | tr -d ' ')B"
+for EXT in tar.gz tar; do [ -f "/state-archive/out.\${EXT}" ] && break; EXT=""; done
+if [ -z "\${EXT}" ]; then echo "[state-cache] nothing to save"; exit 0; fi
+if rclone copyto --s3-no-check-bucket "/state-archive/out.\${EXT}" "state:\${STATE_BUCKET}/\${STATE_KEY}.\${EXT}"; then
+  echo "[state-cache] saved \${STATE_KEY}.\${EXT} $(wc -c < "/state-archive/out.\${EXT}" | tr -d ' ')B"
+  if [ "\${EXT}" = tar ]; then OTHER=tar.gz; else OTHER=tar; fi
+  rclone deletefile --s3-no-check-bucket "state:\${STATE_BUCKET}/\${STATE_KEY}.\${OTHER}" 2>/dev/null || true
 else
   echo "[state-cache] saving failed; the build did not"
 fi
@@ -323,16 +337,29 @@ export const BUILD_SCRIPT = `set -eu
 STATE_DIR="${BUILDKIT_STATE_DIR}"
 # The state's files belong to users of BuildKit's user namespace, so it is
 # unpacked and packed inside one (rootlesskit), where their owners are real.
-if [ -n "\${STATE_ARCHIVE:-}" ] && [ -f "\${STATE_ARCHIVE}/in.tar" ]; then
-  if rootlesskit tar -xf "\${STATE_ARCHIVE}/in.tar" -C "\${STATE_DIR}"; then
-    # Anything written after this marker is new work worth saving.
-    touch "\${STATE_ARCHIVE}/unpacked"
-    echo "[state-cache] unpacked"
-  else
-    echo "[state-cache] unpacking failed: a cold build"
-    rootlesskit sh -c 'find "$1" -mindepth 1 -delete' sh "\${STATE_DIR}" || true
+# The archive is gzip when STATE_GZIP (pigz) is in the image, a plain tar otherwise.
+# No pipefail (not every sh has it): a failed stage of a pipe leaves a file behind.
+GZ=""
+if [ -n "\${STATE_GZIP:-}" ] && command -v "\${STATE_GZIP}" >/dev/null 2>&1; then GZ="\${STATE_GZIP}"; fi
+if [ -n "\${STATE_ARCHIVE:-}" ]; then
+  IN=""
+  for f in in.tar.gz in.tar; do if [ -f "\${STATE_ARCHIVE}/\${f}" ]; then IN="\${STATE_ARCHIVE}/\${f}"; break; fi; done
+  if [ -n "\${IN}" ]; then
+    case "\${IN}" in
+      *.gz) UNGZ="\${GZ:-gzip}"
+        rootlesskit sh -c '{ "$1" -dc "$2" || touch "$4"; } | tar -xf - -C "$3"' sh "\${UNGZ}" "\${IN}" "\${STATE_DIR}" "\${STATE_ARCHIVE}/unpack-failed" || touch "\${STATE_ARCHIVE}/unpack-failed" ;;
+      *) rootlesskit tar -xf "\${IN}" -C "\${STATE_DIR}" || touch "\${STATE_ARCHIVE}/unpack-failed" ;;
+    esac
+    if [ ! -f "\${STATE_ARCHIVE}/unpack-failed" ]; then
+      # Anything written after this marker is new work worth saving.
+      touch "\${STATE_ARCHIVE}/unpacked"
+      echo "[state-cache] unpacked"
+    else
+      echo "[state-cache] unpacking failed: a cold build"
+      rootlesskit sh -c 'find "$1" -mindepth 1 -delete' sh "\${STATE_DIR}" || true
+    fi
+    rm -f "\${IN}" "\${STATE_ARCHIVE}/unpack-failed"
   fi
-  rm -f "\${STATE_ARCHIVE}/in.tar"
 fi
 cd /workspace/src
 BUILD_TIME="$(cat /workspace/build-time)"
@@ -366,19 +393,28 @@ buildctl-daemonless.sh build \\
 if [ -n "\${STATE_ARCHIVE:-}" ]; then
   KEEP_MB=$(( \${STATE_MAX_BYTES} / 1048576 ))
   buildctl-daemonless.sh prune --keep-storage "\${KEEP_MB}" >/dev/null 2>&1 || echo "[state-cache] prune failed"
-  # A build that only reused the state changes nothing but BuildKit's own databases: keep the archive there is.
+  # What is worth saving lives in the snapshots: layers and cache mounts. A build that only reused the
+  # state still writes BuildKit's databases, a runc log (executor/) and small new blobs to the content
+  # store (the exported manifests and attestations, which BuildKit writes again), so those do not count.
   # Looked for inside the user namespace too, where every directory of the state can be read.
-  if [ -f "\${STATE_ARCHIVE}/unpacked" ] && [ -z "$(rootlesskit find "\${STATE_DIR}" -newer "\${STATE_ARCHIVE}/unpacked" -type f ! -name '*.db' ! -name '*.lock' -print 2>/dev/null | head -n 1)" ]; then
+  if [ -f "\${STATE_ARCHIVE}/unpacked" ] && [ -z "$(rootlesskit find "\${STATE_DIR}" -newer "\${STATE_ARCHIVE}/unpacked" -type f ! -name '*.db' ! -name '*.lock' ! -path '*/executor/*' ! -path '*/content/*' -print 2>/dev/null | head -n 1)" ]; then
     echo "[state-cache] unchanged: not saved"
-  elif rootlesskit tar -cf "\${STATE_ARCHIVE}/out.tar" -C "\${STATE_DIR}" .; then
-    SIZE="$(wc -c < "\${STATE_ARCHIVE}/out.tar" | tr -d ' ')"
-    if [ "\${SIZE}" -gt "\${STATE_MAX_BYTES}" ]; then
-      rm -f "\${STATE_ARCHIVE}/out.tar"; echo "[state-cache] \${SIZE}B is over the limit: not saved"
-    else
-      echo "[state-cache] packed \${SIZE}B"
-    fi
   else
-    rm -f "\${STATE_ARCHIVE}/out.tar"; echo "[state-cache] packing failed: not saved"
+    if [ -n "\${GZ}" ]; then OUT="\${STATE_ARCHIVE}/out.tar.gz"
+      rootlesskit sh -c '{ tar -cf - -C "$2" . || touch "$4"; } | "$1" -1 > "$3"' sh "\${GZ}" "\${STATE_DIR}" "\${OUT}" "\${STATE_ARCHIVE}/pack-failed" || touch "\${STATE_ARCHIVE}/pack-failed"
+    else OUT="\${STATE_ARCHIVE}/out.tar"
+      rootlesskit tar -cf "\${OUT}" -C "\${STATE_DIR}" . || touch "\${STATE_ARCHIVE}/pack-failed"
+    fi
+    if [ -f "\${STATE_ARCHIVE}/pack-failed" ]; then
+      rm -f "\${OUT}" "\${STATE_ARCHIVE}/pack-failed"; echo "[state-cache] packing failed: not saved"
+    else
+      SIZE="$(wc -c < "\${OUT}" | tr -d ' ')"
+      if [ "\${SIZE}" -gt "\${STATE_MAX_BYTES}" ]; then
+        rm -f "\${OUT}"; echo "[state-cache] \${SIZE}B is over the limit: not saved"
+      else
+        echo "[state-cache] packed \${SIZE}B"
+      fi
+    fi
   fi
 fi
 ${DIGEST_FROM_METADATA}`;
@@ -445,7 +481,8 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
         ...env({
           STATE_ENDPOINT: state.endpoint,
           STATE_BUCKET: state.bucket,
-          STATE_KEY: `${input.projectId}/${input.component}.tar`,
+          // The scripts add the format: .tar.gz, or .tar from an older release or an image without pigz.
+          STATE_KEY: `${input.projectId}/${input.component}`,
           ...(state.region ? { STATE_REGION: state.region } : {}),
         }),
         { name: "STATE_ACCESS_KEY", valueFrom: { secretKeyRef: { name: state.secret, key: "access-key" } } },
@@ -490,7 +527,12 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
         ? { CACHE_REF: `${input.imageRepository}:buildcache` }
         : {}),
       ...(state
-        ? { STATE_ARCHIVE: "/state-archive", STATE_MAX_BYTES: String(state.maxBytes ?? DEFAULT_STATE_MAX_BYTES) }
+        ? {
+            STATE_ARCHIVE: "/state-archive",
+            STATE_MAX_BYTES: String(state.maxBytes ?? DEFAULT_STATE_MAX_BYTES),
+            // In the default BuildKit image: on 3 GB of a Rust state, half the size in 22s on 8 cores.
+            STATE_GZIP: "pigz",
+          }
         : {}),
     }),
     // Rootless BuildKit needs unconfined seccomp and AppArmor to set up

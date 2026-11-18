@@ -446,7 +446,9 @@ describe("state cache", () => {
         .filter((e: { value?: string }) => e.value)
         .map((e: { name: string; value: string }) => [e.name, e.value]),
     );
-    assert.equal(vars.STATE_KEY, "demo/api.tar");
+    assert.equal(vars.STATE_KEY, "demo/api", "the scripts add the format");
+    const build = spec.initContainers[2];
+    assert.ok(build.env.some((e: { name: string; value?: string }) => e.name === "STATE_GZIP" && e.value === "pigz"));
     assert.equal(vars.STATE_BUCKET, "buildcache");
     for (const other of [
       manifest(),
@@ -511,7 +513,7 @@ describe("state cache", () => {
     writeFileSync(join(dir, "bin", "rootlesskit"), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
     writeFileSync(
       join(dir, "bin", "buildctl-daemonless.sh"),
-      `#!/bin/sh\n[ "$1" = prune ] && exit 0\n[ -n "\${NOWRITE:-}" ] || touch "${dir}/state/built"\nprintf '{"containerimage.digest":"sha256:%s"}' "${"a".repeat(64)}" > "${dir}/metadata.json"\n`,
+      `#!/bin/sh\n[ "$1" = prune ] && exit 0\n[ -n "\${NOWRITE:-}" ] || touch "${dir}/state/built"\nfor f in \${ALSO:-}; do mkdir -p "$(dirname "${dir}/state/$f")"; echo x > "${dir}/state/$f"; done\nprintf '{"containerimage.digest":"sha256:%s"}' "${"a".repeat(64)}" > "${dir}/metadata.json"\n`,
       { mode: 0o755 },
     );
     setup(dir);
@@ -582,6 +584,133 @@ describe("state cache", () => {
       assert.ok(!existsSync(join(b.dir, "archive", "out.tar")));
     } finally {
       b.done();
+    }
+  });
+  const oldState = (dir: string, gz = false) => {
+    mkdirSync(join(dir, "old"));
+    writeFileSync(join(dir, "old", "cached"), "layer");
+    execFileSync("sh", ["-c", `tar -c${gz ? "z" : ""}f "${dir}/archive/in.tar${gz ? ".gz" : ""}" -C "${dir}/old" .`]);
+  };
+
+  it("packs with the configured gzip when the image has it, and unpacks a compressed state", () => {
+    const b = runBuild((dir) => oldState(dir, true), { STATE_MAX_BYTES: "1073741824", STATE_GZIP: "gzip" });
+    try {
+      assert.equal(b.run.status, 0, b.run.stderr);
+      assert.equal(readFileSync(join(b.dir, "state", "cached"), "utf8"), "layer", "the compressed state was unpacked");
+      assert.ok(!existsSync(join(b.dir, "archive", "in.tar.gz")));
+      assert.ok(!existsSync(join(b.dir, "archive", "out.tar")), "not the plain format");
+      const magic = readFileSync(join(b.dir, "archive", "out.tar.gz")).subarray(0, 2);
+      assert.deepEqual([...magic], [0x1f, 0x8b], "the archive is gzip, not a tar named .gz");
+      const packed = execFileSync("tar", ["-tzf", join(b.dir, "archive", "out.tar.gz")], { encoding: "utf8" });
+      assert.match(packed, /cached/);
+      assert.match(packed, /built/);
+    } finally {
+      b.done();
+    }
+  });
+
+  it("falls back to a plain tar when the configured gzip is not in the image", () => {
+    const b = runBuild((dir) => oldState(dir), { STATE_MAX_BYTES: "1073741824", STATE_GZIP: "no-such-pigz" });
+    try {
+      assert.equal(b.run.status, 0, b.run.stderr);
+      assert.ok(existsSync(join(b.dir, "archive", "out.tar")));
+      assert.ok(!existsSync(join(b.dir, "archive", "out.tar.gz")));
+    } finally {
+      b.done();
+    }
+  });
+
+  it("builds cold over a broken compressed archive", () => {
+    const b = runBuild((dir) => writeFileSync(join(dir, "archive", "in.tar.gz"), "not gzip"), {
+      STATE_MAX_BYTES: "1073741824",
+      STATE_GZIP: "gzip",
+    });
+    try {
+      assert.equal(b.run.status, 0, b.run.stderr);
+      assert.match(b.run.stdout, /unpacking failed: a cold build/);
+      assert.ok(!existsSync(join(b.dir, "archive", "unpack-failed")));
+      assert.match(b.run.stdout, /\[stardust-image-digest\]/);
+    } finally {
+      b.done();
+    }
+  });
+
+  it("does not count a runc log or new content-store blobs as a change, but does count a snapshot", () => {
+    const noise = "runc-overlayfs/executor/runc-log.json runc-overlayfs/content/blobs/sha256/abc";
+    const reused = runBuild((dir) => oldState(dir), { STATE_MAX_BYTES: "1073741824", NOWRITE: "1", ALSO: noise });
+    try {
+      assert.equal(reused.run.status, 0, reused.run.stderr);
+      assert.match(reused.run.stdout, /unchanged: not saved/);
+    } finally {
+      reused.done();
+    }
+    const changed = runBuild((dir) => oldState(dir), {
+      STATE_MAX_BYTES: "1073741824",
+      NOWRITE: "1",
+      ALSO: `${noise} runc-overlayfs/snapshots/snapshots/7/fs/target/release/app`,
+    });
+    try {
+      assert.equal(changed.run.status, 0, changed.run.stderr);
+      assert.match(changed.run.stdout, /packed \d+B/);
+    } finally {
+      changed.done();
+    }
+  });
+
+  // rclone stand-in: "copyto SRC DST" succeeds for a remote listed in $HAVE (fetch) or always (store); calls are logged.
+  const fakeRclone = (dir: string) =>
+    writeFileSync(
+      join(dir, "bin", "rclone"),
+      `#!/bin/sh\necho "$*" >> "${dir}/calls"\ncmd=""; src=""; dst=""\nfor a; do case "$a" in --*|[0-9]*) ;; *) if [ -z "$cmd" ]; then cmd=$a; elif [ -z "$src" ]; then src=$a; else dst=$a; fi;; esac; done\n[ "$cmd" = copyto ] || exit 0\ncase "$src" in state:*) case " $HAVE " in *" $src "*) echo data > "$dst"; exit 0;; esac; exit 1;; esac\nexit 0\n`,
+      { mode: 0o755 },
+    );
+  const transfer = (script: string, setup: (dir: string) => void, extra: Record<string, string> = {}) => {
+    const dir = mkdtempSync(join(tmpdir(), "state-xfer-"));
+    mkdirSync(join(dir, "bin"));
+    fakeRclone(dir);
+    setup(dir);
+    const run = spawnSync("sh", ["-c", script.replaceAll("/state-archive", dir)], {
+      env: {
+        PATH: `${join(dir, "bin")}:/usr/bin:/bin`,
+        STATE_ENDPOINT: "http://x",
+        STATE_BUCKET: "b",
+        STATE_KEY: "p/c",
+        STATE_ACCESS_KEY: "a",
+        STATE_SECRET_KEY: "s",
+        ...extra,
+      },
+      encoding: "utf8",
+    });
+    const calls = existsSync(join(dir, "calls")) ? readFileSync(join(dir, "calls"), "utf8") : "";
+    return { dir, run, calls, done: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+
+  it("fetches the compressed archive first, then a plain one, with several streams", () => {
+    const both = transfer(STATE_RESTORE_SCRIPT, () => {}, { HAVE: "state:b/p/c.tar.gz state:b/p/c.tar" });
+    try {
+      assert.ok(existsSync(join(both.dir, "in.tar.gz")));
+      assert.ok(!existsSync(join(both.dir, "in.tar")));
+      assert.match(both.calls, /--multi-thread-streams 8/);
+    } finally {
+      both.done();
+    }
+    const plain = transfer(STATE_RESTORE_SCRIPT, () => {}, { HAVE: "state:b/p/c.tar" });
+    try {
+      assert.ok(existsSync(join(plain.dir, "in.tar")), "an archive of an older release still restores");
+      assert.ok(!existsSync(join(plain.dir, "in.tar.gz")));
+    } finally {
+      plain.done();
+    }
+  });
+
+  it("stores the archive under its format and removes the other format", () => {
+    const t = transfer(STATE_SAVE_SCRIPT, (dir) => writeFileSync(join(dir, "out.tar.gz"), "x"));
+    try {
+      assert.equal(t.run.status, 0);
+      assert.match(t.calls, /copyto .*out\.tar\.gz state:b\/p\/c\.tar\.gz/);
+      assert.match(t.calls, /deletefile .*state:b\/p\/c\.tar$/m);
+    } finally {
+      t.done();
     }
   });
 });
