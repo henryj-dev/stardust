@@ -1,5 +1,11 @@
 # stardust
 
+## 0.21.2
+
+### Patch Changes
+
+- [#94](https://github.com/henryj-dev/stardust/pull/94) [`5685396`](https://github.com/henryj-dev/stardust/commit/5685396057368821146f532f21b30bb1ae3b0c94) Thanks [@mack-erel](https://github.com/mack-erel)! - A Worker release's log shows on its run page: the log reader reads the pod's main container when it has no build container (a release's is `deploy`), and a running or failed init step before it starts. Before, the page asked again forever with "the build has not started printing yet".
+
 ## 0.21.1
 
 ### Patch Changes
