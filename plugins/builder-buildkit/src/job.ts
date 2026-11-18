@@ -308,12 +308,14 @@ export HOME=/state-archive RCLONE_CACHE_DIR=/state-archive/.rclone`;
  * Fetches the packed state, as an opaque file: the compressed archive, or a
  * plain one an older release or a BuildKit image without pigz saved. Several
  * streams at once: one stream did not fill the link (59s against 34s for 3 GB).
+ * rclone's copyto exits 0 for an object that does not exist and writes
+ * nothing, so a fetch counts only when the file is there.
  * Never fails: without it the build is cold.
  */
 export const STATE_RESTORE_SCRIPT = `set -u
 ${RCLONE_ENV}
 for EXT in tar.gz tar; do
-  if rclone copyto --s3-no-check-bucket --multi-thread-streams 8 --multi-thread-cutoff 64M "state:\${STATE_BUCKET}/\${STATE_KEY}.\${EXT}" "/state-archive/in.\${EXT}" 2>/dev/null; then
+  if rclone copyto --s3-no-check-bucket --multi-thread-streams 8 --multi-thread-cutoff 64M "state:\${STATE_BUCKET}/\${STATE_KEY}.\${EXT}" "/state-archive/in.\${EXT}" 2>/dev/null && [ -s "/state-archive/in.\${EXT}" ]; then
     echo "[state-cache] fetched \${STATE_KEY}.\${EXT} $(wc -c < "/state-archive/in.\${EXT}" | tr -d ' ')B"
     exit 0
   fi
