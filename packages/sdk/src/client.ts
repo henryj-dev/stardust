@@ -101,8 +101,20 @@ export interface EnvLayerView {
   secrets: string[];
 }
 
+/** A ConfigMap or Secret made by hand under the name stardust renders, which the next change adopts. Names only. */
+export interface HandEnvView {
+  component: string;
+  /** The file in the deploy repository that holds it. */
+  path: string;
+  kind: "ConfigMap" | "Secret";
+  name: string;
+  keys: string[];
+}
+
 export interface EnvView {
   layers: EnvLayerView[];
+  /** Hand-made env the next change to a layer reaching that component moves into the component's layer. Older servers omit it. */
+  adoptable?: HandEnvView[];
   /** Whether the caller may change the env (a maintainer or an administrator). */
   canEdit: boolean;
 }
@@ -115,6 +127,8 @@ export interface EnvChangeInput {
   unset?: string[];
   setSecrets?: Record<string, string>;
   unsetSecrets?: string[];
+  /** Adopt the hand-made env even when nothing else changes. */
+  adopt?: boolean;
 }
 
 export interface EnvChangeResult {
@@ -123,6 +137,8 @@ export interface EnvChangeResult {
   revision: string;
   /** Per component the change reached: the env revision, and the workloads stamped to roll out (empty when none uses the env). */
   components: Array<{ name: string; envRevision: string; consumers: string[] }>;
+  /** Hand-made env this change moved into component layers. Older servers omit it. */
+  adopted?: HandEnvView[];
 }
 
 export interface AuditPage {

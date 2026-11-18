@@ -15,9 +15,13 @@
  * at column 0 directly under `resources:`, and a column-0 comment does not end
  * the list. Assuming two-space items once inserted a two-space item into a
  * column-0 list, which broke the sequence and stopped every deployment.
+ *
+ * An entry may carry a trailing comment (`- secrets.enc.yaml   # what it holds`).
+ * Not reading those as entries once ended the list at its first one, so an
+ * added entry went in above it with another indentation and broke the file.
  */
 
-const ITEM = /^(\s*)-\s+(\S+)\s*$/;
+const ITEM = /^(\s*)-\s+([^\s#]\S*)(?:\s+#.*)?\s*$/;
 const COMMENT = /^\s*#/;
 const BLANK = /^\s*$/;
 const RESOURCES = /^resources:\s*$/;
@@ -72,7 +76,7 @@ export function addResource(yaml: string, entry: string): string {
  * to which entry cannot be told, and a leftover comment is harmless.
  */
 export function removeResource(yaml: string, entry: string): string {
-  const exact = new RegExp(`^\\s*-\\s+${entry.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`);
+  const exact = new RegExp(`^\\s*-\\s+${entry.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s+#.*)?\\s*$`);
   let inList = false;
   const kept: string[] = [];
   for (const line of yaml.split("\n")) {

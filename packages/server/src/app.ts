@@ -1365,9 +1365,9 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (!project) return c.json({ error: "unknown project" }, 404);
     if (!services.env) return c.json({ error: "editing env is not enabled on this server" }, 404);
     try {
-      const { layers } = await readEnv(services.env, project);
+      const { layers, adoptable } = await readEnv(services.env, project);
       const role = await projectRole(globalSql, c.get("user").id, id);
-      return c.json({ layers, canEdit: can(c.get("user"), "project:write", role) });
+      return c.json({ layers, adoptable, canEdit: can(c.get("user"), "project:write", role) });
     } catch (err) {
       log.warn("reading env failed", { project: id, error: (err as Error).message });
       return c.json({ error: "the deploy repository could not be read" }, 502);
@@ -1404,6 +1404,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
             unset: change.unset ?? [],
             secretsSet: keys(change.setSecrets),
             secretsUnset: change.unsetSecrets ?? [],
+            adopted: result.adopted.map((h) => ({ component: h.component, file: h.path, kind: h.kind, keys: h.keys })),
             commit: result.commit,
           },
         });
