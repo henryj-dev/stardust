@@ -65,6 +65,7 @@ export const plugin = definePlugin({
           ...(config.gitBaseUrl ? { gitBaseUrl: config.gitBaseUrl as string } : {}),
           ...(config.insecureRegistry === true ? { insecureRegistry: true } : {}),
           ...(config.cloneUsername ? { cloneUsername: config.cloneUsername as string } : {}),
+          ...(config.cache === "off" ? { cache: "off" as const } : {}),
         }),
       };
     },
@@ -84,6 +85,7 @@ export const plugin = definePlugin({
           "insecureRegistry",
           "cloneUsername",
           "pull",
+          "cache",
         ].includes(key)
       ) {
         problems.push(`unknown key "${key}"`);
@@ -122,6 +124,9 @@ export const plugin = definePlugin({
           problems.push("pull.password must be { env: NAME } or { file: PATH }");
         }
       }
+    }
+    if (s.cache !== undefined && s.cache !== "registry" && s.cache !== "off") {
+      problems.push('cache must be "registry" or "off"');
     }
     if (s.insecureRegistry !== undefined && typeof s.insecureRegistry !== "boolean") {
       problems.push("insecureRegistry must be true or false");
