@@ -1404,7 +1404,16 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
             unset: change.unset ?? [],
             secretsSet: keys(change.setSecrets),
             secretsUnset: change.unsetSecrets ?? [],
-            adopted: result.adopted.map((h) => ({ component: h.component, file: h.path, kind: h.kind, keys: h.keys })),
+            ...(result.adopted.length > 0
+              ? {
+                  adopted: result.adopted.map((h) => ({
+                    component: h.component,
+                    file: h.path,
+                    kind: h.kind,
+                    keys: h.keys,
+                  })),
+                }
+              : {}),
             commit: result.commit,
           },
         });
