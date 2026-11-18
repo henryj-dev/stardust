@@ -1,5 +1,11 @@
 # stardust
 
+## 0.21.0
+
+### Minor Changes
+
+- [#89](https://github.com/henryj-dev/stardust/pull/89) [`46e82a1`](https://github.com/henryj-dev/stardust/commit/46e82a1cd2047e2b65a976fd8d2883832bbcc147) Thanks [@mack-erel](https://github.com/mack-erel)! - The env editor adopts a component's hand-made `<component>-env` ConfigMap or `<component>-env-secret` Secret with the next change (or on its own with "Move them now"): their values move into the component's layer and their documents leave their files in the same commit, instead of a second object by the same name breaking the kustomization. Kustomization entries with a trailing comment are now read, added after and removed correctly.
+
 ## 0.20.1
 
 ### Patch Changes
