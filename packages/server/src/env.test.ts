@@ -534,4 +534,27 @@ describe("adopting env made by hand", () => {
     );
     assert.equal(repo.commitCount(), 0);
   });
+
+  it("says why when the hand-made file is not encrypted to stardust's key, and writes nothing", async () => {
+    const { repo, editor } = setup((await handFiles()).files);
+    const failing: EnvEditor = {
+      ...editor,
+      codec: {
+        ...editor.codec,
+        decrypt: async (d) => {
+          if (d.includes("db-auth")) throw new Error("sops --decrypt failed (128): Failed to get the data key");
+          return editor.codec.decrypt(d);
+        },
+      },
+    };
+    await assert.rejects(
+      changeEnv(failing, project, "api", { expectedRevision: await revisionOf(editor, "api"), adopt: true }, "alice"),
+      (err: Error) =>
+        err instanceof EnvInputError &&
+        /cannot decrypt deploy\/apps\/shop\/api\/secrets\.enc\.yaml to adopt api-env-secret: the file is not encrypted to stardust's key/.test(
+          err.message,
+        ),
+    );
+    assert.equal(repo.commitCount(), 0);
+  });
 });
