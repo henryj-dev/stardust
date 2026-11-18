@@ -1,5 +1,11 @@
 # stardust
 
+## 0.23.2
+
+### Patch Changes
+
+- [#103](https://github.com/henryj-dev/stardust/pull/103) [`1cda9c6`](https://github.com/henryj-dev/stardust/commit/1cda9c68321cf85c1248b2e02fddbc16f5424526) Thanks [@mack-erel](https://github.com/mack-erel)! - The build state cache is a plain tar and is saved only when the build wrote something new into it: on pico's Rust image a rebuild spent three of its four minutes compressing, decompressing and re-uploading an unchanged 1.5 GB state.
+
 ## 0.23.1
 
 ### Patch Changes
