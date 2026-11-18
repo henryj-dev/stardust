@@ -282,7 +282,7 @@ recompiles only the crate.
 
 `stateCache` keeps more than layers: the whole BuildKit state of each listed
 component (`<project>/<component>`), cache mounts included, in an
-S3-compatible bucket at `<project>/<component>.tgz`. So a Dockerfile's
+S3-compatible bucket at `<project>/<component>.tar`. So a Dockerfile's
 `RUN --mount=type=cache` (a Rust `target`, a package cache) carries over from
 build to build without changing the Dockerfile. A container before the build
 fetches the archive and one after it stores the new one; only those two hold
@@ -290,7 +290,7 @@ the storage credential (Secret `secret` with keys `access-key` and
 `secret-key`, for that bucket only). The build container unpacks and packs
 the state inside BuildKit's user namespace, where its files' owners are real,
 after BuildKit's GC has brought it under `maxBytes` (default 10 GiB); a state
-still larger is not saved. A missing or broken archive, or a failed transfer,
+still larger is not saved. The archive is a plain tar (compressing gigabytes costs more than sending them to storage nearby), and a build that wrote nothing new into the state, such as a rebuild of the same commit, saves nothing. A missing or broken archive, or a failed transfer,
 means a cold build, never a failed one. Builds of an external project's code
 use none. Use storage close to the cluster: a few gigabytes go both ways on
 every build.

@@ -446,7 +446,7 @@ describe("state cache", () => {
         .filter((e: { value?: string }) => e.value)
         .map((e: { name: string; value: string }) => [e.name, e.value]),
     );
-    assert.equal(vars.STATE_KEY, "demo/api.tgz");
+    assert.equal(vars.STATE_KEY, "demo/api.tar");
     assert.equal(vars.STATE_BUCKET, "buildcache");
     for (const other of [
       manifest(),
@@ -482,7 +482,7 @@ describe("state cache", () => {
       try {
         mkdirSync(join(dir, "bin"));
         writeFileSync(join(dir, "bin", "rclone"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
-        writeFileSync(join(dir, "out.tgz"), "x");
+        writeFileSync(join(dir, "out.tar"), "x");
         const run = spawnSync("sh", ["-c", script.replaceAll("/state-archive", dir)], {
           env: {
             PATH: `${join(dir, "bin")}:/usr/bin:/bin`,
@@ -511,7 +511,7 @@ describe("state cache", () => {
     writeFileSync(join(dir, "bin", "rootlesskit"), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
     writeFileSync(
       join(dir, "bin", "buildctl-daemonless.sh"),
-      `#!/bin/sh\n[ "$1" = prune ] && exit 0\ntouch "${dir}/state/built"\nprintf '{"containerimage.digest":"sha256:%s"}' "${"a".repeat(64)}" > "${dir}/metadata.json"\n`,
+      `#!/bin/sh\n[ "$1" = prune ] && exit 0\n[ -n "\${NOWRITE:-}" ] || touch "${dir}/state/built"\nprintf '{"containerimage.digest":"sha256:%s"}' "${"a".repeat(64)}" > "${dir}/metadata.json"\n`,
       { mode: 0o755 },
     );
     setup(dir);
@@ -537,17 +537,15 @@ describe("state cache", () => {
       (dir) => {
         mkdirSync(join(dir, "old"));
         writeFileSync(join(dir, "old", "cached"), "layer");
-        execFileSync("sh", ["-c", `tar -cf - -C "${dir}/old" . | gzip > "${dir}/archive/in.tgz"`]);
+        execFileSync("sh", ["-c", `tar -cf "${dir}/archive/in.tar" -C "${dir}/old" .`]);
       },
       { STATE_MAX_BYTES: "1073741824" },
     );
     try {
       assert.equal(b.run.status, 0, b.run.stderr);
       assert.equal(readFileSync(join(b.dir, "state", "cached"), "utf8"), "layer", "the last state was unpacked");
-      assert.ok(!existsSync(join(b.dir, "archive", "in.tgz")));
-      const packed = execFileSync("sh", ["-c", `gzip -dc "${b.dir}/archive/out.tgz" | tar -tf -`], {
-        encoding: "utf8",
-      });
+      assert.ok(!existsSync(join(b.dir, "archive", "in.tar")));
+      const packed = execFileSync("tar", ["-tf", join(b.dir, "archive", "out.tar")], { encoding: "utf8" });
       assert.match(packed, /cached/);
       assert.match(packed, /built/);
       assert.match(b.run.stdout, /\[stardust-image-digest\] sha256:a{64}/);
@@ -557,13 +555,31 @@ describe("state cache", () => {
   });
 
   it("builds cold over a broken archive, and saves nothing over the limit", () => {
-    const b = runBuild((dir) => writeFileSync(join(dir, "archive", "in.tgz"), "not gzip"), { STATE_MAX_BYTES: "10" });
+    const b = runBuild((dir) => writeFileSync(join(dir, "archive", "in.tar"), "not a tar"), { STATE_MAX_BYTES: "10" });
     try {
       assert.equal(b.run.status, 0, b.run.stderr);
       assert.match(b.run.stdout, /unpacking failed: a cold build/);
       assert.match(b.run.stdout, /over the limit: not saved/);
-      assert.ok(!existsSync(join(b.dir, "archive", "out.tgz")));
+      assert.ok(!existsSync(join(b.dir, "archive", "out.tar")));
       assert.match(b.run.stdout, /\[stardust-image-digest\]/);
+    } finally {
+      b.done();
+    }
+  });
+
+  it("saves nothing when the build only reused the state", () => {
+    const b = runBuild(
+      (dir) => {
+        mkdirSync(join(dir, "old"));
+        writeFileSync(join(dir, "old", "cached"), "layer");
+        execFileSync("sh", ["-c", `tar -cf "${dir}/archive/in.tar" -C "${dir}/old" .`]);
+      },
+      { STATE_MAX_BYTES: "1073741824", NOWRITE: "1" },
+    );
+    try {
+      assert.equal(b.run.status, 0, b.run.stderr);
+      assert.match(b.run.stdout, /unchanged: not saved/);
+      assert.ok(!existsSync(join(b.dir, "archive", "out.tar")));
     } finally {
       b.done();
     }
