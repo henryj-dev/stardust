@@ -28,9 +28,12 @@ const confirmRemove = (e: SubmitEvent, name: string) => {
     {:else if form?.result}
       <p data-env-result>
         {#if form.result.status === "no_change"}
-          Nothing changed: {form.name} already had that value.
+          Nothing changed{form.name ? `: ${form.name} already had that value` : ""}.
         {:else}
           Committed <code>{form.result.commit?.slice(0, 12)}</code>.
+          {#if (form.result.adopted ?? []).length > 0}
+            Moved in: {(form.result.adopted ?? []).map((h) => `${h.kind} ${h.name}`).join(", ")}.
+          {/if}
           {#each form.result.components as c (c.name)}
             {#if c.consumers.length > 0}
               {c.name} rolls out {c.consumers.join(", ")}.
@@ -44,8 +47,27 @@ const confirmRemove = (e: SubmitEvent, name: string) => {
     {/if}
 
     {#each data.env.layers as layer (layer.layer)}
+      {@const hand = (data.env.adoptable ?? []).filter((h) => h.component === layer.layer)}
       <section data-env-layer={layer.layer}>
         <h2>{title(layer.layer)}</h2>
+        {#if hand.length > 0}
+          <div data-env-adoptable={layer.layer}>
+            <p>
+              <strong>Made by hand:</strong>
+              {#each hand as h, i (h.path + h.name)}{i > 0 ? "; " : ""}{h.kind} <code>{h.name}</code> in
+                <code>{h.path.split("/").pop()}</code> ({h.keys.join(", ")}){/each}.
+              stardust renders objects by these names, so the next change here moves their values into this layer and
+              takes them out of those files, in the same commit. Values already in this layer are kept.
+            </p>
+            {#if data.env.canEdit}
+              <form method="POST" action="?/adopt">
+                <input type="hidden" name="layer" value={layer.layer} />
+                <input type="hidden" name="revision" value={layer.revision} />
+                <button type="submit">Move them now</button>
+              </form>
+            {/if}
+          </div>
+        {/if}
         {#if Object.keys(layer.plain).length === 0 && layer.secrets.length === 0}
           <p>No values.</p>
         {:else}

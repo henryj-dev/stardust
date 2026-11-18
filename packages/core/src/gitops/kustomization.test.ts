@@ -103,3 +103,13 @@ describe("removeResource", () => {
     assert.match(out, /namespace: demo/);
   });
 });
+
+it("reads, adds after and removes entries that carry a trailing comment", () => {
+  const yaml =
+    "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- namespace.yaml\n- secrets.enc.yaml   # a, b and c\n- deployment.yaml\n";
+  assert.deepEqual(listResources(yaml), ["namespace.yaml", "secrets.enc.yaml", "deployment.yaml"]);
+  const added = addResource(yaml, "env.configmap.yaml");
+  assert.equal(added, yaml.replace("- deployment.yaml\n", "- deployment.yaml\n- env.configmap.yaml\n"));
+  assert.equal(addResource(yaml, "secrets.enc.yaml"), yaml, "already listed, comment and all");
+  assert.equal(removeResource(yaml, "secrets.enc.yaml"), yaml.replace("- secrets.enc.yaml   # a, b and c\n", ""));
+});

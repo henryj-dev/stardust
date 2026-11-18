@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { MemoryRepo } from "@stardust/core/testing";
 import type { Project } from "@stardust/db";
-import { decrypt, encryptIfChanged, type SopsOptions } from "@stardust/plugin-secrets-sops-age";
+import { decrypt, encrypt, encryptIfChanged, type SopsOptions } from "@stardust/plugin-secrets-sops-age";
 import { parse } from "yaml";
 import { changeEnv, type EnvEditor, readEnv } from "./env.ts";
 
@@ -77,5 +77,40 @@ describe("env editing with sops", () => {
     const again = await changeEnv(editor, project, "api", { ...change, expectedRevision: await revision() }, "a");
     assert.equal(again.status, "no_change");
     assert.equal(repo.commitCount(), commits);
+  });
+
+  it("adopts a hand-made env Secret out of a SOPS file of several documents, which decrypts only whole", async () => {
+    const hand = await encrypt(
+      `apiVersion: v1\nkind: Secret\nmetadata:\n  name: db-auth\n  namespace: shop\nstringData:\n  POSTGRES_PASSWORD: pg-${SECRET}\n---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: api-env-secret\n  namespace: shop\nstringData:\n  DB_URL: ${SECRET}\n`,
+      opts,
+    );
+    const repo = new MemoryRepo({
+      "deploy/shop/api/deployment.yaml":
+        "kind: Deployment\nmetadata: { name: api, namespace: shop }\nspec:\n  template:\n    spec:\n      containers:\n        - name: api\n          envFrom: [{ secretRef: { name: api-env-secret } }]\n",
+      "deploy/shop/api/secrets.enc.yaml": hand,
+      "deploy/shop/api/kustomization.yaml":
+        "resources:\n- secrets.enc.yaml # db-auth, api-env-secret\n- deployment.yaml\n",
+    });
+    const editor: EnvEditor = {
+      repo,
+      codec: { decrypt: (d) => decrypt(d, opts), encryptIfChanged: (c, p) => encryptIfChanged(c, p, opts) },
+      revisionKey: "k",
+    };
+    const view = await readEnv(editor, project);
+    assert.deepEqual(
+      view.adoptable.map((h) => `${h.name} ${h.keys.join(",")}`),
+      ["api-env-secret DB_URL"],
+    );
+    const revision = view.layers.find((l) => l.layer === "api")?.revision as string;
+    const result = await changeEnv(editor, project, "api", { expectedRevision: revision, adopt: true }, "alice");
+    assert.equal(result.status, "committed");
+    const files = repo.files();
+    const left = await decrypt(files["deploy/shop/api/secrets.enc.yaml"] as string, opts);
+    assert.match(left, /name: db-auth/);
+    assert.match(left, new RegExp(`POSTGRES_PASSWORD: pg-${SECRET}`));
+    assert.doesNotMatch(left, /api-env-secret/);
+    const layer = parse(await decrypt(files["deploy/env/shop/api/runtime.secret.enc.yaml"] as string, opts));
+    assert.equal(layer.stringData.DB_URL, SECRET);
+    for (const [path, text] of Object.entries(files)) assert.ok(!text.includes(SECRET), path);
   });
 });

@@ -17,6 +17,10 @@
  * template of the workloads that use the env, so the GitOps controller rolls
  * them out; a restart done on the cluster would be reverted as drift.
  *
+ * A component whose directory already holds a ConfigMap or Secret by the
+ * rendered names, made by hand, has them adopted into its layer by the next
+ * change (env-adopt.ts); reads say which, by name.
+ *
  * Secret values only go one way: into a SOPS document. Nothing here returns
  * them, logs them or puts them in a commit message — reads list secret names.
  */
@@ -41,6 +45,8 @@ import {
 } from "@stardust/core";
 import { type Component, getProject, type Project, type Sql } from "@stardust/db";
 import { Document, isMap, parse, parseAllDocuments, parseDocument } from "yaml";
+import { adoptHandEnv, findHandEnv, type HandEnv } from "./env-adopt.ts";
+import { EnvConflict, EnvInputError } from "./env-errors.ts";
 
 /** SOPS, as the editor needs it: decrypt a document, and encrypt one unless it decrypts to the same. */
 export interface EnvCodec {
@@ -65,8 +71,8 @@ export const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 export const MAX_ENV_VALUE = 32 * 1024;
 export const MAX_ENV_CHANGES = 100;
 
-export class EnvInputError extends Error {}
-export class EnvConflict extends Error {}
+export type { HandEnv };
+export { EnvConflict, EnvInputError };
 
 export interface EnvLayerView {
   layer: string;
@@ -85,6 +91,8 @@ export interface EnvChange {
   unset?: string[];
   setSecrets?: Record<string, string>;
   unsetSecrets?: string[];
+  /** Adopt hand-made env even when nothing else changes. */
+  adopt?: boolean;
 }
 
 export interface EnvChangeResult {
@@ -99,6 +107,8 @@ export interface EnvChangeResult {
     /** Workloads that use the env and were stamped to roll out. Empty: nothing uses it yet. */
     consumers: string[];
   }>;
+  /** Hand-made env this change moved into the component layers, by name. */
+  adopted: Array<HandEnv & { component: string }>;
 }
 
 const layerBase = (root: string | undefined, project: string, layer: string) =>
@@ -146,11 +156,17 @@ function serially<T>(repo: RepoIO, run: () => Promise<T>): Promise<T> {
 }
 
 /** Every editable layer of a project, with plain values and secret names. */
-export function readEnv(editor: EnvEditor, project: Project): Promise<{ head: string; layers: EnvLayerView[] }> {
+export function readEnv(
+  editor: EnvEditor,
+  project: Project,
+): Promise<{ head: string; layers: EnvLayerView[]; adoptable: Array<HandEnv & { component: string }> }> {
   return serially(editor.repo, () => readLayers(editor, project));
 }
 
-async function readLayers(editor: EnvEditor, project: Project): Promise<{ head: string; layers: EnvLayerView[] }> {
+async function readLayers(
+  editor: EnvEditor,
+  project: Project,
+): Promise<{ head: string; layers: EnvLayerView[]; adoptable: Array<HandEnv & { component: string }> }> {
   const head = await editor.repo.headSha();
   const layers: EnvLayerView[] = [];
   for (const layer of layersOf(project)) {
@@ -163,7 +179,21 @@ async function readLayers(editor: EnvEditor, project: Project): Promise<{ head: 
       secrets: secretNames(secretText),
     });
   }
-  return { head, layers };
+  const at: BoundRepo = { read: (p) => editor.repo.readFile(p, head), list: (p) => editor.repo.listDir(p, head) };
+  const read = async (p: string) => (await at.read(p))?.content ?? null;
+  const adoptable: Array<HandEnv & { component: string }> = [];
+  for (const component of project.components) {
+    const dir = dirOf(component);
+    let namespace: string;
+    try {
+      namespace = await namespaceOf(at, dir);
+    } catch {
+      continue; // No manifests yet: nothing was made by hand.
+    }
+    for (const { index: _, ...h } of await findHandEnv(at, read, dir, component.name, namespace))
+      adoptable.push({ ...h, component: component.name });
+  }
+  return { head, layers, adoptable };
 }
 
 /** Checks a change before anything is read; the reason is safe to show (it names keys, never values). */
@@ -172,7 +202,7 @@ export function checkChange(change: unknown): EnvChange {
     throw new EnvInputError("a JSON object is required");
   const c = change as Record<string, unknown>;
   for (const key of Object.keys(c)) {
-    if (!["expectedRevision", "set", "unset", "setSecrets", "unsetSecrets", "plainOnPurpose"].includes(key))
+    if (!["expectedRevision", "set", "unset", "setSecrets", "unsetSecrets", "plainOnPurpose", "adopt"].includes(key))
       throw new EnvInputError(`unknown field "${key}"`);
   }
   if (typeof c.expectedRevision !== "string" || !/^[0-9a-f]{20}$/.test(c.expectedRevision))
@@ -199,6 +229,7 @@ export function checkChange(change: unknown): EnvChange {
     }
     return v as string[];
   };
+  if (c.adopt !== undefined && typeof c.adopt !== "boolean") throw new EnvInputError("adopt must be true or false");
   const out: EnvChange = {
     expectedRevision: c.expectedRevision,
     set: map("set"),
@@ -206,6 +237,7 @@ export function checkChange(change: unknown): EnvChange {
     setSecrets: map("setSecrets"),
     unsetSecrets: list("unsetSecrets"),
     ...(c.plainOnPurpose !== undefined ? { plainOnPurpose: list("plainOnPurpose") } : {}),
+    ...(c.adopt === true ? { adopt: true } : {}),
   };
   // A plain value is committed to Git as it is: refuse one whose name says it is a secret.
   const leaking = plaintextSecrets(out.set ?? {}, out.plainOnPurpose);
@@ -220,7 +252,7 @@ export function checkChange(change: unknown): EnvChange {
     ...Object.keys(out.setSecrets ?? {}),
     ...(out.unsetSecrets ?? []),
   ];
-  if (names.length === 0) throw new EnvInputError("nothing to change");
+  if (names.length === 0 && !out.adopt) throw new EnvInputError("nothing to change");
   if (names.length > MAX_ENV_CHANGES) throw new EnvInputError(`at most ${MAX_ENV_CHANGES} changes at once`);
   if (new Set(names).size !== names.length) throw new EnvInputError("each name may appear once in a change");
   return out;
@@ -317,16 +349,64 @@ async function applyChange(
 ): Promise<EnvChangeResult> {
   const components = layer === SHARED_LAYER ? project.components : project.components.filter((c) => c.name === layer);
   let outcome: Omit<EnvChangeResult, "status" | "commit"> | null = null;
+  let adopted: Array<HandEnv & { component: string }> = [];
 
   const result = await commitWithCas(
     editor.repo,
     async (_head, at) => {
       const pPath = plainPath(editor.root, project.id, layer);
       const sPath = secretPath(editor.root, project.id, layer);
-      const plainText = (await at.read(pPath))?.content ?? null;
-      const secretText = (await at.read(sPath))?.content ?? null;
+      let plainText = (await at.read(pPath))?.content ?? null;
+      let secretText = (await at.read(sPath))?.content ?? null;
       if (layerRevision(plainText, secretText) !== change.expectedRevision) {
         throw new EnvConflict("the env changed since you read it; reload it and make your change again");
+      }
+
+      const files: PendingCommit = new Map();
+      // Reads see this change already: the rendered env is made from the layers as they will be.
+      const read = async (path: string) =>
+        files.has(path) ? (files.get(path) ?? null) : ((await at.read(path))?.content ?? null);
+
+      // Hand-made env of the components this layer reaches moves into their own layers first:
+      // rendering next to it would list two objects by one name.
+      adopted = [];
+      for (const component of components) {
+        const dir = dirOf(component);
+        const adoption = await adoptHandEnv(at, read, {
+          dir,
+          component: component.name,
+          namespace: await namespaceOf(at, dir),
+          decrypt: (d) => editor.codec.decrypt(d),
+          encrypt: async (plain) => (await editor.codec.encryptIfChanged(null, plain)).document,
+        });
+        if (!adoption) continue;
+        for (const [path, text] of adoption.files) files.set(path, text);
+        if (adoption.kustomization !== null) files.set(`${dir}/kustomization.yaml`, adoption.kustomization);
+        const cp = plainPath(editor.root, project.id, component.name);
+        const cs = secretPath(editor.root, project.id, component.name);
+        const cPlainText = await read(cp);
+        const cSecretText = await read(cs);
+        const cPlain = cPlainText === null ? {} : stringMap(parse(cPlainText));
+        const cSecrets =
+          cSecretText === null
+            ? {}
+            : stringMap(
+                (parse(await editor.codec.decrypt(cSecretText)) as { stringData?: unknown } | null)?.stringData,
+              );
+        // What the layer already says wins: it is what stardust was told.
+        for (const [k, v] of Object.entries(adoption.plain)) if (!(k in cPlain) && !(k in cSecrets)) cPlain[k] = v;
+        for (const [k, v] of Object.entries(adoption.secrets)) if (!(k in cPlain) && !(k in cSecrets)) cSecrets[k] = v;
+        const nextPlain = writePlain(cPlainText, cPlain);
+        if (nextPlain !== cPlainText) files.set(cp, nextPlain);
+        if (Object.keys(cSecrets).length > 0) {
+          const sealed = await editor.codec.encryptIfChanged(cSecretText, secretDocument(cSecrets));
+          if (sealed.changed || cSecretText === null) files.set(cs, sealed.document);
+        }
+        adopted.push(...adoption.from.map((h) => ({ ...h, component: component.name })));
+      }
+      if (adopted.length > 0) {
+        plainText = await read(pPath);
+        secretText = await read(sPath);
       }
 
       const plain = plainText === null ? {} : stringMap(parse(plainText));
@@ -346,7 +426,6 @@ async function applyChange(
         delete plain[k];
       }
 
-      const files: PendingCommit = new Map();
       const newPlain = writePlain(plainText, plain);
       if (newPlain !== plainText) files.set(pPath, newPlain);
       let newSecret: string | null = null;
@@ -355,9 +434,6 @@ async function applyChange(
       }
       if (newSecret !== secretText) files.set(sPath, newSecret);
 
-      // Reads see this change already: the rendered env is made from the layers as they will be.
-      const read = async (path: string) =>
-        files.has(path) ? (files.get(path) ?? null) : ((await at.read(path))?.content ?? null);
       const rendered: Array<{ name: string; envRevision: string; consumers: string[] }> = [];
       for (const component of components) {
         const dir = dirOf(component);
@@ -412,9 +488,10 @@ async function applyChange(
           files.has(sPath) ? (files.get(sPath) ?? null) : secretText,
         ),
         components: rendered,
+        adopted,
       };
       if (files.size === 0) return null;
-      return { files, message: commitMessage(project.id, layer, change, by) };
+      return { files, message: commitMessage(project.id, layer, change, by, adopted) };
     },
     editor.cas,
   );
@@ -434,13 +511,21 @@ async function applyChange(
 }
 
 /** Names what changed, never a value. */
-export function commitMessage(project: string, layer: string, change: EnvChange, by: string): string {
+export function commitMessage(
+  project: string,
+  layer: string,
+  change: EnvChange,
+  by: string,
+  adopted: readonly HandEnv[] = [],
+): string {
   const parts: string[] = [];
   const names = (o?: Record<string, string>) => Object.keys(o ?? {});
   if (names(change.set).length) parts.push(`set ${names(change.set).join(", ")}`);
   if (change.unset?.length) parts.push(`unset ${change.unset.join(", ")}`);
   if (names(change.setSecrets).length) parts.push(`set secrets ${names(change.setSecrets).join(", ")}`);
   if (change.unsetSecrets?.length) parts.push(`unset secrets ${change.unsetSecrets.join(", ")}`);
+  for (const h of adopted)
+    parts.push(`adopt ${h.kind} ${h.name} from ${h.path.split("/").pop()} (${h.keys.join(", ")})`);
   return `chore(env): ${project}/${layer} — ${parts.join("; ")}\n\nChanged by ${by} in stardust.`;
 }
 

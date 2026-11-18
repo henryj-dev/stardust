@@ -380,3 +380,158 @@ describe("checking a change", () => {
     }
   });
 });
+
+describe("adopting env made by hand", () => {
+  const dir = "deploy/apps/shop/api";
+  const codec = fakeCodec();
+  const sealed = async (doc: string) => (await codec.encryptIfChanged(null, doc)).document;
+  const handFiles = async (envSecret?: string) => {
+    const other = await sealed(
+      "apiVersion: v1\nkind: Secret\nmetadata:\n  name: db-auth\n  namespace: shop\nstringData:\n  POSTGRES_PASSWORD: pg-pass\n",
+    );
+    const pull = await sealed(
+      'apiVersion: v1\nkind: Secret\nmetadata:\n  name: pull\n  namespace: shop\ntype: kubernetes.io/dockerconfigjson\nstringData:\n  ".dockerconfigjson": "{}"\n',
+    );
+    const mine =
+      envSecret ??
+      (await sealed(
+        `apiVersion: v1\nkind: Secret\nmetadata:\n  name: api-env-secret\n  namespace: shop\ntype: Opaque\nstringData:\n  DB_URL: ${CANARY}\n`,
+      ));
+    return {
+      other,
+      pull,
+      files: {
+        [`${dir}/configmap.yaml`]:
+          'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: api-env\n  namespace: shop\ndata:\n  LOG_LEVEL: debug\n  REGION: "eu"\n',
+        [`${dir}/secrets.enc.yaml`]: `${other}---\n${mine}---\n${pull}`,
+        [`${dir}/kustomization.yaml`]:
+          "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- configmap.yaml   # api-env\n- secrets.enc.yaml # db-auth, api-env-secret, pull\n- deployment.yaml\n",
+      },
+    };
+  };
+
+  it("lists it by name and keys, never a value", async () => {
+    const { editor } = setup((await handFiles()).files);
+    const { adoptable } = await readEnv(editor, project);
+    assert.deepEqual(adoptable, [
+      {
+        component: "api",
+        path: `${dir}/configmap.yaml`,
+        kind: "ConfigMap",
+        name: "api-env",
+        keys: ["LOG_LEVEL", "REGION"],
+      },
+      { component: "api", path: `${dir}/secrets.enc.yaml`, kind: "Secret", name: "api-env-secret", keys: ["DB_URL"] },
+    ]);
+    assert.ok(!JSON.stringify(adoptable).includes(CANARY));
+  });
+
+  it("moves it into the component's layer with the next change, in one commit, keeping the other Secrets' values", async () => {
+    const hand = await handFiles();
+    const { repo, editor } = setup(hand.files);
+    const result = await changeEnv(
+      editor,
+      project,
+      "api",
+      { expectedRevision: await revisionOf(editor, "api"), set: { PORT: "8080" } },
+      "alice",
+    );
+    assert.equal(result.status, "committed");
+    assert.equal(repo.commitCount(), 1);
+    assert.deepEqual(
+      result.adopted.map((h) => `${h.kind} ${h.name}`),
+      ["ConfigMap api-env", "Secret api-env-secret"],
+    );
+    const files = repo.files();
+    assert.equal(files[`${dir}/configmap.yaml`], undefined, "a file left empty is removed");
+    // One MAC covers a SOPS file: what is left is encrypted again, with the same values.
+    const left = await codec.decrypt(files[`${dir}/secrets.enc.yaml`] as string);
+    assert.deepEqual(
+      left
+        .split(/^---\s*$/m)
+        .filter((d) => d.trim() !== "")
+        .map((d) => (parse(d) as { metadata: { name: string } }).metadata.name),
+      ["db-auth", "pull"],
+    );
+    assert.match(left, /POSTGRES_PASSWORD: pg-pass/);
+    assert.ok(!(files[`${dir}/secrets.enc.yaml`] as string).includes("pg-pass"), "and still encrypted");
+    const listed = parse(files[`${dir}/kustomization.yaml`] as string).resources;
+    assert.deepEqual(listed, ["secrets.enc.yaml", "deployment.yaml", "env.configmap.yaml", "env.secret.enc.yaml"]);
+    // The component's value wins over the shared layer's, as the hand-made ConfigMap did.
+    assert.deepEqual(parse(files[`${dir}/env.configmap.yaml`] as string).data, {
+      LOG_LEVEL: "debug",
+      PORT: "8080",
+      REGION: "eu",
+    });
+    assert.deepEqual(parse(files["deploy/env/shop/api/runtime.yaml"] as string), {
+      LOG_LEVEL: "debug",
+      REGION: "eu",
+      PORT: "8080",
+    });
+    const layerSecrets = parse(await codec.decrypt(files["deploy/env/shop/api/runtime.secret.enc.yaml"] as string));
+    assert.deepEqual(layerSecrets.stringData, { DB_URL: CANARY });
+    assert.ok(files[`${dir}/env.secret.enc.yaml`]?.includes("DB_URL"));
+    for (const [path, text] of Object.entries(files)) assert.ok(!text.includes(CANARY), path);
+    assert.match(repo.log.join("\n"), /adopt Secret api-env-secret from secrets\.enc\.yaml \(DB_URL\)/);
+    assert.ok(!repo.log.join("\n").includes(CANARY));
+    assert.deepEqual((await readEnv(editor, project)).adoptable, []);
+  });
+
+  it("adopts with nothing else to change when asked, and then has nothing left to do", async () => {
+    const { repo, editor } = setup((await handFiles()).files);
+    const change = checkChange({ expectedRevision: await revisionOf(editor, "api"), adopt: true });
+    assert.equal((await changeEnv(editor, project, "api", change, "alice")).status, "committed");
+    const again = checkChange({ expectedRevision: await revisionOf(editor, "api"), adopt: true });
+    const second = await changeEnv(editor, project, "api", again, "alice");
+    assert.equal(second.status, "no_change");
+    assert.deepEqual(second.adopted, []);
+    assert.equal(repo.commitCount(), 1, "the second adoption committed nothing");
+  });
+
+  it("a shared change adopts into each component's own layer", async () => {
+    const { repo, editor } = setup((await handFiles()).files);
+    const shared = await revisionOf(editor, SHARED_LAYER);
+    await changeEnv(editor, project, SHARED_LAYER, { expectedRevision: shared, set: { TZ: "UTC" } }, "alice");
+    const files = repo.files();
+    assert.equal(parse(files["deploy/env/shop/api/runtime.yaml"] as string).REGION, "eu");
+    assert.equal(files["deploy/env/shop/web/runtime.yaml"], undefined, "web had nothing made by hand");
+  });
+
+  it("keeps what the layer already says, and decodes a Secret's data", async () => {
+    const data = await sealed(
+      `apiVersion: v1\nkind: Secret\nmetadata:\n  name: api-env-secret\n  namespace: shop\ndata:\n  TOKEN: ${Buffer.from("tok").toString("base64")}\n`,
+    );
+    // The fake codec only encrypts stringData: data stays base64, as a real Secret's would after decryption.
+    const { repo, editor } = setup({
+      ...(await handFiles(data)).files,
+      "deploy/env/shop/api/runtime.yaml": "REGION: us\n",
+    });
+    await changeEnv(
+      editor,
+      project,
+      "api",
+      { expectedRevision: await revisionOf(editor, "api"), adopt: true },
+      "alice",
+    );
+    assert.equal(parse(repo.files()["deploy/env/shop/api/runtime.yaml"] as string).REGION, "us");
+    const secrets = parse(await codec.decrypt(repo.files()["deploy/env/shop/api/runtime.secret.enc.yaml"] as string));
+    assert.deepEqual(secrets.stringData, { TOKEN: "tok" });
+  });
+
+  it("refuses a Secret by that name that is not env values, and writes nothing", async () => {
+    const odd =
+      'apiVersion: v1\nkind: Secret\nmetadata:\n  name: api-env-secret\n  namespace: shop\ntype: kubernetes.io/tls\nstringData:\n  "tls.crt": x\n';
+    const { repo, editor } = setup((await handFiles(await sealed(odd))).files);
+    await assert.rejects(
+      changeEnv(
+        editor,
+        project,
+        "api",
+        { expectedRevision: await revisionOf(editor, "api"), set: { A: "1" } },
+        "alice",
+      ),
+      (err: Error) => err instanceof EnvInputError && /kubernetes\.io\/tls Secret/.test(err.message),
+    );
+    assert.equal(repo.commitCount(), 0);
+  });
+});

@@ -643,6 +643,16 @@ Cluster access on its page (`PUT …/components/<name>/access` with
 `"envVars": true`). Until a workload reads them, a change commits but reaches
 no process.
 
+A ConfigMap `<component>-env` or Secret `<component>-env-secret` made by hand
+in another file of the directory (before stardust managed the env) would
+collide with the rendered ones, so the next change to a layer reaching that
+component adopts it, in the same commit: its values move into the component's
+own layer (a value already there wins) and its document leaves its file; a
+file left empty is removed and unlisted. A SOPS file of several documents is
+decrypted whole and what is left is encrypted again. The env page names what
+would be adopted and can do it alone ("Move them now", or `"adopt": true` with
+no other change). A Secret by that name that is not `Opaque` is refused.
+
 - **Reading** (`/projects/<id>/env`, `GET /api/v1/projects/<id>/env`) is for
   anyone who can read the project: plain values, and the **names** of
   secrets. A secret's value is never shown or returned again once saved.

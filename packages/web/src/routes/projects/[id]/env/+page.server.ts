@@ -39,7 +39,22 @@ async function apply(client: Client, projectId: string, form: FormData, op: "set
   }
 }
 
+/** Moves the hand-made env of a layer's component into the layer, with nothing else changed. */
+async function adopt(client: Client, projectId: string, form: FormData) {
+  const layer = String(form.get("layer") ?? "");
+  const revision = String(form.get("revision") ?? "");
+  try {
+    const result = await client.changeEnv(projectId, layer, { expectedRevision: revision, adopt: true });
+    return { layer, name: "", result };
+  } catch (err) {
+    if (err instanceof ApiError && err.status < 500) return fail(err.status, { layer, name: "", error: err.message });
+    throw err;
+  }
+}
+
 export const actions: Actions = {
+  adopt: async ({ locals, params, request, url }) =>
+    adopt(requireClient(locals, url), params.id, await request.formData()),
   set: async ({ locals, params, request, url }) =>
     apply(requireClient(locals, url), params.id, await request.formData(), "set"),
   unset: async ({ locals, params, request, url }) =>
