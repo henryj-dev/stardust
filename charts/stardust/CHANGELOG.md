@@ -1,5 +1,11 @@
 # stardust
 
+## 0.23.0
+
+### Minor Changes
+
+- [#100](https://github.com/henryj-dev/stardust/pull/100) [`cda69cd`](https://github.com/henryj-dev/stardust/commit/cda69cd74d0bce65a1a444c06abe7a4282573faa) Thanks [@mack-erel](https://github.com/mack-erel)! - builder-buildkit `stateCache` keeps the whole BuildKit state of chosen components (cache mounts included) in an S3-compatible bucket between builds, so a Rust `target` or a package cache carries over without changing the Dockerfile. Only the restore and save containers hold the storage credential; the state is packed inside BuildKit's user namespace; any failure means a cold build, never a failed one.
+
 ## 0.22.0
 
 ### Minor Changes
