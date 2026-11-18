@@ -61,3 +61,28 @@ it("gives pods a read-only pull login, read when asked for, and checks its shape
     "pull.password must be { env: NAME } or { file: PATH }",
   ]);
 });
+
+it("checks a state cache: an endpoint, a bucket, a Secret and the components that use it", () => {
+  const section = { namespace: "builds", registry: "registry.example.com", pushSecret: "push" };
+  const stateCache = {
+    endpoint: "http://10.0.0.5:9000",
+    bucket: "stardust-buildcache",
+    secret: "state-cache",
+    maxBytes: 10737418240,
+    components: ["pico-server/notification-server"],
+  };
+  assert.deepEqual(plugin.validateConfig?.({ ...section, stateCache }), []);
+  assert.deepEqual(
+    plugin.validateConfig?.({
+      ...section,
+      stateCache: { endpoint: "ftp://x", bucket: "B", secret: "", components: ["x"], maxBytes: -1 },
+    }),
+    [
+      "stateCache.endpoint must be an http(s) URL without a path",
+      "stateCache.bucket must be a bucket name",
+      "stateCache.secret must name a Secret with keys access-key and secret-key",
+      "stateCache.maxBytes must be a positive whole number of bytes",
+      "stateCache.components must list <project>/<component> entries",
+    ],
+  );
+});

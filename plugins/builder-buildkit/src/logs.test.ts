@@ -127,4 +127,34 @@ describe("buildLogReader", () => {
     assert.match(failed.calls[0] ?? "", /container=build&/);
     assert.deepEqual(await read(release(null, [["clone", { waiting: {} }]]).kube), { state: "waiting" });
   });
+
+  it("reads the build container when a state cache made it an init container", async () => {
+    const calls: string[] = [];
+    const kube: KubeStreamClient = {
+      async request() {
+        const item = {
+          metadata: { name: "b", creationTimestamp: "x" },
+          spec: {
+            initContainers: [{ name: "clone" }, { name: "cache-restore" }, { name: "build" }],
+            containers: [{ name: "cache-save" }],
+          },
+          status: {
+            initContainerStatuses: [
+              { name: "clone", state: { terminated: { exitCode: 0 } } },
+              { name: "cache-restore", state: { terminated: { exitCode: 0 } } },
+              { name: "build", state: { running: {} } },
+            ],
+            containerStatuses: [{ name: "cache-save", state: { waiting: {} } }],
+          },
+        };
+        return { status: 200, body: JSON.stringify({ items: [item] }) };
+      },
+      async stream(path) {
+        calls.push(decodeURIComponent(path));
+        return { status: 200, body: (async function* () {})() };
+      },
+    };
+    assert.equal((await read(kube)).state, "open");
+    assert.match(calls[0] ?? "", /container=build&/);
+  });
 });

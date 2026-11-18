@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   BUILD_CONTAINER,
   BUILD_SCRIPT,
+  BUILDKIT_STATE_DIR,
   type BuildInput,
   buildJob,
   CLONE_SCRIPT,
@@ -15,6 +16,8 @@ import {
   DIGEST_LINE,
   NODE_BUILD_PNPM,
   NODE_DOCKERFILE,
+  STATE_RESTORE_SCRIPT,
+  STATE_SAVE_SCRIPT,
 } from "./job.ts";
 
 const input: BuildInput = {
@@ -418,5 +421,151 @@ describe("layer cache", () => {
     const insecure = argsOf({ CACHE_REF: "r/x:buildcache", REGISTRY_INSECURE: "true" });
     assert.match(insecure[insecure.indexOf("--import-cache") + 1] ?? "", /,registry\.insecure=true$/);
     assert.ok(!argsOf({}).includes("--import-cache"), "no cache without a reference");
+  });
+});
+
+describe("state cache", () => {
+  const stateCache = {
+    endpoint: "http://10.0.0.5:9000",
+    bucket: "buildcache",
+    secret: "state-cache",
+    components: ["demo/api"],
+  };
+  // biome-ignore lint/suspicious/noExplicitAny: walking a plain manifest object in tests
+  const withState = (i: BuildInput = input) => buildJob(i, { ...options, stateCache }) as any;
+  const names = (list: Array<{ name: string }> = []) => list.map((c) => c.name);
+
+  it("restores before the build and saves after it, for a listed component only", () => {
+    const spec = withState().spec.template.spec;
+    assert.deepEqual(names(spec.initContainers), ["clone", "cache-restore", BUILD_CONTAINER]);
+    assert.deepEqual(names(spec.containers), ["cache-save"]);
+    assert.ok(spec.volumes.some((v: { name: string }) => v.name === "state-archive"));
+    const restore = spec.initContainers[1];
+    const vars = Object.fromEntries(
+      restore.env
+        .filter((e: { value?: string }) => e.value)
+        .map((e: { name: string; value: string }) => [e.name, e.value]),
+    );
+    assert.equal(vars.STATE_KEY, "demo/api.tgz");
+    assert.equal(vars.STATE_BUCKET, "buildcache");
+    for (const other of [
+      manifest(),
+      withState({ ...input, component: "web" }),
+      withState({ ...input, trusted: false }),
+    ]) {
+      const o = other.spec.template.spec;
+      assert.deepEqual(
+        names(o.containers),
+        [BUILD_CONTAINER],
+        "unlisted components and untrusted code build as before",
+      );
+      assert.ok(!o.volumes.some((v: { name: string }) => v.name === "state-archive"));
+    }
+  });
+
+  it("gives the storage credential to the transfer containers only, never to the build", () => {
+    const spec = withState().spec.template.spec;
+    const refs = (c: { env: Array<{ valueFrom?: { secretKeyRef?: { name: string } } }> }) =>
+      c.env.flatMap((e) => (e.valueFrom?.secretKeyRef ? [e.valueFrom.secretKeyRef.name] : []));
+    const byName = (n: string) =>
+      [...spec.initContainers, ...spec.containers].find((c: { name: string }) => c.name === n);
+    assert.deepEqual(refs(byName(BUILD_CONTAINER)), []);
+    assert.deepEqual(refs(byName("cache-restore")), ["state-cache", "state-cache"]);
+    assert.deepEqual(refs(byName("cache-save")), ["state-cache", "state-cache"]);
+    assert.equal(byName("cache-save").securityContext.readOnlyRootFilesystem, true);
+  });
+
+  it("transfer scripts parse and never fail the build", () => {
+    for (const script of [STATE_RESTORE_SCRIPT, STATE_SAVE_SCRIPT]) {
+      assert.equal(spawnSync("sh", ["-n", "-c", script]).status, 0);
+      const dir = mkdtempSync(join(tmpdir(), "state-xfer-"));
+      try {
+        mkdirSync(join(dir, "bin"));
+        writeFileSync(join(dir, "bin", "rclone"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+        writeFileSync(join(dir, "out.tgz"), "x");
+        const run = spawnSync("sh", ["-c", script.replaceAll("/state-archive", dir)], {
+          env: {
+            PATH: `${join(dir, "bin")}:/usr/bin:/bin`,
+            STATE_ENDPOINT: "http://x",
+            STATE_BUCKET: "b",
+            STATE_KEY: "k",
+            STATE_ACCESS_KEY: "a",
+            STATE_SECRET_KEY: "s",
+          },
+        });
+        assert.equal(run.status, 0, "a failed transfer is not a failed build");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  // The build script with stand-ins: rootlesskit runs its command as is, buildctl writes the metadata.
+  const runBuild = (setup: (dir: string) => void, env: Record<string, string>) => {
+    const dir = mkdtempSync(join(tmpdir(), "state-build-"));
+    mkdirSync(join(dir, "src"));
+    mkdirSync(join(dir, "bin"));
+    mkdirSync(join(dir, "state"));
+    mkdirSync(join(dir, "archive"));
+    writeFileSync(join(dir, "build-time"), "2026-01-01T00:00:00Z");
+    writeFileSync(join(dir, "bin", "rootlesskit"), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+    writeFileSync(
+      join(dir, "bin", "buildctl-daemonless.sh"),
+      `#!/bin/sh\n[ "$1" = prune ] && exit 0\ntouch "${dir}/state/built"\nprintf '{"containerimage.digest":"sha256:%s"}' "${"a".repeat(64)}" > "${dir}/metadata.json"\n`,
+      { mode: 0o755 },
+    );
+    setup(dir);
+    const script = BUILD_SCRIPT.replaceAll(BUILDKIT_STATE_DIR, join(dir, "state")).replaceAll("/workspace", dir);
+    const run = spawnSync("sh", ["-c", script], {
+      env: {
+        PATH: `${join(dir, "bin")}:/usr/bin:/bin`,
+        IMAGE: "r/x:1",
+        SHA: "s",
+        CONTEXT: ".",
+        DOCKERFILE: "Dockerfile",
+        BUILD_KIND: "dockerfile",
+        STATE_ARCHIVE: join(dir, "archive"),
+        ...env,
+      },
+      encoding: "utf8",
+    });
+    return { dir, run, done: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+
+  it("unpacks the last state, builds, and packs it again under the limit", () => {
+    const b = runBuild(
+      (dir) => {
+        mkdirSync(join(dir, "old"));
+        writeFileSync(join(dir, "old", "cached"), "layer");
+        execFileSync("sh", ["-c", `tar -cf - -C "${dir}/old" . | gzip > "${dir}/archive/in.tgz"`]);
+      },
+      { STATE_MAX_BYTES: "1073741824" },
+    );
+    try {
+      assert.equal(b.run.status, 0, b.run.stderr);
+      assert.equal(readFileSync(join(b.dir, "state", "cached"), "utf8"), "layer", "the last state was unpacked");
+      assert.ok(!existsSync(join(b.dir, "archive", "in.tgz")));
+      const packed = execFileSync("sh", ["-c", `gzip -dc "${b.dir}/archive/out.tgz" | tar -tf -`], {
+        encoding: "utf8",
+      });
+      assert.match(packed, /cached/);
+      assert.match(packed, /built/);
+      assert.match(b.run.stdout, /\[stardust-image-digest\] sha256:a{64}/);
+    } finally {
+      b.done();
+    }
+  });
+
+  it("builds cold over a broken archive, and saves nothing over the limit", () => {
+    const b = runBuild((dir) => writeFileSync(join(dir, "archive", "in.tgz"), "not gzip"), { STATE_MAX_BYTES: "10" });
+    try {
+      assert.equal(b.run.status, 0, b.run.stderr);
+      assert.match(b.run.stdout, /unpacking failed: a cold build/);
+      assert.match(b.run.stdout, /over the limit: not saved/);
+      assert.ok(!existsSync(join(b.dir, "archive", "out.tgz")));
+      assert.match(b.run.stdout, /\[stardust-image-digest\]/);
+    } finally {
+      b.done();
+    }
   });
 });
