@@ -76,6 +76,12 @@ export interface StateCacheOptions {
   region?: string;
   /** Largest state kept, in bytes; BuildKit's GC keeps the state under it before it is packed. Default 10 GiB. */
   maxBytes?: number;
+  /**
+   * Cache records not used for this long are pruned before the state is packed, however small
+   * the state is: a cache mount a Dockerfile stopped using is otherwise carried on every build
+   * until the state outgrows maxBytes. A Go duration such as `168h`. Default 7 days.
+   */
+  keepDuration?: string;
   /** `<project>/<component>` entries that use it. */
   components: string[];
 }
@@ -392,7 +398,7 @@ buildctl-daemonless.sh build \\
   --metadata-file /workspace/metadata.json
 if [ -n "\${STATE_ARCHIVE:-}" ]; then
   KEEP_MB=$(( \${STATE_MAX_BYTES} / 1048576 ))
-  buildctl-daemonless.sh prune --keep-storage "\${KEEP_MB}" >/dev/null 2>&1 || echo "[state-cache] prune failed"
+  buildctl-daemonless.sh prune --keep-storage "\${KEEP_MB}" --keep-duration "\${STATE_KEEP_DURATION:-168h}" >/dev/null 2>&1 || echo "[state-cache] prune failed"
   # What is worth saving lives in the snapshots: layers and cache mounts. A build that only reused the
   # state still writes BuildKit's databases, a runc log (executor/) and small new blobs to the content
   # store (the exported manifests and attestations, which BuildKit writes again), so those do not count.
@@ -443,6 +449,7 @@ echo "[stardust-image-digest] \${GOT}"
 `;
 
 const DEFAULT_STATE_MAX_BYTES = 10 * 1024 ** 3;
+const DEFAULT_STATE_KEEP_DURATION = "168h";
 
 /** The state cache a build uses: only a listed component's, and never for someone else's code. */
 function stateCacheFor(input: BuildInput, options: BuilderOptions): StateCacheOptions | null {
@@ -530,6 +537,7 @@ export function buildJob(input: BuildInput, options: BuilderOptions): Record<str
         ? {
             STATE_ARCHIVE: "/state-archive",
             STATE_MAX_BYTES: String(state.maxBytes ?? DEFAULT_STATE_MAX_BYTES),
+            STATE_KEEP_DURATION: state.keepDuration ?? DEFAULT_STATE_KEEP_DURATION,
             // In the default BuildKit image: on 3 GB of a Rust state, half the size in 22s on 8 cores.
             STATE_GZIP: "pigz",
           }

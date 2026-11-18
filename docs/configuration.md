@@ -250,18 +250,18 @@ Builds images in Kubernetes Jobs with rootless BuildKit. Requires
 `builds.enabled: true` in the Helm chart so the worker may create Jobs in
 the builds namespace.
 
-| Key                |          |                                                                                                                                    |
-| ------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `namespace`        | required | Namespace the build Jobs run in.                                                                                                   |
-| `registry`         | required | Registry host and optional path. Images are `<registry>/<project>/<component>`.                                                    |
-| `cloneSecret`      | optional | Secret in `namespace` with key `token`: reads the source repository. Without it the clone is anonymous (public repositories only). |
-| `pushSecret`       | required | Secret in `namespace` with key `config.json`: a docker config that can push.                                                       |
-| `gitBaseUrl`       | optional | Git host to clone from. Defaults to `https://github.com`.                                                                          |
-| `cloneUsername`    | optional | User name sent with the clone token. GitHub ignores it; Gitea needs the token's owner.                                             |
-| `insecureRegistry` | optional | Push over plain HTTP. For local test registries only.                                                                              |
-| `pull`             | optional | `{ username, password: { env } }`: a read-only login pods pull with. stardust seals it into each component's directory (below).    |
-| `cache`            | optional | `registry` (default) or `off`: the layer cache between builds, below.                                                              |
-| `stateCache`       | optional | `{ endpoint, bucket, secret, region?, maxBytes?, components }`: keep the whole BuildKit state of the listed components, below.     |
+| Key                |          |                                                                                                                                               |
+| ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `namespace`        | required | Namespace the build Jobs run in.                                                                                                              |
+| `registry`         | required | Registry host and optional path. Images are `<registry>/<project>/<component>`.                                                               |
+| `cloneSecret`      | optional | Secret in `namespace` with key `token`: reads the source repository. Without it the clone is anonymous (public repositories only).            |
+| `pushSecret`       | required | Secret in `namespace` with key `config.json`: a docker config that can push.                                                                  |
+| `gitBaseUrl`       | optional | Git host to clone from. Defaults to `https://github.com`.                                                                                     |
+| `cloneUsername`    | optional | User name sent with the clone token. GitHub ignores it; Gitea needs the token's owner.                                                        |
+| `insecureRegistry` | optional | Push over plain HTTP. For local test registries only.                                                                                         |
+| `pull`             | optional | `{ username, password: { env } }`: a read-only login pods pull with. stardust seals it into each component's directory (below).               |
+| `cache`            | optional | `registry` (default) or `off`: the layer cache between builds, below.                                                                         |
+| `stateCache`       | optional | `{ endpoint, bucket, secret, region?, maxBytes?, keepDuration?, components }`: keep the whole BuildKit state of the listed components, below. |
 
 The clone runs in its own container; the build container, which runs the
 Dockerfile, never sees the clone token.
@@ -289,8 +289,10 @@ fetches the archive and one after it stores the new one; only those two hold
 the storage credential (Secret `secret` with keys `access-key` and
 `secret-key`, for that bucket only). The build container unpacks and packs
 the state inside BuildKit's user namespace, where its files' owners are real,
-after BuildKit's GC has brought it under `maxBytes` (default 10 GiB); a state
-still larger is not saved. The archive is a tar compressed with `pigz -1` on every core when the BuildKit image has pigz (the default image does), and a plain `<project>/<component>.tar` otherwise; a restore takes either, and is fetched over several streams at once. A build that wrote nothing new into the state's layers or cache mounts, such as a rebuild of the same commit, saves nothing: BuildKit's databases, its runc log and the small blobs an export writes to the content store do not count. A missing or broken archive, or a failed transfer,
+after BuildKit's GC has brought it under `maxBytes` (default 10 GiB) and dropped
+cache records unused for `keepDuration` (a Go duration, default `168h`, seven
+days), so a cache mount a Dockerfile stopped using does not ride along until the
+state outgrows the limit; a state still larger is not saved. The archive is a tar compressed with `pigz -1` on every core when the BuildKit image has pigz (the default image does), and a plain `<project>/<component>.tar` otherwise; a restore takes either, and is fetched over several streams at once. A build that wrote nothing new into the state's layers or cache mounts, such as a rebuild of the same commit, saves nothing: BuildKit's databases, its runc log and the small blobs an export writes to the content store do not count. A missing or broken archive, or a failed transfer,
 means a cold build, never a failed one. Builds of an external project's code
 use none. Use storage close to the cluster: a few gigabytes go both ways on
 every build.

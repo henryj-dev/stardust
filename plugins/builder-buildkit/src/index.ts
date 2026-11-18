@@ -150,7 +150,7 @@ function stateCacheProblems(value: unknown): string[] {
   const c = value as Record<string, unknown>;
   const problems: string[] = [];
   for (const key of Object.keys(c)) {
-    if (!["endpoint", "bucket", "secret", "region", "maxBytes", "components"].includes(key))
+    if (!["endpoint", "bucket", "secret", "region", "maxBytes", "keepDuration", "components"].includes(key))
       problems.push(`stateCache: unknown key "${key}"`);
   }
   if (typeof c.endpoint !== "string" || !/^https?:\/\/[^\s/]+\/?$/.test(c.endpoint))
@@ -163,6 +163,14 @@ function stateCacheProblems(value: unknown): string[] {
     problems.push("stateCache.region must be a region name");
   if (c.maxBytes !== undefined && !(Number.isInteger(c.maxBytes) && (c.maxBytes as number) > 0))
     problems.push("stateCache.maxBytes must be a positive whole number of bytes");
+  // A Go duration, as buildctl reads it: whole hours, minutes or seconds such as 168h or 90m (no days).
+  if (
+    c.keepDuration !== undefined &&
+    (typeof c.keepDuration !== "string" ||
+      !/^([1-9][0-9]*h)?([1-9][0-9]*m)?([1-9][0-9]*s)?$/.test(c.keepDuration) ||
+      c.keepDuration === "")
+  )
+    problems.push("stateCache.keepDuration must be a duration such as 168h");
   if (
     !Array.isArray(c.components) ||
     c.components.some((x) => typeof x !== "string" || !/^[a-z0-9-]+\/[a-z0-9-]+$/.test(x))

@@ -69,19 +69,21 @@ it("checks a state cache: an endpoint, a bucket, a Secret and the components tha
     bucket: "stardust-buildcache",
     secret: "state-cache",
     maxBytes: 10737418240,
+    keepDuration: "168h",
     components: ["pico-server/notification-server"],
   };
   assert.deepEqual(plugin.validateConfig?.({ ...section, stateCache }), []);
   assert.deepEqual(
     plugin.validateConfig?.({
       ...section,
-      stateCache: { endpoint: "ftp://x", bucket: "B", secret: "", components: ["x"], maxBytes: -1 },
+      stateCache: { endpoint: "ftp://x", bucket: "B", secret: "", components: ["x"], maxBytes: -1, keepDuration: "7d" },
     }),
     [
       "stateCache.endpoint must be an http(s) URL without a path",
       "stateCache.bucket must be a bucket name",
       "stateCache.secret must name a Secret with keys access-key and secret-key",
       "stateCache.maxBytes must be a positive whole number of bytes",
+      "stateCache.keepDuration must be a duration such as 168h",
       "stateCache.components must list <project>/<component> entries",
     ],
   );
