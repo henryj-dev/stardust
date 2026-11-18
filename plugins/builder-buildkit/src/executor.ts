@@ -5,7 +5,7 @@
  * the digest the deploy repository cannot be pointed at what was built.
  */
 import { setTimeout as sleep } from "node:timers/promises";
-import type { BuildOutcome, KubeClient } from "@stardust/core";
+import { adoptableJob, type BuildOutcome, isHandoff, type KubeClient } from "@stardust/core";
 import { BUILD_CONTAINER, DIGEST_LINE } from "./job.ts";
 
 export interface RunBuildOptions {
@@ -42,11 +42,13 @@ export async function runBuild(
   options: RunBuildOptions,
 ): Promise<BuildOutcome> {
   const ns = encodeURIComponent(namespace);
-  const created = await api<JobStatus>(kube, "POST", `/apis/batch/v1/namespaces/${ns}/jobs`, manifest);
-  const jobName = created.metadata?.name;
+  // A Job an earlier attempt left running (its worker stopped) is watched, not built again.
+  const adopted = await adoptableJob(kube, namespace, manifest);
+  const created = adopted ? null : await api<JobStatus>(kube, "POST", `/apis/batch/v1/namespaces/${ns}/jobs`, manifest);
+  const jobName = adopted ? adopted.name : created?.metadata?.name;
   if (!jobName) throw new Error("created Job has no name");
   const jobPath = `/apis/batch/v1/namespaces/${ns}/jobs/${encodeURIComponent(jobName)}`;
-  if (options.afterCreate) {
+  if (created && options.afterCreate) {
     try {
       await options.afterCreate({ name: jobName, uid: created.metadata?.uid ?? "" });
     } catch (err) {
@@ -59,6 +61,7 @@ export async function runBuild(
   let reason: string | undefined;
   while (result === null) {
     if (options.signal.aborted) {
+      if (isHandoff(options.signal)) return { result: "cancelled", jobName, reason: "handed off", logTail: "" };
       await kube.request("DELETE", `${jobPath}?propagationPolicy=Background`);
       return { result: "cancelled", jobName, reason: "cancelled", logTail: "" };
     }

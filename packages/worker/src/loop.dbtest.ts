@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { Logger } from "@stardust/core";
-import { cancelJob, claimJob, startRun } from "@stardust/db";
+import { LeaseHandoff, type Logger } from "@stardust/core";
+import { cancelJob, claimJob, reclaimExpired, startRun } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
 import { runJob, runWorker } from "./loop.ts";
 
@@ -117,4 +117,35 @@ it("cancelling a running job stops its handler, and the job stays cancelled", as
   assert.equal(aborted, true, "the build was not told to stop");
   assert.equal(result, null);
   assert.equal(await statusOf(runId, "long"), "cancelled");
+});
+
+it("a job queued again for another worker aborts its handler as a hand-off, not a cancellation", async () => {
+  await start({ slow: { pipeline: "N" } });
+  const job = await claimJob(db.sql, "w-old", 200);
+  assert.ok(job);
+  let reason: unknown;
+  const result = runJob(
+    {
+      sql: db.sql,
+      workerId: "w-old",
+      log: quiet,
+      leaseMs: 200,
+      handler: (_job, signal) =>
+        new Promise((resolve) => {
+          signal.addEventListener("abort", () => {
+            reason = signal.reason;
+            resolve("success");
+          });
+        }),
+    },
+    job,
+  );
+  // The worker stalls past its lease (a pod being replaced) and the job is taken back.
+  await db.sql`UPDATE jobs SET lease_expires_at = now() - interval '1 second' WHERE id = ${job.id}`;
+  assert.equal(await reclaimExpired(db.sql), 1);
+  assert.equal(await result, null, "the old worker records nothing");
+  assert.ok(reason instanceof LeaseHandoff, "the Kubernetes Job is left for the next worker");
+  const [row] = await db.sql<{ status: string }[]>`SELECT status FROM jobs WHERE id = ${job.id}`;
+  assert.equal(row?.status, "queued");
+  await db.sql`UPDATE jobs SET status = 'cancelled', finished_at = now() WHERE id = ${job.id}`;
 });

@@ -79,7 +79,7 @@ export {
   validateProject,
 } from "./projects.ts";
 export type { ClaimedJob, JobResult } from "./queue.ts";
-export { claimJob, finishJob, reclaimExpired, renewLease } from "./queue.ts";
+export { claimJob, finishJob, jobStatusOf, MAX_ATTEMPTS, reclaimExpired, renewLease } from "./queue.ts";
 export type { StartRun } from "./runs.ts";
 export { advanceRun, startRun } from "./runs.ts";
 export type { CoreTableScope } from "./scopes.ts";

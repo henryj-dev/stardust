@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { KubeClient, KubeResponse } from "@stardust/core";
+import { type KubeClient, type KubeResponse, LeaseHandoff } from "@stardust/core";
 import { runBuild } from "./executor.ts";
 
 const DIGEST = `sha256:${"e".repeat(64)}`;
 
 /** A fake API server: Job status advances one step per GET. */
-function fakeKube(steps: Array<Record<string, unknown>>, log: string) {
+function fakeKube(steps: Array<Record<string, unknown>>, log: string, listed: Array<Record<string, unknown>> = []) {
   const calls: string[] = [];
   let gets = 0;
   const kube: KubeClient = {
     async request(method, path): Promise<KubeResponse> {
       calls.push(`${method} ${path.split("?")[0]}`);
+      if (method === "GET" && path.includes("/jobs?labelSelector="))
+        return { status: 200, body: JSON.stringify({ items: listed }) };
       if (method === "POST") return { status: 201, body: JSON.stringify({ metadata: { name: "build-x-1" } }) };
       if (method === "DELETE") return { status: 200, body: "{}" };
       if (path.includes("/pods?"))
@@ -65,5 +67,50 @@ describe("runBuild", () => {
   it("surfaces an API error instead of waiting forever", async () => {
     const kube: KubeClient = { request: async () => ({ status: 403, body: "forbidden" }) };
     await assert.rejects(run(kube), /returned 403/);
+  });
+});
+
+describe("runBuild takes over a Job an earlier attempt left", () => {
+  const labelled = { kind: "Job", metadata: { labels: { "stardust/run": "r1", "stardust/job": "build" } } };
+  const runLabelled = (kube: KubeClient, signal = new AbortController().signal, afterCreate?: () => Promise<void>) =>
+    runBuild(kube, "builds", labelled, { signal, pollMs: 1, ...(afterCreate ? { afterCreate } : {}) });
+
+  it("watches the running Job instead of building again, and reads its digest", async () => {
+    const { kube, calls } = fakeKube([{ succeeded: 1 }], `[stardust-image-digest] ${DIGEST}\n`, [
+      { metadata: { name: "build-old", creationTimestamp: "2026-01-01T00:00:00Z" } },
+      { metadata: { name: "build-older", creationTimestamp: "2025-12-31T00:00:00Z" } },
+    ]);
+    let released = false;
+    const outcome = await runLabelled(kube, undefined, async () => {
+      released = true;
+    });
+    assert.equal(outcome.result, "success");
+    assert.equal(outcome.digest, DIGEST);
+    assert.equal(outcome.jobName, "build-old", "the newest of them");
+    assert.ok(!calls.some((c) => c.startsWith("POST")), "no second build");
+    assert.equal(released, false, "an adopted Job is not released again");
+    assert.ok(calls.includes("GET /apis/batch/v1/namespaces/builds/jobs/build-old"));
+  });
+
+  it("deletes a suspended leftover and one being deleted is ignored, then builds", async () => {
+    const { kube, calls } = fakeKube([{ succeeded: 1 }], `[stardust-image-digest] ${DIGEST}\n`, [
+      { metadata: { name: "build-stuck" }, spec: { suspend: true } },
+      { metadata: { name: "build-going", deletionTimestamp: "2026-01-01T00:00:00Z" } },
+    ]);
+    const outcome = await runLabelled(kube);
+    assert.equal(outcome.jobName, "build-x-1");
+    assert.ok(calls.includes("DELETE /apis/batch/v1/namespaces/builds/jobs/build-stuck"));
+    assert.ok(!calls.includes("DELETE /apis/batch/v1/namespaces/builds/jobs/build-going"));
+    assert.equal(calls.filter((c) => c.startsWith("POST")).length, 1);
+  });
+
+  it("leaves the Job running when the job is handed to another worker", async () => {
+    const { kube, calls } = fakeKube([{ active: 1 }], "");
+    const stop = new AbortController();
+    stop.abort(new LeaseHandoff());
+    const outcome = await run(kube, stop.signal);
+    assert.equal(outcome.result, "cancelled");
+    assert.equal(outcome.reason, "handed off");
+    assert.ok(!calls.some((c) => c.startsWith("DELETE")), "the Job is the next worker's");
   });
 });
