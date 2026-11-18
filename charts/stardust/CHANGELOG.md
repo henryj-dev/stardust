@@ -1,5 +1,11 @@
 # stardust
 
+## 0.23.6
+
+### Patch Changes
+
+- [#112](https://github.com/henryj-dev/stardust/pull/112) [`c463777`](https://github.com/henryj-dev/stardust/commit/c4637770eb50008c1a7e1cba9524bf4638961e36) Thanks [@mack-erel](https://github.com/mack-erel)! - The build state cache falls back to the plain archive again: rclone's copyto exits 0 for an object that does not exist, so a missing `.tar.gz` counted as fetched and the `.tar` an earlier release saved was never restored. A fetch now counts only when the file is there.
+
 ## 0.23.5
 
 ### Patch Changes
