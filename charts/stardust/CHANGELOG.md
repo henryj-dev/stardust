@@ -1,5 +1,11 @@
 # stardust
 
+## 0.23.4
+
+### Patch Changes
+
+- [#108](https://github.com/henryj-dev/stardust/pull/108) [`c7899c4`](https://github.com/henryj-dev/stardust/commit/c7899c4f51b550cc37204042f9dc02b31878c007) Thanks [@mack-erel](https://github.com/mack-erel)! - The build state cache prunes cache records unused for `stateCache.keepDuration` (default `168h`) before packing, not only when the state outgrows `maxBytes`: a cache mount a Dockerfile stopped using was otherwise carried, gigabytes at a time, on every build.
+
 ## 0.23.3
 
 ### Patch Changes
