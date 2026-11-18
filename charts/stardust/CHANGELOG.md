@@ -1,5 +1,11 @@
 # stardust
 
+## 0.21.1
+
+### Patch Changes
+
+- [#91](https://github.com/henryj-dev/stardust/pull/91) [`b090a19`](https://github.com/henryj-dev/stardust/commit/b090a19a04235bcf994f38698d0266c01079f4eb) Thanks [@mack-erel](https://github.com/mack-erel)! - Adopting hand-made env from a SOPS file stardust cannot decrypt (one encrypted only to the cluster's and the operator's keys) is refused with what to do, instead of failing with a server error.
+
 ## 0.21.0
 
 ### Minor Changes
