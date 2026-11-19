@@ -20,6 +20,7 @@
     "vite": "^8.3.5"
   },
   "dependencies": {
+    "@lucide/svelte": "^1.75.0",
     "@stardust/sdk": "workspace:*"
   }
 }

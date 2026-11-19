@@ -363,6 +363,9 @@ importers:
 
   packages/web:
     dependencies:
+      '@lucide/svelte':
+        specifier: ^1.75.0
+        version: 1.75.0(svelte@5.57.2)
       '@stardust/sdk':
         specifier: workspace:*
         version: link:../sdk
@@ -739,6 +742,11 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@lucide/svelte@1.75.0':
+    resolution: {integrity: sha512-iGFP2m718jy26FrCXMxSbzz8WCDL4kx5lWN2jeXg1jzM0GcSLoQ9ygzDF++bpUjw5WHXNVCw90lBh0mvTAih+Q==}
+    peerDependencies:
+      svelte: ^5
 
   '@manypkg/find-root@3.1.0':
     resolution: {integrity: sha512-BcSqCyKhBVZ5YkSzOiheMCV41kqAFptW6xGqYSTjkVTl9XQpr+pqHhwgGCOHQtjDCv7Is6EFyA14Sm5GVbVABA==}
@@ -1722,6 +1730,10 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  '@lucide/svelte@1.75.0(svelte@5.57.2)':
+    dependencies:
+      svelte: 5.57.2
 
   '@manypkg/find-root@3.1.0':
     dependencies:
