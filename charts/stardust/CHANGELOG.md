@@ -1,5 +1,11 @@
 # stardust
 
+## 0.26.0
+
+### Minor Changes
+
+- [#124](https://github.com/henryj-dev/stardust/pull/124) [`13ca171`](https://github.com/henryj-dev/stardust/commit/13ca171067e51a5d3847fd2ec8d7ea9dafc18166) Thanks [@mack-erel](https://github.com/mack-erel)! - Live logs come as server-sent events. A followed build or pod log is sent to the browser as `log` events (the text as JSON, every character kept), a `: heartbeat` comment every 5 seconds, and `end` when the log ends — the same shape as the project event stream. A proxy in front no longer closes a quiet log after its read timeout (nginx: 60 s), and the headers go out at once. A log read once (not followed, or a kept log) stays plain text; the API is unchanged.
+
 ## 0.25.3
 
 ### Patch Changes
