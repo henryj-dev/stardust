@@ -45,6 +45,9 @@ const errorOf = async (res: Response) => {
   return body?.error ?? body?.message ?? `the log could not be read (${res.status})`;
 };
 
+/** The URL with follow=true, after whatever query it already has (a pod log has source=…). */
+export const withFollow = (url: string) => `${url}${url.includes("?") ? "&" : "?"}follow=true`;
+
 export async function followLog(options: FollowOptions): Promise<void> {
   const { signal } = options;
   const doFetch = options.fetch ?? fetch;
@@ -54,7 +57,7 @@ export async function followLog(options: FollowOptions): Promise<void> {
     const active = options.active();
     let res: Response;
     try {
-      res = await doFetch(active ? `${options.url}?follow=true` : options.url, { signal });
+      res = await doFetch(active ? withFollow(options.url) : options.url, { signal });
     } catch {
       if (signal.aborted) return;
       options.onState({ kind: "error", message: "the log could not be reached; retrying" });

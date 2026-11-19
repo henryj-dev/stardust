@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { followLog, type LogState } from "./run-log.ts";
+import { followLog, type LogState, withFollow } from "./run-log.ts";
 import { duration, jobFacts, keptLogTail } from "./run-view.ts";
 
 const json = (status: number, error: string) => Response.json({ error }, { status });
@@ -118,5 +118,12 @@ describe("run view", () => {
     );
     assert.equal(keptLogTail(detail), "tail");
     assert.equal(keptLogTail({}), null);
+  });
+});
+
+describe("withFollow", () => {
+  it("adds follow=true after a query the URL already has", () => {
+    assert.equal(withFollow("/log"), "/log?follow=true");
+    assert.equal(withFollow("/pods/p/log?source=live&container=c"), "/pods/p/log?source=live&container=c&follow=true");
   });
 });
