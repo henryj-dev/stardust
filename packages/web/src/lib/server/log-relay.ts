@@ -5,7 +5,7 @@
  */
 export async function relayLog(upstream: Response): Promise<Response> {
   if (upstream.ok && upstream.body) {
-    return new Response(upstream.body, {
+    return new Response(headersFirst(upstream.body), {
       headers: {
         // Text, never HTML, and never sniffed into something else.
         "content-type": "text/plain; charset=utf-8",
@@ -22,4 +22,27 @@ export async function relayLog(upstream: Response): Promise<Response> {
     { error },
     { status: upstream.ok ? 502 : upstream.status, headers: { "cache-control": "no-store" } },
   );
+}
+
+/**
+ * The body, led by an empty chunk. SvelteKit's Node adapter calls writeHead but
+ * Node sends the headers only with the first write, so a log that prints
+ * nothing yet (a quiet pod, a build waiting for its first step) kept the
+ * browser on "connecting" until it did. Writing an empty chunk sends them.
+ */
+function headersFirst(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(0));
+    },
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) controller.close();
+      else controller.enqueue(value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
 }
