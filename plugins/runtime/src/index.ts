@@ -392,6 +392,8 @@ export const plugin = definePlugin({
     return Object.keys(section).map((key) => `unknown key "${key}"`);
   },
   requires: ["kube", "deployRepo", "projects"],
+  // The pod log page reads these; without saying so, logs-kube and logs-loki are never built.
+  uses: ["logs"],
   permissions: [
     { id: "runtime:view", description: "See a component's workloads, pods and events", grantedTo: "project-readers" },
     { id: "runtime:operate", description: "Restart, scale and size a component", grantedTo: "project-writers" },
