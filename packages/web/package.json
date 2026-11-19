@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@lucide/svelte": "^1.75.0",
-    "@stardust/sdk": "workspace:*"
+    "@stardust/sdk": "workspace:*",
+    "@tanstack/svelte-table": "^9.3.2"
   }
 }

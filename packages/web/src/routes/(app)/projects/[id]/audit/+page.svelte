@@ -1,5 +1,5 @@
 <script lang="ts">
-import AuditTable from "$lib/components/AuditTable.svelte";
+import AuditTable from "$lib/components/audit/AuditTable.svelte";
 import ProjectNav from "$lib/components/ProjectNav.svelte";
 
 let { data } = $props();
