@@ -1,5 +1,11 @@
 # stardust
 
+## 0.25.3
+
+### Patch Changes
+
+- [#122](https://github.com/henryj-dev/stardust/pull/122) [`2be3343`](https://github.com/henryj-dev/stardust/commit/2be33437d2e46aac0df4c2e780a22906262a01ac) Thanks [@mack-erel](https://github.com/mack-erel)! - A followed log opens at once: a pod (or build) that had printed nothing yet left the browser on "connecting", because SvelteKit's Node adapter sends the headers only with the first byte of the body. The relay now leads the body with an empty chunk, which sends them.
+
 ## 0.25.2
 
 ### Patch Changes
