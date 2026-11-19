@@ -1,5 +1,11 @@
 # stardust
 
+## 0.25.1
+
+### Patch Changes
+
+- [#118](https://github.com/henryj-dev/stardust/pull/118) [`adcd4fc`](https://github.com/henryj-dev/stardust/commit/adcd4fcd3c7c54aada9510e6ea092757650b4d00) Thanks [@mack-erel](https://github.com/mack-erel)! - The env page edits a value in place: a plain value has an Edit form holding its current value, and a secret that has been shown can be edited where it is instead of retyped.
+
 ## 0.25.0
 
 ### Minor Changes
