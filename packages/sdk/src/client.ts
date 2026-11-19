@@ -43,6 +43,32 @@ export interface FileMount {
 }
 
 /** What a component mounts from its env Secret, and the secrets it could. */
+/** A volume a component's containers write to. */
+export interface StorageVolume {
+  name: string;
+  mountPath: string;
+  size: string;
+  storageClass?: string;
+}
+
+/** A component's persistent storage. Size is null for a claim stardust does not hold. */
+export interface ComponentStorage {
+  namespace: string | null;
+  volumes: Array<Omit<StorageVolume, "size"> & { size: string | null; claim: string; claimFile: boolean }>;
+  /** Claims whose volume is unmounted: their data is kept until it is deleted. */
+  kept: Array<{ name: string; claim: string; size: string | null }>;
+  /** The workload's own claim volumes, which can be taken over. */
+  other: Array<{ volume: string; claim: string; mountPath: string | null }>;
+  fsGroup: number | null;
+}
+
+export interface StorageChange {
+  volumes: StorageVolume[];
+  adopt?: string[];
+  deleteData?: string[];
+  fsGroup?: number | null;
+}
+
 export interface ComponentFiles {
   mounts: FileMount[];
   secrets: string[];
@@ -401,6 +427,17 @@ export interface Client {
     component: string,
     mounts: FileMount[],
   ): Promise<{ status: "committed" | "no_change"; deployCommit: string | null; mounts: FileMount[] }>;
+  /** A component's persistent storage: mounted claims, kept ones, and volumes it could take over. */
+  componentStorage(projectId: string, component: string): Promise<ComponentStorage>;
+  /**
+   * Sets a component's storage as one commit. Unmounting keeps a claim's data;
+   * only volumes in `deleteData` lose it. ApiError 400 names what is wrong.
+   */
+  setComponentStorage(
+    projectId: string,
+    component: string,
+    change: StorageChange,
+  ): Promise<{ status: "committed" | "no_change"; deployCommit: string | null }>;
   /** A component's registry pull Secret and pod view, and whether stardust can manage them. */
   componentAccess(projectId: string, component: string): Promise<ComponentAccess>;
   /** Turns them on or off, as one commit. Administrators only. */
@@ -740,6 +777,26 @@ export function createClient(options: ClientOptions): Client {
       return (await (
         await get(`/api/v1/projects/${p(projectId)}/components/${p(component)}/files`)
       ).json()) as ComponentFiles;
+    },
+    async componentStorage(projectId, component) {
+      const p = (x: string) => encodeURIComponent(x);
+      return (await (
+        await get(`/api/v1/projects/${p(projectId)}/components/${p(component)}/storage`)
+      ).json()) as ComponentStorage;
+    },
+    async setComponentStorage(projectId, component, change) {
+      const p = (x: string) => encodeURIComponent(x);
+      const path = `/api/v1/projects/${p(projectId)}/components/${p(component)}/storage`;
+      const res = await doFetch(`${base}${path}`, {
+        method: "PUT",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify(change),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `PUT ${path} failed: ${res.status}`);
+      }
+      return (await res.json()) as { status: "committed" | "no_change"; deployCommit: string | null };
     },
     async setComponentFiles(projectId, component, mounts) {
       const p = (x: string) => encodeURIComponent(x);

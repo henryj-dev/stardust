@@ -308,6 +308,66 @@ const LANDING: Record<string, string> = {
     {/if}
   {/if}
 
+  {#if data.storage}
+    <h2>Storage</h2>
+    <p>
+      Persistent volumes this component writes to, each a claim of its own in <code>{data.storage.namespace ?? "its namespace"}</code>.
+      With a volume, a Deployment rolls one pod at a time, the old one stopped first. Clearing a mount path unmounts the
+      volume and keeps its data; data is deleted only with the confirmation below. Sizes can grow, not shrink.
+    </p>
+    <form method="POST" action="?/storage" data-storage>
+      <table>
+        <thead><tr><th>Name</th><th>Path in the container</th><th>Size</th><th>Storage class</th></tr></thead>
+        <tbody>
+          {#each [...data.storage.volumes, { name: "", mountPath: "", size: "1Gi", storageClass: "", claim: "", claimFile: true }] as v, i (i)}
+            {@const isNew = i === data.storage.volumes.length}
+            <tr data-storage-row={i}>
+              <td>
+                <input name={`volumes.${i}.name`} value={v.name} readonly={!isNew} placeholder="data" aria-label={`Name of volume ${i + 1}`} autocomplete="off" />
+                {#if !isNew && !v.claimFile}<br /><small data-storage-elsewhere>claim {v.claim} is kept outside this directory</small>{/if}
+              </td>
+              <td>
+                <input name={`volumes.${i}.mountPath`} value={v.mountPath} placeholder={isNew ? "/var/lib/app (add a volume)" : "clear to unmount"} aria-label={`Path of volume ${i + 1}`} autocomplete="off" />
+              </td>
+              <td><input name={`volumes.${i}.size`} value={v.size ?? "1Gi"} readonly={!isNew && !v.claimFile} size="6" aria-label={`Size of volume ${i + 1}`} /></td>
+              <td><input name={`volumes.${i}.storageClass`} value={v.storageClass ?? ""} readonly={!isNew} placeholder="cluster default" aria-label={`Storage class of volume ${i + 1}`} /></td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      <label>
+        Group that owns the volumes (fsGroup):
+        <input name="fsGroup" value={data.storage.fsGroup ?? ""} size="6" placeholder="none" inputmode="numeric" />
+        <small>the image user's group id, if it is not root</small>
+      </label>
+      {#if data.storage.other.length > 0}
+        <p>Claims this component mounts that stardust does not manage yet. Taking one over keeps the claim and its data:</p>
+        <ul data-storage-other>
+          {#each data.storage.other as o (o.volume)}
+            <li><label><input type="checkbox" name="adopt" value={o.volume} /> {o.volume} → {o.mountPath ?? "not mounted"} (claim {o.claim})</label></li>
+          {/each}
+        </ul>
+      {/if}
+      {#if data.storage.kept.length > 0}
+        <p>Unmounted, data kept. Add one again with its name to mount it, or delete its data:</p>
+        <ul data-storage-kept>
+          {#each data.storage.kept as k (k.name)}
+            <li><label><input type="checkbox" name="deleteData" value={k.name} /> delete the data of {k.name} ({k.claim}, {k.size ?? "size unknown"})</label></li>
+          {/each}
+        </ul>
+        <label><input type="checkbox" name="confirmDelete" /> I understand deleted data cannot be recovered</label>
+      {/if}
+      <button type="submit">Save storage</button>
+    </form>
+    {#if form?.storageError}
+      <p role="alert" data-storage-error>{form.storageError}</p>
+    {:else if form?.storageSaved}
+      <p data-storage-saved>
+        {form.storageSaved.status === "committed" ? `Committed ${form.storageSaved.deployCommit?.slice(0, 7) ?? ""}.` : "Nothing to change."}
+      </p>
+    {/if}
+  {/if}
+
   <h2>Deliveries</h2>
   {#if data.deliveries.length === 0}
     <p>Nothing has been delivered yet.</p>

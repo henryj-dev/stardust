@@ -16,6 +16,7 @@ export * from "./gitops/image-tag.ts";
 export * from "./gitops/kustomization.ts";
 export * from "./gitops/scaffold.ts";
 export * from "./gitops/stamp.ts";
+export * from "./gitops/storage.ts";
 export * from "./guard.ts";
 export * from "./jobs/run.ts";
 export type { Logger } from "./logger.ts";

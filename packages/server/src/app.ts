@@ -8,6 +8,7 @@ import {
   bumpImage,
   can,
   checkFileMounts,
+  checkStorage,
   commitWithCas,
   type DeployRepo,
   decideAccess,
@@ -111,6 +112,7 @@ import { changeEnv, checkChange, EnvConflict, type EnvEditor, EnvInputError, rea
 import type { RunEvents } from "./events.ts";
 import { mountFeatures } from "./features.ts";
 import { FilesConflict, FilesInputError, readFiles, writeFiles } from "./files.ts";
+import { readStorage, type StorageChange, StorageConflict, StorageInputError, writeStorage } from "./storage.ts";
 
 export interface AppInfo {
   readonly version: string;
@@ -1052,6 +1054,84 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       });
     }
     return c.json({ status: result.status, deployCommit: result.commit, mounts });
+  });
+
+  // A component's persistent storage: the claims it mounts, the ones kept unmounted, and volumes it could take over.
+  app.get("/api/v1/projects/:id/components/:name/storage", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:read", id);
+    if (denied) return denied;
+    const project = await getProject(sql, id);
+    const component = project?.components.find((x) => x.name === c.req.param("name"));
+    if (!project || !component) return c.json({ error: "unknown component" }, 404);
+    if (!services.deployRepo) return c.json({ error: "storage needs a deploy repository (gitops-git)" }, 404);
+    try {
+      return c.json(await readStorage(services.deployRepo.repo, component));
+    } catch (err) {
+      return c.json({ error: `deploy repository: ${(err as Error).message}` }, 502);
+    }
+  });
+
+  // Sets a component's storage as one commit. Data is deleted only for volumes named in deleteData.
+  app.put("/api/v1/projects/:id/components/:name/storage", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:write", id);
+    if (denied) return denied;
+    const project = await getProject(sql, id);
+    const component = project?.components.find((x) => x.name === c.req.param("name"));
+    if (!project || !component) return c.json({ error: "unknown component" }, 404);
+    if (!services.deployRepo) return c.json({ error: "storage needs a deploy repository (gitops-git)" }, 404);
+    const body = ((await c.req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+    let change: StorageChange;
+    try {
+      const names = (v: unknown, field: string) => {
+        if (v === undefined) return undefined;
+        if (!Array.isArray(v) || v.some((x) => typeof x !== "string" || x.length > 63)) {
+          throw new Error(`${field} must be a list of names`);
+        }
+        return v as string[];
+      };
+      const fsGroup = body.fsGroup;
+      if (
+        fsGroup !== undefined &&
+        fsGroup !== null &&
+        !(Number.isInteger(fsGroup) && (fsGroup as number) >= 0 && (fsGroup as number) <= 2147483647)
+      ) {
+        throw new Error("fsGroup must be a group id or null");
+      }
+      const adopt = names(body.adopt, "adopt");
+      const deleteData = names(body.deleteData, "deleteData");
+      change = {
+        volumes: checkStorage(component.name, body.volumes),
+        ...(adopt ? { adopt } : {}),
+        ...(deleteData ? { deleteData } : {}),
+        ...(fsGroup !== undefined ? { fsGroup: fsGroup as number | null } : {}),
+      };
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    let result: Awaited<ReturnType<typeof writeStorage>>;
+    try {
+      result = await writeStorage(services.deployRepo.repo, {
+        project: project.id,
+        component,
+        change,
+        by: c.get("user").username,
+      });
+    } catch (err) {
+      if (err instanceof StorageInputError) return c.json({ error: err.message }, 400);
+      if (err instanceof StorageConflict) return c.json({ error: err.message }, 409);
+      return c.json({ error: `deploy repository: ${(err as Error).message}` }, 502);
+    }
+    if (result.status === "committed") {
+      await audit(c, {
+        action: "project.component.storage",
+        projectId: project.id,
+        target: component.name,
+        detail: { ...change, deployCommit: result.commit },
+      });
+    }
+    return c.json({ status: result.status, deployCommit: result.commit });
   });
 
   const accessServices = (): AccessServices => ({

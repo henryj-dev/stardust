@@ -79,7 +79,7 @@ const KUSTOMIZATIONS = ["kustomization.yaml", "kustomization.yml"];
 const dirOf = (c: Pick<Component, "deployDir">) => c.deployDir.replace(/\/+$/, "");
 
 /** A directory's manifests as `at` has them, path → text. */
-async function manifests(at: BoundRepo, dir: string): Promise<Map<string, string>> {
+export async function manifests(at: BoundRepo, dir: string): Promise<Map<string, string>> {
   const files = new Map<string, string>();
   for (const name of await at.list(dir)) {
     if (!MANIFEST.test(name)) continue;
@@ -90,7 +90,7 @@ async function manifests(at: BoundRepo, dir: string): Promise<Map<string, string
 }
 
 /** The one namespace the component's workloads run in, or why there is none. */
-function namespaceOf(files: ReadonlyMap<string, string>, dir: string): string | { error: string } {
+export function namespaceOf(files: ReadonlyMap<string, string>, dir: string): string | { error: string } {
   let fallback: string | null = null;
   for (const k of KUSTOMIZATIONS) {
     const doc = parse(files.get(`${dir}/${k}`) ?? "") as { namespace?: unknown } | null;

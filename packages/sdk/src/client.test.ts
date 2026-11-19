@@ -332,6 +332,38 @@ it("reads and sets a component's files, passing on the server's reason", async (
   );
 });
 
+it("reads and sets a component's storage, passing on the server's reason", async () => {
+  const seen: Array<{ url: string; method: string; body: unknown }> = [];
+  const empty = { namespace: "pico", volumes: [], kept: [], other: [], fsGroup: null };
+  const client = createClient({
+    baseUrl: "http://api.test",
+    token: "t0k",
+    fetch: async (input, init) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      seen.push({ url: String(input), method: init?.method ?? "GET", body });
+      if (init?.method !== "PUT") return Response.json(empty);
+      if (body.volumes[0]?.size === "1G")
+        return Response.json({ error: "volumes.0.size is not a size" }, { status: 400 });
+      return Response.json({ status: "committed", deployCommit: "abc" });
+    },
+  });
+  assert.deepEqual(await client.componentStorage("pico", "push"), empty);
+  const change = { volumes: [{ name: "data", mountPath: "/var/lib/push", size: "1Gi" }], fsGroup: 10001 };
+  assert.deepEqual(await client.setComponentStorage("pico", "push", change), {
+    status: "committed",
+    deployCommit: "abc",
+  });
+  assert.deepEqual(seen[1], {
+    url: "http://api.test/api/v1/projects/pico/components/push/storage",
+    method: "PUT",
+    body: change,
+  });
+  await assert.rejects(
+    client.setComponentStorage("pico", "push", { volumes: [{ name: "d", mountPath: "/x", size: "1G" }] }),
+    (err: Error) => err.message === "volumes.0.size is not a size",
+  );
+});
+
 it("reads and sets a component's access, and reseals pull Secrets", async () => {
   const seen: Array<{ url: string; method: string; body: unknown }> = [];
   const client = createClient({
