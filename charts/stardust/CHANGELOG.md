@@ -1,5 +1,11 @@
 # stardust
 
+## 0.25.2
+
+### Patch Changes
+
+- [#120](https://github.com/henryj-dev/stardust/pull/120) [`e2c798d`](https://github.com/henryj-dev/stardust/commit/e2c798d073fc6a0fb0e910e4793f249d9dc1988b) Thanks [@mack-erel](https://github.com/mack-erel)! - Pod logs work again: the runtime plugin now says it uses the log sources, so logs-kube and logs-loki are built when enabled (they were never built, and the pod page said no live log source was enabled). A live log is followed again: the page added `?follow=true` after a URL that already had a query.
+
 ## 0.25.1
 
 ### Patch Changes
