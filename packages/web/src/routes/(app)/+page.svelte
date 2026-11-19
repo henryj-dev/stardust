@@ -1,4 +1,5 @@
 <script lang="ts">
+import PageContainer from "$lib/components/layout/PageContainer.svelte";
 import { Search } from "@lucide/svelte";
 import EmptyProjects from "$lib/components/projects/EmptyProjects.svelte";
 import ProjectHeader from "$lib/components/projects/ProjectHeader.svelte";
@@ -10,7 +11,7 @@ const filtered = $derived(data.projects.filter((project) => `${project.name} ${p
 
 <svelte:head><title>Projects · stardust</title></svelte:head>
 
-<main class="mx-auto w-full max-w-[1152px] px-5 pt-7 pb-16 sm:px-8">
+<PageContainer>
   <ProjectHeader isAdmin={!!data.user?.isAdmin} />
 
   {#if data.costs?.sources.length}
@@ -55,4 +56,4 @@ const filtered = $derived(data.projects.filter((project) => `${project.name} ${p
       {/each}
     </ul>
   {/if}
-</main>
+</PageContainer>

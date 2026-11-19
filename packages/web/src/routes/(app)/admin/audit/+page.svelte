@@ -1,4 +1,6 @@
 <script lang="ts">
+import PageContainer from "$lib/components/layout/PageContainer.svelte";
+import PageHeader from "$lib/components/layout/PageHeader.svelte";
 import AuditTable from "$lib/components/audit/AuditTable.svelte";
 
 let { data } = $props();
@@ -8,8 +10,8 @@ let { data } = $props();
   <title>Audit log · stardust</title>
 </svelte:head>
 
-<main>
-  <h1>Audit log</h1>
+<PageContainer>
+  <PageHeader title="Audit log" />
   <form method="GET" class="toolbar" data-audit-filter>
     <label>Who <input name="actor" value={data.filter.actor ?? ""} placeholder="username" /></label>
     <label>Action <input name="action" value={data.filter.action ?? ""} placeholder="project, auth.login…" /></label>
@@ -22,4 +24,4 @@ let { data } = $props();
     <p role="alert" data-audit-problem>{data.problem}</p>
   {/if}
   <AuditTable linkEvents events={data.events} older={data.older} showProject={true} />
-</main>
+</PageContainer>

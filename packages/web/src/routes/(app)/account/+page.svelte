@@ -1,4 +1,6 @@
 <script lang="ts">
+import PageContainer from "$lib/components/layout/PageContainer.svelte";
+import PageHeader from "$lib/components/layout/PageHeader.svelte";
 import { onMount } from "svelte";
 import { goto } from "$app/navigation";
 import * as Tabs from "$lib/components/ui/tabs";
@@ -46,11 +48,8 @@ function selectSection(value: string) {
 
 <svelte:head><title>Settings · stardust</title></svelte:head>
 
-<main class="mx-auto w-full max-w-[1120px] px-5 pt-8 pb-16 sm:px-8">
-  <div class="mb-7">
-    <h1 class="m-0 text-[26px] leading-9 font-semibold tracking-[-0.035em] text-[#171719]">Settings</h1>
-    <p class="mt-1 mb-0 text-sm text-[#777980]">Manage your account and security preferences.</p>
-  </div>
+<PageContainer>
+  <PageHeader title="Settings" description="Manage your account and security preferences." />
   <Tabs.Root bind:value={active} {orientation} onValueChange={selectSection} class="settings-tabs md:grid md:grid-cols-[180px_minmax(0,1fr)] md:gap-6">
     <Tabs.List label="Account settings" class="mb-4 flex gap-1 overflow-x-auto md:mb-0 md:block">
       {#each sections as section (section.id)}
@@ -64,4 +63,4 @@ function selectSection(value: string) {
       <Tabs.Content value="tokens"><TokenSettings {data} {form} /></Tabs.Content>
     </div>
   </Tabs.Root>
-</main>
+</PageContainer>
