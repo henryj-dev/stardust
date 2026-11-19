@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { followLog, type LogState, withFollow } from "./run-log.ts";
+import { followLog, type LogState, logEventTexts, withFollow } from "./run-log.ts";
 import { duration, jobFacts, keptLogTail } from "./run-view.ts";
 
 const json = (status: number, error: string) => Response.json({ error }, { status });
@@ -126,4 +126,48 @@ describe("withFollow", () => {
     assert.equal(withFollow("/log"), "/log?follow=true");
     assert.equal(withFollow("/pods/p/log?source=live&container=c"), "/pods/p/log?source=live&container=c&follow=true");
   });
+});
+
+describe("logEventTexts", () => {
+  const stream = (parts: string[]) => {
+    const enc = new TextEncoder();
+    return new ReadableStream<Uint8Array>({
+      pull(c) {
+        const next = parts.shift();
+        if (next === undefined) c.close();
+        else c.enqueue(enc.encode(next));
+      },
+    });
+  };
+  const all = async (parts: string[]) => {
+    const out: string[] = [];
+    for await (const t of logEventTexts(stream(parts))) out.push(t);
+    return out;
+  };
+
+  it("yields each log event's text, skipping heartbeats, across any chunk boundary", async () => {
+    const wire =
+      ': heartbeat\n\nevent: log\ndata: "a\\nb"\n\n: heartbeat\n\nevent: log\ndata: "한글"\n\nevent: end\ndata: {}\n\n';
+    assert.deepEqual(await all([wire]), ["a\nb", "한글"]);
+    // Split one byte at a time: the events come out the same.
+    assert.deepEqual(await all([...wire]), ["a\nb", "한글"]);
+  });
+
+  it("stops at end, and ignores events it does not know", async () => {
+    assert.deepEqual(
+      await all([
+        'event: other\ndata: "x"\n\nevent: log\ndata: "y"\n\nevent: end\ndata: {}\n\nevent: log\ndata: "after"\n\n',
+      ]),
+      ["y"],
+    );
+  });
+});
+
+it("follows a log that comes as events, and reads one that comes as text", async () => {
+  const sse = new Response(': heartbeat\n\nevent: log\ndata: "x\\n"\n\nevent: end\ndata: {}\n\n', {
+    headers: { "content-type": "text/event-stream; charset=utf-8" },
+  });
+  const h = harness([sse], () => false);
+  await h.run;
+  assert.equal(h.text(), "x\n");
 });

@@ -15,5 +15,5 @@ export const GET: RequestHandler = async ({ locals, params, request, url }) => {
   const upstream = await apiClient(locals.token)
     .plugin("runtime")
     .raw(`/projects/${p(params.id)}/components/${p(params.name)}/pods/${p(params.pod)}/log?${query}`, request.signal);
-  return relayLog(upstream);
+  return relayLog(upstream, { follow: query.get("follow") === "true" });
 };

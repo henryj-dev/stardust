@@ -3,6 +3,10 @@
  * while the build prints, waits while the build has not started, and stops
  * when the job is over or the log is gone. Text only — callers render it as
  * a text node, never as HTML.
+ *
+ * A followed log comes as server-sent events (`log` with the text as JSON, a
+ * `: heartbeat` comment while it is quiet, `end` when it ends); a log read once
+ * comes as plain text.
  */
 
 export type LogState =
@@ -67,10 +71,14 @@ export async function followLog(options: FollowOptions): Promise<void> {
     if (res.ok && res.body) {
       options.onReset();
       options.onState({ kind: "streaming" });
-      const decoder = new TextDecoder();
       try {
-        for await (const chunk of res.body) options.onText(decoder.decode(chunk, { stream: true }));
-        options.onText(decoder.decode());
+        if ((res.headers.get("content-type") ?? "").startsWith("text/event-stream")) {
+          for await (const text of logEventTexts(res.body)) options.onText(text);
+        } else {
+          const decoder = new TextDecoder();
+          for await (const chunk of res.body) options.onText(decoder.decode(chunk, { stream: true }));
+          options.onText(decoder.decode());
+        }
       } catch {
         if (signal.aborted) return;
       }
@@ -93,5 +101,37 @@ export async function followLog(options: FollowOptions): Promise<void> {
       return;
     }
     await wait(retryMs, signal);
+  }
+}
+
+/**
+ * The text of each `log` event in a server-sent event stream, in order. Comments
+ * (the heartbeat) and other events are skipped; an event split across chunks is
+ * put back together. Ends at `end` or when the stream does.
+ */
+export async function* logEventTexts(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for await (const chunk of body) {
+    buffer += decoder.decode(chunk, { stream: true }).replace(/\r\n?/g, "\n");
+    for (let cut = buffer.indexOf("\n\n"); cut !== -1; cut = buffer.indexOf("\n\n")) {
+      const block = buffer.slice(0, cut);
+      buffer = buffer.slice(cut + 2);
+      let name = "message";
+      const data: string[] = [];
+      for (const line of block.split("\n")) {
+        if (line === "" || line.startsWith(":")) continue;
+        const colon = line.indexOf(":");
+        const field = colon === -1 ? line : line.slice(0, colon);
+        const value = colon === -1 ? "" : line.slice(colon + 1).replace(/^ /, "");
+        if (field === "event") name = value;
+        else if (field === "data") data.push(value);
+      }
+      if (name === "end") return;
+      if (name === "log" && data.length > 0) {
+        const text: unknown = JSON.parse(data.join("\n"));
+        if (typeof text === "string" && text !== "") yield text;
+      }
+    }
   }
 }
