@@ -1,5 +1,11 @@
 # stardust
 
+## 0.24.0
+
+### Minor Changes
+
+- [#114](https://github.com/henryj-dev/stardust/pull/114) [`ee0aafe`](https://github.com/henryj-dev/stardust/commit/ee0aafe31de71885c54582a441941fb025f747a1) Thanks [@mack-erel](https://github.com/mack-erel)! - Components get persistent storage on their page: volumes with a mount path, a size and a StorageClass, written as a claim per volume next to the manifests and mounted in one commit, with fsGroup for non-root images and one pod at a time. Unmounting keeps the data; deleting it needs a confirmation. A claim already mounted under stardust's names (added by hand) is picked up as it is, and another claim the workload mounts can be taken over without being made again.
+
 ## 0.23.6
 
 ### Patch Changes
