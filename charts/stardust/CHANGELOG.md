@@ -1,5 +1,11 @@
 # stardust
 
+## 0.25.0
+
+### Minor Changes
+
+- [#116](https://github.com/henryj-dev/stardust/pull/116) [`da1ce99`](https://github.com/henryj-dev/stardust/commit/da1ce9950a71db8c3f41bf7a015d08a1167aa5d8) Thanks [@mack-erel](https://github.com/mack-erel)! - The env page, as Coolify's: maintainers can show a secret's value (audited by name, never cached), values may span several lines (typed, not only as files), and a value may use `${NAME}` and `{{project.NAME}}`, resolved when the env is rendered — in multi-line secrets too — unless the value is marked Literal. A reference to nothing, a cycle, or a plain value that uses a secret is refused.
+
 ## 0.24.0
 
 ### Minor Changes
