@@ -1,158 +1,67 @@
 <script lang="ts">
-let { data, form } = $props();
-const time = (iso: string) => new Date(iso).toLocaleString();
-const ended = (iso: string) => new Date(iso).getTime() <= Date.now();
+import { onMount } from "svelte";
+import { goto } from "$app/navigation";
+import * as Tabs from "$lib/components/ui/tabs";
+import { KeyRound, ShieldCheck, Monitor, KeySquare } from "@lucide/svelte";
+import PasswordSettings from "$lib/components/account/PasswordSettings.svelte";
+import TwoFactorSettings from "$lib/components/account/TwoFactorSettings.svelte";
+import SessionSettings from "$lib/components/account/SessionSettings.svelte";
+import TokenSettings from "$lib/components/account/TokenSettings.svelte";
 
-let copied = $state(false);
-async function copy(value: string) {
-  await navigator.clipboard.writeText(value);
-  copied = true;
+let { data, form } = $props();
+const sections = [
+  { id: "password", label: "Password", icon: KeyRound },
+  { id: "two-factor", label: "Two-step sign-in", icon: ShieldCheck },
+  { id: "sessions", label: "Sessions", icon: Monitor },
+  { id: "tokens", label: "API tokens", icon: KeySquare },
+];
+
+type SectionId = (typeof sections)[number]["id"];
+function initialSection(): SectionId {
+  if (form?.setup || form?.totpError || form?.totpOff || form?.recoveryCodes) return "two-factor";
+  if (form?.sessionError || form?.endedSession) return "sessions";
+  if (form?.tokenError || form?.createdToken || form?.revokedToken || form?.confirmed) return "tokens";
+  return "password";
+}
+let active = $state<SectionId>(initialSection());
+function syncSection() {
+  const id = window.location.hash.slice(1);
+  active = sections.some((section) => section.id === id) ? id as SectionId : "password";
+}
+let orientation = $state<"horizontal" | "vertical">("horizontal");
+onMount(() => {
+  if (window.location.hash) syncSection();
+  const wide = window.matchMedia("(min-width: 768px)");
+  const syncOrientation = () => orientation = wide.matches ? "vertical" : "horizontal";
+  syncOrientation();
+  wide.addEventListener("change", syncOrientation);
+  return () => wide.removeEventListener("change", syncOrientation);
+});
+function selectSection(value: string) {
+  void goto(`#${value}`, { shallow: true });
 }
 </script>
 
-<svelte:head>
-  <title>Your account · stardust</title>
-</svelte:head>
+<svelte:window onhashchange={syncSection} />
 
-<main>
-  <h1>Your account</h1>
+<svelte:head><title>Settings · stardust</title></svelte:head>
 
-  <h2>Password</h2>
-  {#if form?.passwordError}
-    <p role="alert" data-password-error>{form.passwordError}</p>
-  {:else if form?.changed}
-    <p data-password-changed>Changed. Your other sessions and your API tokens have ended.</p>
-  {/if}
-  <form method="POST" action="?/password" data-password>
-    <label>Current password <input type="password" name="current" autocomplete="current-password" required /></label>
-    <label>New password <input type="password" name="password" autocomplete="new-password" minlength="12" required /></label>
-    <label>Again <input type="password" name="again" autocomplete="new-password" minlength="12" required /></label>
-    <button type="submit">Change password</button>
-  </form>
-
-  <h2>Two-step sign-in</h2>
-  {#if form?.totpError}<p role="alert" data-totp-error>{form.totpError}</p>{/if}
-  {#if form?.recoveryCodes}
-    <div data-recovery-codes>
-      <p>Your recovery codes. Each works once, in place of a code, if you lose your phone. Keep them somewhere safe: they are not shown again.</p>
-      <pre>{form.recoveryCodes.join("\n")}</pre>
-    </div>
-  {/if}
-  {#if data.totp.policy === "off"}
-    <p>Two-step sign-in is off on this server.</p>
-  {:else if form?.setup}
-    <p>Add this to your authenticator app, then enter the code it shows.</p>
-    <p>Secret: <code data-totp-secret>{form.setup.secret}</code></p>
-    <p>Or open this link on the phone: <code>{form.setup.uri}</code></p>
-    <form method="POST" action="?/totpConfirm">
-      <label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" required /></label>
-      <button type="submit">Turn on</button>
-    </form>
-  {:else if data.totp.enrolled && !form?.totpOff}
-    <p data-totp-on>On. {data.totp.recoveryCodesLeft} recovery code(s) left.</p>
-    <form method="POST" action="?/totpCodes">
-      <label>Code from your app <input name="code" inputmode="numeric" autocomplete="one-time-code" required /></label>
-      <button type="submit">New recovery codes</button>
-    </form>
-    {#if data.totp.policy !== "required"}
-      <form method="POST" action="?/totpOff">
-        <label>Code (or a recovery code) <input name="code" autocomplete="one-time-code" required /></label>
-        <button type="submit">Turn off</button>
-      </form>
-    {/if}
-  {:else}
-    <p data-totp-off>{data.totp.policy === "required" ? "Required on this server: set it up to continue." : "Off."}</p>
-    <form method="POST" action="?/totpSetup"><button type="submit">Set up</button></form>
-  {/if}
-
-  <h2>Sessions</h2>
-  {#if form?.sessionError}<p role="alert">{form.sessionError}</p>{/if}
-  <table>
-    <thead><tr><th>Started</th><th>Last seen</th><th>Signed in with</th><th></th></tr></thead>
-    <tbody>
-      {#each data.sessions as s (s.id)}
-        <tr data-session={s.id}>
-          <td>{time(s.createdAt)}</td>
-          <td>{time(s.lastSeenAt)}</td>
-          <td>{s.via === "oidc" ? "single sign-on" : "password"}</td>
-          <td>
-            {#if s.current}
-              this one
-            {:else}
-              <form method="POST" action="?/end">
-                <input type="hidden" name="session" value={s.id} />
-                <button type="submit">End</button>
-              </form>
-            {/if}
-          </td>
-        </tr>
+<main class="mx-auto w-full max-w-[1120px] px-5 pt-8 pb-16 sm:px-8">
+  <div class="mb-7">
+    <h1 class="m-0 text-[26px] leading-9 font-semibold tracking-[-0.035em] text-[#171719]">Settings</h1>
+    <p class="mt-1 mb-0 text-sm text-[#777980]">Manage your account and security preferences.</p>
+  </div>
+  <Tabs.Root bind:value={active} {orientation} onValueChange={selectSection} class="settings-tabs md:grid md:grid-cols-[180px_minmax(0,1fr)] md:gap-6">
+    <Tabs.List label="Account settings" class="mb-4 flex gap-1 overflow-x-auto md:mb-0 md:block">
+      {#each sections as section (section.id)}
+        <Tabs.Trigger value={section.id} class="flex min-h-10 w-auto shrink-0 items-center gap-2.5 rounded-lg border-0 bg-transparent px-3 text-left text-[13px] font-medium whitespace-nowrap text-[#66676d] hover:bg-[#efeff0] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#0066ff] data-[state=active]:bg-[#f0f1f3] data-[state=active]:text-[#171719] md:w-full"><section.icon size={16} strokeWidth={1.6} aria-hidden="true" />{section.label}</Tabs.Trigger>
       {/each}
-    </tbody>
-  </table>
-
-  <h2>API tokens</h2>
-  <p>For scripts and automation. A token acts with your roles until it expires or you revoke it.</p>
-  {#if form?.tokenError}
-    <p role="alert" data-token-error>{form.tokenError}</p>
-    {#if form.reauth}
-{#if data.sso}
-      <form method="POST" action="/login?/oidc&next=/account" data-reauth-sso>
-        <input type="hidden" name="reauth" value="1" />
-        <button type="submit">Confirm through single sign-on</button>
-      </form>
-{/if}
-      <form method="POST" action="?/reauth" data-reauth>
-        <label>Your password, or a code from your app <input name="proof" type="password" autocomplete="current-password" required /></label>
-        <button type="submit">Confirm</button>
-      </form>
-    {/if}
-  {:else if form?.confirmed}
-    <p data-confirmed>Confirmed for the next few minutes.</p>
-  {:else if form?.revokedToken}
-    <p data-token-revoked>Revoked. It no longer works.</p>
-  {/if}
-  {#if form?.createdToken}
-    <div data-new-token>
-      <p>Your new token <strong>{form.createdToken.name}</strong>. Copy it now: it is not shown again.</p>
-      <p><code data-token-value>{form.createdToken.token}</code></p>
-      <button type="button" onclick={() => form?.createdToken && copy(form.createdToken.token)}>
-        {copied ? "Copied" : "Copy"}
-      </button>
+    </Tabs.List>
+    <div class="min-w-0">
+      <Tabs.Content value="password"><PasswordSettings {form} /></Tabs.Content>
+      <Tabs.Content value="two-factor"><TwoFactorSettings {data} {form} /></Tabs.Content>
+      <Tabs.Content value="sessions"><SessionSettings {data} {form} /></Tabs.Content>
+      <Tabs.Content value="tokens"><TokenSettings {data} {form} /></Tabs.Content>
     </div>
-  {/if}
-  {#if data.tokens.length === 0}
-    <p data-no-tokens>No tokens.</p>
-  {:else}
-    <table>
-      <thead><tr><th>Name</th><th>Created</th><th>Last used</th><th>Expires</th><th></th></tr></thead>
-      <tbody>
-        {#each data.tokens as t (t.id)}
-          <tr data-token={t.id}>
-            <td>{t.name}</td>
-            <td>{time(t.createdAt)}</td>
-            <td>{t.lastUsedAt ? time(t.lastUsedAt) : "never"}</td>
-            <td>{t.expiresAt ? `${ended(t.expiresAt) ? "ended " : ""}${time(t.expiresAt)}` : "never"}</td>
-            <td>
-              <form method="POST" action="?/revokeToken">
-                <input type="hidden" name="token" value={t.id} />
-                <button type="submit">Revoke</button>
-              </form>
-            </td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-  {/if}
-  <form method="POST" action="?/createToken" data-create-token>
-    <label>Name <input name="name" maxlength="100" autocomplete="off" required value={form?.tokenName ?? ""} /></label>
-    <label>
-      Expires after
-      <select name="expiry">
-        {#each data.tokenExpiry.choices as c (c.value)}
-          <option value={c.value} selected={c.value === (form?.tokenExpiry ?? data.tokenExpiry.default)}>{c.label}</option>
-        {/each}
-      </select>
-    </label>
-    <button type="submit">Make a token</button>
-  </form>
+  </Tabs.Root>
 </main>
