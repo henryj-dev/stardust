@@ -906,6 +906,30 @@ describe("env and secrets", () => {
     assert.equal((await patch("api", { expectedRevision: await layer("api"), set: { A: "1" } }, outsider)).status, 404);
   });
 
+  it("a maintainer reveals one secret by name, audited by name and not cached; a viewer cannot, an outsider learns nothing", async () => {
+    const reveal = (headers: Record<string, string>, name = "DB_PASSWORD") =>
+      envApp.request("/api/v1/projects/envshop/env/api/reveal", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name }),
+      });
+    const res = await reveal(keeper);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await res.json(), { layer: "api", name: "DB_PASSWORD", value: SECRET });
+    const [event] = await db.sql<{ actor_name: string; target: string; detail: Record<string, unknown> }[]>`
+      SELECT actor_name, target, detail FROM audit_events WHERE action = 'env.reveal' ORDER BY id DESC LIMIT 1`;
+    assert.deepEqual([event?.actor_name, event?.target, event?.detail], ["env-keeper", "api", { name: "DB_PASSWORD" }]);
+    const kept = [logged.join("\n"), JSON.stringify((await db.sql`SELECT * FROM audit_events`).map((r) => r))].join(
+      "\n",
+    );
+    assert.ok(!kept.includes(SECRET), "the revealed value is in no log and no audit entry");
+
+    assert.equal((await reveal(viewer)).status, 403);
+    assert.equal((await reveal(outsider)).status, 404);
+    assert.equal((await reveal(keeper, "NOPE")).status, 400);
+  });
+
   it("a stale revision is 409; bad input and unknown layers are 400 with the reason", async () => {
     const stale = await layer("api");
     assert.equal((await patch("api", { expectedRevision: stale, set: { A: "1" } }, keeper)).status, 200);

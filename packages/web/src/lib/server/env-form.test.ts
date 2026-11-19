@@ -1,11 +1,18 @@
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: env values are written with ${NAME} references on purpose
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { envFormChange, valueFromFile } from "./env-form.ts";
+import { envFormChange, literalFormChange, valueFromFile } from "./env-form.ts";
 
 const form = (fields: Record<string, string>) => {
   const f = new FormData();
   for (const [k, v] of Object.entries(fields)) f.set(k, v);
   return f;
+};
+
+/** The change of a parsed form, failing the test when the form was refused. */
+const changeOf = (r: ReturnType<typeof envFormChange>) => {
+  assert.ok("change" in r, "error" in r ? r.error : "");
+  return r.change;
 };
 
 describe("env form", () => {
@@ -19,6 +26,44 @@ describe("env form", () => {
       envFormChange(form({ layer: "_shared", revision: "r", name: "KEY", value: "s3cret", kind: "secret" }), "set"),
       { layer: "_shared", name: "KEY", change: { expectedRevision: "r", setSecrets: { KEY: "s3cret" } } },
     );
+  });
+
+  it("keeps a multi-line value exactly, and sends Literal only when it changes", () => {
+    const toml = '[auth]\n  audience = "${AUDIENCE}"\n';
+    assert.deepEqual(
+      envFormChange(form({ layer: "api", revision: "r", name: "PUSH_TOML", value: toml, kind: "secret" }), "set"),
+      { layer: "api", name: "PUSH_TOML", change: { expectedRevision: "r", setSecrets: { PUSH_TOML: toml } } },
+    );
+    assert.deepEqual(
+      changeOf(envFormChange(form({ layer: "api", revision: "r", name: "S", value: "${X}", literal: "on" }), "set")),
+      { expectedRevision: "r", set: { S: "${X}" }, literal: { S: true } },
+    );
+    assert.deepEqual(
+      changeOf(envFormChange(form({ layer: "api", revision: "r", name: "S", value: "${X}", wasLiteral: "on" }), "set")),
+      { expectedRevision: "r", set: { S: "${X}" }, literal: { S: false } },
+    );
+    assert.deepEqual(
+      changeOf(
+        envFormChange(
+          form({ layer: "api", revision: "r", name: "S", value: "x", literal: "on", wasLiteral: "on" }),
+          "set",
+        ),
+      ),
+      { expectedRevision: "r", set: { S: "x" } },
+      "unchanged, so not sent",
+    );
+  });
+
+  it("toggles Literal alone", () => {
+    assert.deepEqual(literalFormChange(form({ layer: "api", revision: "r", name: "S", literal: "on" })), {
+      layer: "api",
+      name: "S",
+      change: { expectedRevision: "r", literal: { S: true } },
+    });
+    assert.deepEqual(changeOf(literalFormChange(form({ layer: "api", revision: "r", name: "S" }))), {
+      expectedRevision: "r",
+      literal: { S: false },
+    });
   });
 
   it("removes a plain value or a secret", () => {

@@ -123,8 +123,10 @@ export interface EnvLayerView {
   /** Send back as `expectedRevision` when changing this layer. */
   revision: string;
   plain: Record<string, string>;
-  /** Names only: secret values are never sent back. */
+  /** Names only; one value comes back by revealSecret. */
   secrets: string[];
+  /** Names kept as written: their ${…} and {{project.…}} are not resolved. Absent from older servers. */
+  literal?: string[];
 }
 
 /** A ConfigMap or Secret made by hand under the name stardust renders, which the next change adopts. Names only. */
@@ -155,6 +157,8 @@ export interface EnvChangeInput {
   unsetSecrets?: string[];
   /** Adopt the hand-made env even when nothing else changes. */
   adopt?: boolean;
+  /** Names to keep literal (true) or to resolve again (false). */
+  literal?: Record<string, boolean>;
 }
 
 export interface EnvChangeResult {
@@ -475,6 +479,8 @@ export interface Client {
    * input, 409 the layer changed since it was read, 403/404 no access.
    */
   changeEnv(projectId: string, layer: string, change: EnvChangeInput): Promise<EnvChangeResult>;
+  /** One secret's value, as stored (maintainers; audited by name). ApiError 400 when the layer has no such secret. */
+  revealSecret(projectId: string, layer: string, name: string): Promise<string>;
   /** The whole audit log, newest first (administrators). An ApiError carries the reason for a bad filter. */
   audit(filter?: AuditFilter): Promise<AuditPage>;
   /** One audit event (administrators); ApiError 404 when unknown. */
@@ -876,6 +882,19 @@ export function createClient(options: ClientOptions): Client {
         throw new ApiError(res.status, error || `PATCH ${path} failed: ${res.status}`);
       }
       return (await res.json()) as EnvChangeResult;
+    },
+    async revealSecret(projectId, layer, name) {
+      const path = `/api/v1/projects/${encodeURIComponent(projectId)}/env/${encodeURIComponent(layer)}/reveal`;
+      const res = await doFetch(`${base}${path}`, {
+        method: "POST",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `POST ${path} failed: ${res.status}`);
+      }
+      return ((await res.json()) as { value: string }).value;
     },
     async auditEvent(id) {
       return (await (await get(`/api/v1/audit/${encodeURIComponent(id)}`)).json()) as AuditEventView;

@@ -1,7 +1,7 @@
 import { ApiError, type Client } from "@stardust/sdk";
 import { error, fail } from "@sveltejs/kit";
 import { requireClient } from "$lib/server/api";
-import { envFormChange, valueFromFile } from "$lib/server/env-form";
+import { envFormChange, literalFormChange, valueFromFile } from "$lib/server/env-form";
 import type { Actions, PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ locals, params, url }) => {
@@ -53,6 +53,31 @@ async function adopt(client: Client, projectId: string, form: FormData) {
 }
 
 export const actions: Actions = {
+  // One secret's value, shown to the person who asked and to no one else; the server audits the asking.
+  reveal: async ({ locals, params, request, url }) => {
+    const client = requireClient(locals, url);
+    const form = await request.formData();
+    const layer = String(form.get("layer") ?? "");
+    const name = String(form.get("name") ?? "");
+    try {
+      return { revealed: { layer, name, value: await client.revealSecret(params.id, layer, name) } };
+    } catch (err) {
+      if (err instanceof ApiError && err.status < 500) return fail(err.status, { layer, name, error: err.message });
+      throw err;
+    }
+  },
+  literal: async ({ locals, params, request, url }) => {
+    const parsed = literalFormChange(await request.formData());
+    if ("error" in parsed) return fail(400, { layer: parsed.layer, name: parsed.name, error: parsed.error });
+    try {
+      const result = await requireClient(locals, url).changeEnv(params.id, parsed.layer, parsed.change);
+      return { layer: parsed.layer, name: parsed.name, result };
+    } catch (err) {
+      if (err instanceof ApiError && err.status < 500)
+        return fail(err.status, { layer: parsed.layer, name: parsed.name, error: err.message });
+      throw err;
+    }
+  },
   adopt: async ({ locals, params, request, url }) =>
     adopt(requireClient(locals, url), params.id, await request.formData()),
   set: async ({ locals, params, request, url }) =>

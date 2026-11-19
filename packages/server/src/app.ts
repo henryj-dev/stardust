@@ -108,7 +108,7 @@ import {
   resealPulls,
   writeAccess,
 } from "./access.ts";
-import { changeEnv, checkChange, EnvConflict, type EnvEditor, EnvInputError, readEnv } from "./env.ts";
+import { changeEnv, checkChange, EnvConflict, type EnvEditor, EnvInputError, readEnv, revealSecret } from "./env.ts";
 import type { RunEvents } from "./events.ts";
 import { mountFeatures } from "./features.ts";
 import { FilesConflict, FilesInputError, readFiles, writeFiles } from "./files.ts";
@@ -1435,8 +1435,8 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   });
 
   // A project's environment. Readers see plain values and the names of
-  // secrets; secret values are write-only. Maintainers change one layer at a
-  // time, against the revision they read.
+  // secrets; maintainers can show one secret by name (audited, below) and
+  // change one layer at a time, against the revision they read.
   app.get("/api/v1/projects/:id/env", async (c) => {
     const id = c.req.param("id");
     const denied = await deny(c, "project:read", id);
@@ -1484,6 +1484,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
             unset: change.unset ?? [],
             secretsSet: keys(change.setSecrets),
             secretsUnset: change.unsetSecrets ?? [],
+            ...(change.literal ? { literal: change.literal } : {}),
             ...(result.adopted.length > 0
               ? {
                   adopted: result.adopted.map((h) => ({
@@ -1506,6 +1507,31 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       log.error("changing env failed", { project: id, layer, error: (err as Error).message });
       return c.json({ error: "the deploy repository could not be changed" }, 502);
     }
+  });
+
+  // One secret's value, for someone who may change it, asked for by name. Every
+  // asking is audited (the name, never the value), and the answer is not cached.
+  app.post("/api/v1/projects/:id/env/:layer/reveal", async (c) => {
+    const id = c.req.param("id");
+    const denied = await deny(c, "project:write", id);
+    if (denied) return denied;
+    const project = await getProject(sql, id);
+    if (!project) return c.json({ error: "unknown project" }, 404);
+    if (!services.env) return c.json({ error: "editing env is not enabled on this server" }, 404);
+    const layer = c.req.param("layer");
+    const body = (await c.req.json().catch(() => null)) as { name?: unknown } | null;
+    const name = typeof body?.name === "string" ? body.name : "";
+    let value: string;
+    try {
+      value = await revealSecret(services.env, project, layer, name);
+    } catch (err) {
+      if (err instanceof EnvInputError) return c.json({ error: err.message }, 400);
+      log.error("revealing a secret failed", { project: id, layer, name, error: (err as Error).message });
+      return c.json({ error: "the deploy repository could not be read" }, 502);
+    }
+    await audit(c, { action: "env.reveal", projectId: id, target: layer, detail: { name } });
+    c.header("cache-control", "no-store");
+    return c.json({ layer, name, value });
   });
 
   app.get("/api/v1/users", async (c) => {

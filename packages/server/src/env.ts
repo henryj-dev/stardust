@@ -21,8 +21,14 @@
  * rendered names, made by hand, has them adopted into its layer by the next
  * change (env-adopt.ts); reads say which, by name.
  *
- * Secret values only go one way: into a SOPS document. Nothing here returns
- * them, logs them or puts them in a commit message — reads list secret names.
+ * Secret values go into a SOPS document and are not part of a read, a log or
+ * a commit message — reads list secret names. One value comes back only when a
+ * maintainer asks for that one by name (`revealSecret`), and the asking is
+ * audited by the caller.
+ *
+ * A layer may also have `runtime.meta.yaml`, plain, with `literal: [NAME…]`:
+ * names whose `${…}` and `{{project.…}}` are kept as they are (see core
+ * mergeEnv, which resolves the others).
  */
 import { createHash } from "node:crypto";
 import {
@@ -32,8 +38,10 @@ import {
   commitWithCas,
   DEFAULT_ENV_ROOT,
   ENV_REVISION_ANNOTATION,
+  EnvReferenceError,
   envConfigMapName,
   envSecretName,
+  literalNames,
   type MergedEnv,
   mergeEnv,
   type PendingCommit,
@@ -79,8 +87,10 @@ export interface EnvLayerView {
   /** Pass back as `expectedRevision` to change this layer. */
   revision: string;
   plain: Record<string, string>;
-  /** Names only: secret values are never read back. */
+  /** Names only: a secret's value is read back one at a time, by revealSecret. */
   secrets: string[];
+  /** Names whose references are kept as they are. */
+  literal: string[];
 }
 
 export interface EnvChange {
@@ -93,6 +103,8 @@ export interface EnvChange {
   unsetSecrets?: string[];
   /** Adopt hand-made env even when nothing else changes. */
   adopt?: boolean;
+  /** Names to keep literal (true) or to resolve again (false). */
+  literal?: Record<string, boolean>;
 }
 
 export interface EnvChangeResult {
@@ -117,11 +129,19 @@ const plainPath = (root: string | undefined, project: string, layer: string) =>
   `${layerBase(root, project, layer)}.yaml`;
 const secretPath = (root: string | undefined, project: string, layer: string) =>
   `${layerBase(root, project, layer)}.secret.enc.yaml`;
+const metaPath = (root: string | undefined, project: string, layer: string) =>
+  `${layerBase(root, project, layer)}.meta.yaml`;
+
+/** The meta file for these literal names, or null when there are none. */
+function writeMeta(literal: Iterable<string>): string | null {
+  const names = [...new Set(literal)].sort();
+  return names.length === 0 ? null : new Document({ literal: names }).toString();
+}
 const dirOf = (c: Component) => c.deployDir.replace(/\/+$/, "");
 
-function layerRevision(plainText: string | null, secretText: string | null): string {
+function layerRevision(plainText: string | null, secretText: string | null, metaText: string | null = null): string {
   return createHash("sha256")
-    .update(JSON.stringify([plainText, secretText]))
+    .update(JSON.stringify(metaText === null ? [plainText, secretText] : [plainText, secretText, metaText]))
     .digest("hex")
     .slice(0, 20);
 }
@@ -172,11 +192,13 @@ async function readLayers(
   for (const layer of layersOf(project)) {
     const plainText = (await editor.repo.readFile(plainPath(editor.root, project.id, layer), head))?.content ?? null;
     const secretText = (await editor.repo.readFile(secretPath(editor.root, project.id, layer), head))?.content ?? null;
+    const metaText = (await editor.repo.readFile(metaPath(editor.root, project.id, layer), head))?.content ?? null;
     layers.push({
       layer,
-      revision: layerRevision(plainText, secretText),
+      revision: layerRevision(plainText, secretText, metaText),
       plain: plainText === null ? {} : stringMap(parse(plainText)),
       secrets: secretNames(secretText),
+      literal: literalNames(metaText),
     });
   }
   const at: BoundRepo = { read: (p) => editor.repo.readFile(p, head), list: (p) => editor.repo.listDir(p, head) };
@@ -202,7 +224,18 @@ export function checkChange(change: unknown): EnvChange {
     throw new EnvInputError("a JSON object is required");
   const c = change as Record<string, unknown>;
   for (const key of Object.keys(c)) {
-    if (!["expectedRevision", "set", "unset", "setSecrets", "unsetSecrets", "plainOnPurpose", "adopt"].includes(key))
+    if (
+      ![
+        "expectedRevision",
+        "set",
+        "unset",
+        "setSecrets",
+        "unsetSecrets",
+        "plainOnPurpose",
+        "adopt",
+        "literal",
+      ].includes(key)
+    )
       throw new EnvInputError(`unknown field "${key}"`);
   }
   if (typeof c.expectedRevision !== "string" || !/^[0-9a-f]{20}$/.test(c.expectedRevision))
@@ -230,6 +263,17 @@ export function checkChange(change: unknown): EnvChange {
     return v as string[];
   };
   if (c.adopt !== undefined && typeof c.adopt !== "boolean") throw new EnvInputError("adopt must be true or false");
+  let literal: Record<string, boolean> | undefined;
+  if (c.literal !== undefined) {
+    if (!c.literal || typeof c.literal !== "object" || Array.isArray(c.literal))
+      throw new EnvInputError("literal must be an object of names to true or false");
+    for (const [k, v] of Object.entries(c.literal)) {
+      if (!ENV_KEY.test(k))
+        throw new EnvInputError(`literal: "${k.slice(0, 130)}" is not an environment variable name`);
+      if (typeof v !== "boolean") throw new EnvInputError(`literal.${k} must be true or false`);
+    }
+    literal = c.literal as Record<string, boolean>;
+  }
   const out: EnvChange = {
     expectedRevision: c.expectedRevision,
     set: map("set"),
@@ -238,6 +282,7 @@ export function checkChange(change: unknown): EnvChange {
     unsetSecrets: list("unsetSecrets"),
     ...(c.plainOnPurpose !== undefined ? { plainOnPurpose: list("plainOnPurpose") } : {}),
     ...(c.adopt === true ? { adopt: true } : {}),
+    ...(literal ? { literal } : {}),
   };
   // A plain value is committed to Git as it is: refuse one whose name says it is a secret.
   const leaking = plaintextSecrets(out.set ?? {}, out.plainOnPurpose);
@@ -252,9 +297,15 @@ export function checkChange(change: unknown): EnvChange {
     ...Object.keys(out.setSecrets ?? {}),
     ...(out.unsetSecrets ?? []),
   ];
-  if (names.length === 0 && !out.adopt) throw new EnvInputError("nothing to change");
-  if (names.length > MAX_ENV_CHANGES) throw new EnvInputError(`at most ${MAX_ENV_CHANGES} changes at once`);
+  const flags = Object.keys(out.literal ?? {});
+  if (names.length === 0 && flags.length === 0 && !out.adopt) throw new EnvInputError("nothing to change");
+  if (names.length + flags.length > MAX_ENV_CHANGES)
+    throw new EnvInputError(`at most ${MAX_ENV_CHANGES} changes at once`);
   if (new Set(names).size !== names.length) throw new EnvInputError("each name may appear once in a change");
+  for (const k of flags) {
+    if (out.literal?.[k] && ((out.unset ?? []).includes(k) || (out.unsetSecrets ?? []).includes(k)))
+      throw new EnvInputError(`${k} is removed in this change: it cannot be made literal too`);
+  }
   return out;
 }
 
@@ -356,9 +407,11 @@ async function applyChange(
     async (_head, at) => {
       const pPath = plainPath(editor.root, project.id, layer);
       const sPath = secretPath(editor.root, project.id, layer);
+      const mPath = metaPath(editor.root, project.id, layer);
       let plainText = (await at.read(pPath))?.content ?? null;
       let secretText = (await at.read(sPath))?.content ?? null;
-      if (layerRevision(plainText, secretText) !== change.expectedRevision) {
+      const metaText = (await at.read(mPath))?.content ?? null;
+      if (layerRevision(plainText, secretText, metaText) !== change.expectedRevision) {
         throw new EnvConflict("the env changed since you read it; reload it and make your change again");
       }
 
@@ -434,16 +487,36 @@ async function applyChange(
       }
       if (newSecret !== secretText) files.set(sPath, newSecret);
 
+      // Literal names: set as asked, and a name the layer no longer has drops its flag.
+      const literal = new Set(literalNames(metaText));
+      for (const [k, on] of Object.entries(change.literal ?? {})) {
+        if (on && !(k in plain) && !(k in secrets)) throw new EnvInputError(`${k} is not set in this layer`);
+        if (on) literal.add(k);
+        else literal.delete(k);
+      }
+      for (const k of [...literal]) if (!(k in plain) && !(k in secrets)) literal.delete(k);
+      const newMeta = writeMeta(literal);
+      // Compared by the names, so a meta file written by hand in another style is not rewritten for nothing.
+      if (literalNames(newMeta).join("\n") !== [...new Set(literalNames(metaText))].sort().join("\n"))
+        files.set(mPath, newMeta);
+
       const rendered: Array<{ name: string; envRevision: string; consumers: string[] }> = [];
       for (const component of components) {
         const dir = dirOf(component);
-        const merged: MergedEnv[] = await mergeEnv({
-          read,
-          decrypt: (d) => editor.codec.decrypt(d),
-          project: project.id,
-          ...(editor.root ? { root: editor.root } : {}),
-          component: component.name,
-        });
+        let merged: MergedEnv[];
+        try {
+          merged = await mergeEnv({
+            read,
+            decrypt: (d) => editor.codec.decrypt(d),
+            project: project.id,
+            ...(editor.root ? { root: editor.root } : {}),
+            component: component.name,
+          });
+        } catch (err) {
+          // A reference that cannot be resolved: the change is refused, naming the keys.
+          if (err instanceof EnvReferenceError) throw new EnvInputError(`${component.name}: ${err.message}`);
+          throw err;
+        }
         const env = renderEnv({
           merged,
           component: component.name,
@@ -486,6 +559,7 @@ async function applyChange(
         revision: layerRevision(
           files.has(pPath) ? (files.get(pPath) ?? null) : plainText,
           files.has(sPath) ? (files.get(sPath) ?? null) : secretText,
+          files.has(mPath) ? (files.get(mPath) ?? null) : metaText,
         ),
         components: rendered,
         adopted,
@@ -510,6 +584,26 @@ async function applyChange(
   };
 }
 
+/**
+ * One secret's value, as stored in the layer (its references unresolved), for
+ * a maintainer who asked for it by name. The caller checks the permission and
+ * audits the asking; nothing here logs the value.
+ */
+export function revealSecret(editor: EnvEditor, project: Project, layer: string, name: string): Promise<string> {
+  if (!layersOf(project).includes(layer))
+    return Promise.reject(new EnvInputError(`"${layer}" is not a layer of this project`));
+  if (!ENV_KEY.test(name)) return Promise.reject(new EnvInputError("not an environment variable name"));
+  return serially(editor.repo, async () => {
+    const head = await editor.repo.headSha();
+    const text = (await editor.repo.readFile(secretPath(editor.root, project.id, layer), head))?.content ?? null;
+    if (text === null) throw new EnvInputError(`${layer} has no secret named ${name}`);
+    const values = stringMap((parse(await editor.codec.decrypt(text)) as { stringData?: unknown } | null)?.stringData);
+    const value = values[name];
+    if (value === undefined) throw new EnvInputError(`${layer} has no secret named ${name}`);
+    return value;
+  });
+}
+
 /** Names what changed, never a value. */
 export function commitMessage(
   project: string,
@@ -524,6 +618,14 @@ export function commitMessage(
   if (change.unset?.length) parts.push(`unset ${change.unset.join(", ")}`);
   if (names(change.setSecrets).length) parts.push(`set secrets ${names(change.setSecrets).join(", ")}`);
   if (change.unsetSecrets?.length) parts.push(`unset secrets ${change.unsetSecrets.join(", ")}`);
+  const on = Object.entries(change.literal ?? {})
+    .filter(([, v]) => v)
+    .map(([k]) => k);
+  const off = Object.entries(change.literal ?? {})
+    .filter(([, v]) => !v)
+    .map(([k]) => k);
+  if (on.length) parts.push(`literal ${on.join(", ")}`);
+  if (off.length) parts.push(`resolve ${off.join(", ")}`);
   for (const h of adopted)
     parts.push(`adopt ${h.kind} ${h.name} from ${h.path.split("/").pop()} (${h.keys.join(", ")})`);
   return `chore(env): ${project}/${layer} — ${parts.join("; ")}\n\nChanged by ${by} in stardust.`;

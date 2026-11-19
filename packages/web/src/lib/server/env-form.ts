@@ -22,20 +22,37 @@ export function envFormChange(
       change: secret ? { expectedRevision, unsetSecrets: [name] } : { expectedRevision, unset: [name] },
     };
   }
+  // Taken exactly as typed or read from a file: newlines, a trailing one included, and leading spaces are kept.
   const value = String(form.get("value") ?? "");
   if (secret && value === "") return { error: "Enter the secret's value.", layer, name };
+  // Literal: sent only when it changes, so saving a value leaves its flag as it was.
+  const literal = form.get("literal") === "on";
+  const flag = literal !== (form.get("wasLiteral") === "on") ? { literal: { [name]: literal } } : {};
   return {
     layer,
     name,
     change: secret
-      ? { expectedRevision, setSecrets: { [name]: value } }
+      ? { expectedRevision, setSecrets: { [name]: value }, ...flag }
       : {
           expectedRevision,
           set: { [name]: value },
           // The person said this value is public, though its name looks like a secret's.
           ...(form.get("public") === "on" ? { plainOnPurpose: [name] } : {}),
+          ...flag,
         },
   };
+}
+
+/** Turns one name's Literal on or off, without touching its value. */
+export function literalFormChange(
+  form: FormData,
+): { layer: string; name: string; change: EnvChangeInput } | { error: string; layer: string; name: string } {
+  const layer = String(form.get("layer") ?? "");
+  const name = String(form.get("name") ?? "").trim();
+  const expectedRevision = String(form.get("revision") ?? "");
+  if (!layer || !expectedRevision || !name)
+    return { error: "The form is missing its layer; reload the page.", layer, name };
+  return { layer, name, change: { expectedRevision, literal: { [name]: form.get("literal") === "on" } } };
 }
 
 /** The most a value may be, as the server allows. */
