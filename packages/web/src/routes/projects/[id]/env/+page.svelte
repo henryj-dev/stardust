@@ -91,6 +91,21 @@ const revealed = (layer: string, name: string) =>
                   </td>
                   {#if data.env.canEdit}
                     <td>
+                      <details data-env-edit={name}>
+                        <summary>Edit</summary>
+                        <form method="POST" action="?/set" enctype="multipart/form-data">
+                          <input type="hidden" name="layer" value={layer.layer} />
+                          <input type="hidden" name="revision" value={layer.revision} />
+                          <input type="hidden" name="name" value={name} />
+                          <input type="hidden" name="kind" value="plain" />
+                          {#if isLiteral(layer, name)}<input type="hidden" name="wasLiteral" value="on" />{/if}
+                          <textarea name="value" rows={Math.min(12, value.split("\n").length + 1)} autocomplete="off"
+                            spellcheck="false" aria-label={`Value of ${name}`}>{value}</textarea>
+                          <label><input type="checkbox" name="literal" checked={isLiteral(layer, name)} /> Literal</label>
+                          <label><input type="checkbox" name="public" /> The value is public</label>
+                          <button type="submit">Save</button>
+                        </form>
+                      </details>
                       <form method="POST" action="?/literal">
                         <input type="hidden" name="layer" value={layer.layer} />
                         <input type="hidden" name="revision" value={layer.revision} />
@@ -139,8 +154,10 @@ const revealed = (layer: string, name: string) =>
                         <input type="hidden" name="name" value={name} />
                         <input type="hidden" name="kind" value="secret" />
                         {#if isLiteral(layer, name)}<input type="hidden" name="wasLiteral" value="on" />{/if}
-                        <textarea name="value" rows="2" autocomplete="off" spellcheck="false"
-                          aria-label={`New value for ${name}`} placeholder="new value (several lines are fine)"></textarea>
+                        <!-- Shown, the value is here to edit; hidden, the field is empty and a new value replaces it. -->
+                        <textarea name="value" rows={shown === null ? 2 : Math.min(12, shown.split("\n").length + 1)}
+                          autocomplete="off" spellcheck="false" aria-label={`New value for ${name}`}
+                          placeholder="new value (several lines are fine)">{shown ?? ""}</textarea>
                         <input type="file" name="file" aria-label={`Or a file for ${name}`} />
                         <label><input type="checkbox" name="literal" checked={isLiteral(layer, name)} /> Literal</label>
                         <button type="submit">Replace</button>
