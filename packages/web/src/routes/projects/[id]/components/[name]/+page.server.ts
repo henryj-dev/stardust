@@ -3,6 +3,7 @@ import { error, fail } from "@sveltejs/kit";
 import type { RuntimeView } from "$lib/runtime";
 import { requireClient } from "$lib/server/api";
 import { readMounts } from "$lib/server/files-form";
+import { readStorageForm } from "$lib/server/storage-form";
 import type { Actions, PageServerLoad } from "./$types";
 
 interface EnvLanding {
@@ -42,12 +43,17 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       if (err instanceof ApiError && err.status === 404) return null;
       throw err;
     });
+    const storage = await client.componentStorage(params.id, params.name).catch((err) => {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    });
     const access = await client.componentAccess(params.id, params.name).catch((err) => {
       if (err instanceof ApiError && err.status === 404) return null;
       throw err;
     });
     return {
       files,
+      storage,
       access,
       projectId: params.id,
       component: params.name,
@@ -126,6 +132,22 @@ export const actions: Actions = {
     } catch (err) {
       const r = reason(err);
       return fail(r.status, { filesError: r.message });
+    }
+  },
+  storage: async ({ locals, params, request, url }) => {
+    const client = requireClient(locals, url);
+    const form = await request.formData();
+    const change = readStorageForm(form);
+    // Deleting data cannot be undone: it needs its own confirmation box.
+    if (change.deleteData?.length && form.get("confirmDelete") !== "on") {
+      return fail(400, { storageError: "Tick the confirmation to delete data: it cannot be undone." });
+    }
+    try {
+      const result = await client.setComponentStorage(params.id, params.name, change);
+      return { storageSaved: result };
+    } catch (err) {
+      const r = reason(err);
+      return fail(r.status, { storageError: r.message });
     }
   },
   // Points the component back at an earlier delivery. The server checks write access.

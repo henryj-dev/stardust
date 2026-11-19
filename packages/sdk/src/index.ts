@@ -8,6 +8,7 @@ export type {
   ClientOptions,
   ComponentAccess,
   ComponentFiles,
+  ComponentStorage,
   Delivery,
   EnvChangeInput,
   EnvChangeResult,
@@ -27,6 +28,8 @@ export type {
   RunView,
   SessionInfo,
   SessionUser,
+  StorageChange,
+  StorageVolume,
   TotpState,
   UserView,
 } from "./client.ts";

@@ -451,6 +451,7 @@ form[data-delete-project] button[type="submit"] {
 [data-access="ok"],
 p[data-scaffolded],
 p[data-files-saved],
+p[data-storage-saved],
 p[data-access-saved],
 p[data-resealed],
 p[data-restarted],

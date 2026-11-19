@@ -740,6 +740,29 @@ maintainers). A key the component's env Secret does not have is refused. When
 a secret changes, the env change rolls the workload out, which mounts the new
 file.
 
+**Persistent storage.** A component that keeps state on disk (a SQLite file,
+uploads) gets volumes on its page, Storage: a name, a path in the container,
+a size and optionally a StorageClass (the cluster's default otherwise). For
+each one stardust writes a claim `<component>-<name>` in
+`storage-<name>.pvc.yaml` next to the manifests, lists it in the
+kustomization, and mounts it as the pod volume `storage-<name>`, as one commit
+(`PUT /api/v1/projects/<id>/components/<name>/storage` with
+`{"volumes": [{"name": "data", "mountPath": "/var/lib/app", "size": "1Gi"}],
+"fsGroup": 10001}`, for maintainers). `fsGroup` lets an image's non-root user
+write the volume. With a volume, a Deployment rolls one pod at a time with the
+old one stopped first (`maxSurge: 0`, `maxUnavailable: 1`), because a
+ReadWriteOnce claim is written by one pod; the strategy type is not switched
+to `Recreate`, which an applied Deployment refuses.
+
+Data is not deleted by accident: removing a volume unmounts it and keeps its
+claim, listed as kept; only `"deleteData": ["<name>"]` (a confirmation on the
+page) removes the claim file, which deletes the claim and its data when the
+GitOps controller prunes it. A size can grow, not shrink, and a claim's class
+does not change. A claim mounted under these names already, for example
+added by hand, is the component's storage as it stands; another claim the
+workload mounts is listed and can be taken over with `"adopt": ["<volume>"]`,
+which renames only the pod volume and leaves the claim where it is.
+
 With the runtime plugin, a component's page shows whether its env has
 **landed**: committed but not applied yet, applied but still rolling out, or
 running with it — from the env ConfigMap's revision and the workload's pod
