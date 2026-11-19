@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: env values are written with ${NAME} references on purpose
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ENV_REVISION_ANNOTATION, setFileMounts } from "@stardust/core";
@@ -12,6 +13,7 @@ import {
   type EnvEditor,
   EnvInputError,
   readEnv,
+  revealSecret,
   SHARED_LAYER,
 } from "./env.ts";
 import { fakeCodec } from "./env-testing.ts";
@@ -330,6 +332,119 @@ describe("env editing", () => {
     );
     assert.match(message, /set PORT; set secrets PASS; unset secrets OLD/);
     assert.ok(!message.includes(CANARY));
+  });
+});
+
+describe("references, literal values, multi-line values and revealing a secret", () => {
+  const renderedSecret = async (codec: ReturnType<typeof fakeCodec>, files: Record<string, string>) =>
+    (
+      parse(await codec.decrypt(files["deploy/apps/shop/api/env.secret.enc.yaml"] as string)) as {
+        stringData: Record<string, string>;
+      }
+    ).stringData;
+  const configMapOf = (files: Record<string, string>) =>
+    (parse(files["deploy/apps/shop/api/env.configmap.yaml"] as string) as { data: Record<string, string> }).data;
+
+  it("renders references resolved, keeps a multi-line secret's lines, and stores the layer as written", async () => {
+    const { repo, codec, editor } = setup();
+    const toml = `[auth]\naudience = "\${AUDIENCE}"\ntoken = "\${TOKEN}"\nshared = "{{project.LOG_LEVEL}}"\n`;
+    await changeEnv(
+      editor,
+      project,
+      "api",
+      {
+        expectedRevision: await revisionOf(editor, "api"),
+        set: { AUDIENCE: "push.example", URL: "https://${AUDIENCE}/v1" },
+        setSecrets: { TOKEN: CANARY, PUSH_TOML: toml },
+      },
+      "alice",
+    );
+    const files = repo.files();
+    assert.equal(configMapOf(files).URL, "https://push.example/v1");
+    assert.equal(
+      (await renderedSecret(codec, files)).PUSH_TOML,
+      `[auth]\naudience = "push.example"\ntoken = "${CANARY}"\nshared = "info"\n`,
+      "resolved, newlines and the trailing one kept",
+    );
+    // The layer keeps what was written; only the rendered env is resolved.
+    assert.equal(parse(files["deploy/env/shop/api/runtime.yaml"] as string).URL, "https://${AUDIENCE}/v1");
+  });
+
+  it("a literal value is rendered as written, and the flag goes with its name", async () => {
+    const { repo, editor } = setup();
+    await changeEnv(
+      editor,
+      project,
+      "api",
+      { expectedRevision: await revisionOf(editor, "api"), set: { SCRIPT: "echo ${HOME}" }, literal: { SCRIPT: true } },
+      "alice",
+    );
+    assert.equal(configMapOf(repo.files()).SCRIPT, "echo ${HOME}");
+    assert.equal(repo.files()["deploy/env/shop/api/runtime.meta.yaml"], "literal:\n  - SCRIPT\n");
+    const view = (await readEnv(editor, project)).layers.find((l) => l.layer === "api");
+    assert.deepEqual(view?.literal, ["SCRIPT"]);
+    // Turning it off resolves it: ${HOME} is not set, so the change is refused and nothing is written.
+    const before = repo.commitCount();
+    await assert.rejects(
+      changeEnv(
+        editor,
+        project,
+        "api",
+        { expectedRevision: view?.revision as string, literal: { SCRIPT: false } },
+        "alice",
+      ),
+      (err: Error) => err instanceof EnvInputError && /api: SCRIPT uses HOME, which is not set/.test(err.message),
+    );
+    assert.equal(repo.commitCount(), before);
+    // Removing the name removes its flag, and the meta file with the last one.
+    await changeEnv(editor, project, "api", { expectedRevision: view?.revision as string, unset: ["SCRIPT"] }, "alice");
+    assert.equal(repo.files()["deploy/env/shop/api/runtime.meta.yaml"], undefined);
+  });
+
+  it("refuses a plain value that uses a secret, naming keys and never the value", async () => {
+    const { repo, editor } = setup();
+    await assert.rejects(
+      changeEnv(
+        editor,
+        project,
+        "api",
+        {
+          expectedRevision: await revisionOf(editor, "api"),
+          set: { DSN: "user:${DB_PASSWORD}@db" },
+          setSecrets: { DB_PASSWORD: CANARY },
+        },
+        "alice",
+      ),
+      (err: Error) =>
+        err instanceof EnvInputError &&
+        /DSN is a plain value and uses the secret DB_PASSWORD/.test(err.message) &&
+        !err.message.includes(CANARY),
+    );
+    assert.equal(repo.commitCount(), 0);
+  });
+
+  it("reveals one secret by name, as stored, and refuses a name the layer does not have", async () => {
+    const { editor } = setup();
+    await changeEnv(
+      editor,
+      project,
+      "api",
+      { expectedRevision: await revisionOf(editor, "api"), setSecrets: { DB_PASSWORD: CANARY, LINES: "a\nb\n" } },
+      "alice",
+    );
+    assert.equal(await revealSecret(editor, project, "api", "DB_PASSWORD"), CANARY);
+    assert.equal(await revealSecret(editor, project, "api", "LINES"), "a\nb\n");
+    await assert.rejects(revealSecret(editor, project, "api", "NOPE"), EnvInputError);
+    await assert.rejects(revealSecret(editor, project, "nowhere", "DB_PASSWORD"), EnvInputError);
+    await assert.rejects(revealSecret(editor, project, SHARED_LAYER, "DB_PASSWORD"), EnvInputError);
+  });
+
+  it("checks the literal field", () => {
+    const base = { expectedRevision: "0".repeat(20) };
+    assert.deepEqual(checkChange({ ...base, literal: { A: true } }).literal, { A: true });
+    assert.throws(() => checkChange({ ...base, literal: { A: "yes" } }), /literal\.A must be true or false/);
+    assert.throws(() => checkChange({ ...base, literal: { "1A": true } }), /not an environment variable name/);
+    assert.throws(() => checkChange({ ...base, unset: ["A"], literal: { A: true } }), /cannot be made literal/);
   });
 });
 

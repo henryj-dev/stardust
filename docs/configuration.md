@@ -697,7 +697,11 @@ no other change). A Secret by that name that is not `Opaque` is refused.
 
 - **Reading** (`/projects/<id>/env`, `GET /api/v1/projects/<id>/env`) is for
   anyone who can read the project: plain values, and the **names** of
-  secrets. A secret's value is never shown or returned again once saved.
+  secrets. A secret's value is hidden; the project's maintainers and
+  administrators can show one by name ("Show" on the env page, or
+  `POST /api/v1/projects/<id>/env/<layer>/reveal` with `{"name": "…"}`). The
+  answer is not cached, and each showing is in the audit log as `env.reveal`
+  with the name, never the value.
 - **Changing** is for the project's maintainers and administrators, one layer
   at a time (`PATCH /api/v1/projects/<id>/env/<layer>` with `set`, `unset`,
   `setSecrets`, `unsetSecrets` and the `expectedRevision` read). Each change is
@@ -708,6 +712,19 @@ no other change). A Secret by that name that is not `Opaque` is refused.
   Setting values that are already there commits nothing.
 - Names are environment variable names; a value is at most 32 KiB; one name is
   plain or secret within a layer, and setting it as one removes the other.
+  A value may span several lines (a key, a config file); it is kept exactly,
+  a trailing newline included.
+- **References**, as in Coolify: a value may use `${NAME}`, NAME as the
+  component ends up with it after the layers are merged, and
+  `{{project.NAME}}`, NAME at the project level (the global and shared
+  layers, before the component's own); `$${` is a literal `${`. They are
+  resolved when the env is rendered, in multi-line values too, so a config
+  file kept as a secret can take other secrets; the layer keeps what was
+  written. **Literal** (`"literal": {"NAME": true}` in a change, kept in the
+  layer's `runtime.meta.yaml`) leaves a value as written. A change is refused
+  (400, naming the keys) when a reference names nothing, references go round
+  in a circle, or a plain value uses a secret, which would put the secret in
+  the ConfigMap in clear.
 - On the env page a value can be given as a file instead of typed (a key, a
   JSON credential, a config file): UTF-8 text, taken as it is, newlines
   included.
