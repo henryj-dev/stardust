@@ -96,6 +96,19 @@ export function databaseProviderContract(name: string, make: () => Promise<Datab
       assert.ok(!all.some((d) => d.kind === "Secret"), "the password Secret is the feature's to write, sealed");
     });
 
+    it("names the labels that select a new instance's pods, which its pods carry", async () => {
+      const p = await make();
+      const selector = p.instanceSelector("orders");
+      assert.ok(Object.keys(selector).length > 0);
+      const pods = docs(p.renderInstance(spec(p)))
+        .map((d) => (d as { spec?: { template?: { metadata?: { labels?: Record<string, string> } } } }).spec?.template)
+        .filter((t) => t !== undefined);
+      assert.ok(pods.length > 0, "something runs pods");
+      for (const t of pods)
+        for (const [k, v] of Object.entries(selector)) assert.equal(t?.metadata?.labels?.[k], v, `the pods carry ${k}`);
+      assert.notDeepEqual(p.instanceSelector("billing"), selector, "two instances are told apart");
+    });
+
     it("renders an application's grant as one Job, refusing names that would need quoting", async () => {
       const p = await make();
       const files = p.renderAppGrant(target(p), grant);

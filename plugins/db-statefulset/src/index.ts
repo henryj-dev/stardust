@@ -4,16 +4,27 @@
  *   db-statefulset:
  *     namespace: stardust-databases      # where new instances go
  *     namespaces: [apps, tools]          # optional: where else to find instances to adopt
- *     image: postgres                    # optional: the repository; tags are <version>-alpine
+ *     image: registry.example.com/postgres  # optional: another repository; tags are <version>-alpine
+ *     images:                            # optional: an image per version, pinned by digest
+ *       "17": registry.example.com/postgres:17.12-alpine@sha256:<digest>
  *     versions: ["16", "17"]             # optional
+ *
+ * Without `image`, new instances run the official image pinned by digest
+ * (POSTGRES_IMAGES); `images` pins a version in any repository.
  *
  * It needs get/list on statefulsets in those namespaces (the chart's
  * `databases.namespaces`).
  */
 import { definePlugin, isKubeName } from "@stardust/core";
-import { statefulSetPostgres } from "./statefulset.ts";
+import { PINNED_IMAGE, statefulSetPostgres } from "./statefulset.ts";
 
-export { majorOf, type StatefulSetOptions, statefulSetPostgres } from "./statefulset.ts";
+export {
+  majorOf,
+  PINNED_IMAGE,
+  POSTGRES_IMAGES,
+  type StatefulSetOptions,
+  statefulSetPostgres,
+} from "./statefulset.ts";
 
 export const plugin = definePlugin({
   manifest: { name: "db-statefulset", description: "PostgreSQL as a plain StatefulSet." },
@@ -22,7 +33,8 @@ export const plugin = definePlugin({
     const s = section as Record<string, unknown>;
     const problems: string[] = [];
     for (const key of Object.keys(s))
-      if (!["namespace", "namespaces", "image", "versions"].includes(key)) problems.push(`unknown key "${key}"`);
+      if (!["namespace", "namespaces", "image", "images", "versions"].includes(key))
+        problems.push(`unknown key "${key}"`);
     if (!isKubeName(s.namespace)) problems.push("namespace must be a namespace name");
     if (s.namespaces !== undefined && (!Array.isArray(s.namespaces) || !s.namespaces.every(isKubeName))) {
       problems.push("namespaces must be a list of namespace names");
@@ -38,6 +50,17 @@ export const plugin = definePlugin({
     ) {
       problems.push('versions must be a list of major versions, e.g. ["17"]');
     }
+    if (s.images !== undefined) {
+      if (typeof s.images !== "object" || s.images === null || Array.isArray(s.images)) {
+        problems.push("images must map major versions to images pinned by digest");
+      } else {
+        for (const [v, ref] of Object.entries(s.images)) {
+          if (!/^\d{2}$/.test(v)) problems.push(`images: "${v}" is not a major version`);
+          if (typeof ref !== "string" || !PINNED_IMAGE.test(ref))
+            problems.push(`images.${v} must be an image pinned by digest (…@sha256:<64 hex>)`);
+        }
+      }
+    }
     return problems;
   },
   provides: {
@@ -46,7 +69,13 @@ export const plugin = definePlugin({
     async create({ config, ports }) {
       // Outside a cluster there is nothing to run databases on.
       if (!ports.kube) return {};
-      const c = config as { namespace: string; namespaces?: string[]; image?: string; versions?: string[] };
+      const c = config as {
+        namespace: string;
+        namespaces?: string[];
+        image?: string;
+        images?: Record<string, string>;
+        versions?: string[];
+      };
       return {
         databases: {
           statefulset: statefulSetPostgres({
@@ -54,6 +83,7 @@ export const plugin = definePlugin({
             namespace: c.namespace,
             namespaces: c.namespaces ?? [],
             ...(c.image ? { image: c.image } : {}),
+            ...(c.images ? { images: c.images } : {}),
             ...(c.versions ? { versions: c.versions } : {}),
           }),
         },

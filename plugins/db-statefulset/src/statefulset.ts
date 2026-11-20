@@ -34,8 +34,13 @@ export interface StatefulSetOptions {
   namespace: string;
   /** Where to look for instances, the namespace above included. */
   namespaces: readonly string[];
-  /** The image repository; the tag is `<version>-alpine`. */
+  /**
+   * The image repository; the tag is `<version>-alpine`. Without it, the
+   * official image pinned by digest (POSTGRES_IMAGES).
+   */
   image?: string;
+  /** An image per major version, pinned by digest; these win over `image`. */
+  images?: Readonly<Record<string, string>>;
   versions?: readonly string[];
 }
 
@@ -43,6 +48,7 @@ interface StatefulSetObject {
   metadata: { name: string; namespace: string; labels?: Record<string, string> };
   spec?: {
     replicas?: number;
+    selector?: { matchLabels?: Record<string, string>; matchExpressions?: unknown[] };
     serviceName?: string;
     template?: {
       spec?: {
@@ -68,6 +74,19 @@ const doc = (o: unknown) => stringify(o, { lineWidth: 0, aliasDuplicateObjects: 
 /** Official images for the backup steps, pinned by digest (the tag is for people). */
 export const SOPS_IMAGE =
   "ghcr.io/getsops/sops:v3.13.3-alpine@sha256:ae501277bf742f1662e0f881f43dd8fd6798b489a8058e921dbf6cda597140ea";
+/**
+ * The official PostgreSQL images new instances run, pinned by digest: a tag
+ * can be moved under a running instance's next restart, a digest cannot.
+ * Alpine, like the tags used before them: an instance moved to the Debian
+ * images could sort text differently (another libc), so existing instances
+ * keep the image they were created with — only new ones get these.
+ */
+export const POSTGRES_IMAGES: Readonly<Record<string, string>> = {
+  "16": "docker.io/library/postgres:16.16-alpine@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857",
+  "17": "docker.io/library/postgres:17.12-alpine@sha256:526f86d93c6ea08fd3f1fe5605650cacc781b2c6013169a0ad8f42c7d3d84f32",
+};
+/** A reference pinned by digest. */
+export const PINNED_IMAGE = /^[a-z0-9][a-z0-9./_:-]*@sha256:[0-9a-f]{64}$/;
 export const AWS_CLI_IMAGE =
   "docker.io/amazon/aws-cli:2.40.3@sha256:33a16c53ea442e918b58df67301ad76a8fb57082c39f7e78753b898c3f3e87c2";
 
@@ -129,6 +148,13 @@ function stateOf(o: StatefulSetObject): DatabaseState | null {
   return {
     ref: { namespace: o.metadata.namespace, name: o.metadata.name },
     service: o.spec?.serviceName ?? null,
+    // Only plain labels can be copied into another Service's selector.
+    selector:
+      o.spec?.selector?.matchLabels &&
+      Object.keys(o.spec.selector.matchLabels).length > 0 &&
+      (o.spec.selector.matchExpressions?.length ?? 0) === 0
+        ? { ...o.spec.selector.matchLabels }
+        : null,
     image: pg.image,
     version: majorOf(pg.image),
     desiredReplicas: desired,
@@ -144,7 +170,10 @@ function stateOf(o: StatefulSetObject): DatabaseState | null {
 
 export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvider {
   const versions = options.versions ?? ["16", "17"];
-  const image = options.image ?? "postgres";
+  const repository = options.image ?? null;
+  // The official image's pins hold for the official repository only.
+  const official = repository === null || repository === "postgres" || repository === "docker.io/library/postgres";
+  const pins = { ...(official ? POSTGRES_IMAGES : {}), ...(options.images ?? {}) };
   const namespaces = [...new Set([options.namespace, ...options.namespaces])];
   const get = async (path: string) => {
     const res = await options.kube.request("GET", path);
@@ -152,7 +181,7 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
     if (res.status !== 200) throw new Error(`kube GET ${path} answered ${res.status}`);
     return JSON.parse(res.body) as unknown;
   };
-  const pgImage = (version: string) => `${image}:${version}-alpine`;
+  const pgImage = (version: string) => pins[version] ?? `${repository ?? "postgres"}:${version}-alpine`;
   /** The newest client dumps every older server. */
   const newest = () => [...versions].sort((a, b) => Number(b) - Number(a))[0] ?? "17";
   const passwordEnv = (name: string, ref: { name: string; key: string }) => ({
@@ -198,6 +227,7 @@ export function statefulSetPostgres(options: StatefulSetOptions): DatabaseProvid
     },
 
     superuserSecret: (name) => ({ name: `${name}-superuser`, key: "password" }),
+    instanceSelector: (name) => ({ "app.kubernetes.io/name": name }),
 
     renderInstance(spec: DatabaseSpec) {
       const problems = databaseSpecProblems(spec, versions);

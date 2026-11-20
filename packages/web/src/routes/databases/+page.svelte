@@ -1,5 +1,7 @@
 <script lang="ts">
 let { data, form } = $props();
+const shown = (name: string) =>
+  form && "connection" in form && form.connection?.name === name ? form.connection : null;
 </script>
 
 <svelte:head>
@@ -9,19 +11,29 @@ let { data, form } = $props();
 <main>
   <h1>Databases</h1>
   <p>
-    Every change here is a commit to the deploy repository. Passwords are generated on the server and sealed; they are
-    never shown.
+    Every change here is a commit to the deploy repository. Passwords are generated on the server and sealed; a
+    superuser's is shown only when an administrator asks, and every asking is recorded in the audit log.
     {#if data.backup}Backups run at <code>{data.backup.schedule}</code> (UTC).{:else}<strong>Backups are not configured.</strong>{/if}
   </p>
-  {#if form?.error}<p role="alert">{form.error}</p>{:else if form?.ok}<p data-done>Committed.</p>{/if}
+  {#if form?.error}<p role="alert">{form.error}</p>{:else if form && "ok" in form && form.ok}<p data-done>Committed.</p>{/if}
 
   <table data-instances>
-    <thead><tr><th>Instance</th><th>Where</th><th>Version</th><th>State</th><th>Restores</th><th>Grants</th></tr></thead>
+    <thead><tr><th>Instance</th><th>Where</th><th>Version</th><th>State</th><th>Restores</th><th>Grants</th><th>Connect</th></tr></thead>
     <tbody>
       {#each data.instances as i (i.name)}
         <tr data-instance={i.name}>
           <td>{i.name}<br /><small>{i.origin} · {i.provider}</small></td>
-          <td><code>{i.host}</code></td>
+          <td>
+            <code>{i.host}</code>
+            {#if i.external}
+              <br /><small data-external>outside: <code>{i.external.address}</code></small>
+            {:else if data.externalAddresses}
+              <form method="POST" action="?/external">
+                <input type="hidden" name="instance" value={i.name} />
+                <button type="submit" data-add-external>Add an address outside</button>
+              </form>
+            {/if}
+          </td>
           <td>{i.version ?? "—"}</td>
           <td>{!i.present ? "not running yet" : i.ready ? "ready" : "not ready"}</td>
           <td data-check={i.lastCheck?.status ?? "never"}>
@@ -50,9 +62,31 @@ let { data, form } = $props();
               none
             {/each}
           </td>
+          <td>
+            {#if shown(i.name)}
+              {@const c = shown(i.name)}
+              <dl data-connection>
+                <dt>Superuser</dt><dd><code>{c?.role}</code></dd>
+                <dt>Inside the cluster</dt>
+                <dd><textarea readonly rows="2" aria-label={`URL of ${i.name} inside the cluster`}>{c?.inCluster.url}</textarea></dd>
+                {#if c?.external}
+                  <dt>Outside</dt>
+                  <dd><textarea readonly rows="2" aria-label={`URL of ${i.name} outside`}>{c.external.url}</textarea></dd>
+                {/if}
+              </dl>
+              <a href="?" data-connection-hide>Hide</a>
+            {:else if i.connection}
+              <form method="POST" action="?/connection">
+                <input type="hidden" name="instance" value={i.name} />
+                <button type="submit" data-connection-show>Show DATABASE_URL</button>
+              </form>
+            {:else}
+              <small>its password is in the cluster only</small>
+            {/if}
+          </td>
         </tr>
       {:else}
-        <tr><td colspan="6">No instances yet.</td></tr>
+        <tr><td colspan="7">No instances yet.</td></tr>
       {/each}
     </tbody>
   </table>
@@ -122,6 +156,10 @@ let { data, form } = $props();
       <label>Storage <input name="storage" value="10Gi" /></label>
       <label>CPU <input name="cpu" value="250m" /></label>
       <label>Memory <input name="memory" value="512Mi" /></label>
+      {#if data.externalAddresses}
+        <input type="hidden" name="offersExternal" value="1" />
+        <label><input type="checkbox" name="external" checked /> With an address outside the cluster</label>
+      {/if}
       <button type="submit">Create</button>
     </form>
   {/if}

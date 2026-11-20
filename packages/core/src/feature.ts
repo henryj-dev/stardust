@@ -82,6 +82,8 @@ export interface Route {
    * it is them) within the server's re-authentication window.
    */
   fresh?: boolean;
+  /** The answer holds a secret: it is sent with `cache-control: no-store`. */
+  noStore?: boolean;
   handle(request: RouteRequest): Promise<RouteResponse>;
 }
 
