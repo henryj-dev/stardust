@@ -4,7 +4,8 @@ import { describe, it } from "node:test";
 import type { KubeClient } from "@stardust/core";
 import { databaseProviderContract } from "@stardust/core/testing";
 import { parse } from "yaml";
-import { majorOf, statefulSetPostgres } from "./statefulset.ts";
+import { plugin } from "./index.ts";
+import { majorOf, POSTGRES_IMAGES, statefulSetPostgres } from "./statefulset.ts";
 
 const sts = (namespace: string, name: string, image: string, extra: Record<string, unknown> = {}) => ({
   metadata: { namespace, name },
@@ -77,7 +78,31 @@ describe("finding instances", () => {
     assert.equal(await p.observe({ namespace: "elsewhere", name: "hidden" }), null);
   });
 
+  it("reads the labels that select its pods, when they are plain labels", async () => {
+    const withSelector = (name: string, selector: unknown) => ({
+      ...sts("apps", name, "postgres:17"),
+      spec: { ...sts("apps", name, "postgres:17").spec, selector },
+    });
+    const q = statefulSetPostgres({
+      kube: fakeKube({
+        apps: [
+          withSelector("labels", { matchLabels: { app: "labels" } }),
+          withSelector("expressions", {
+            matchLabels: { app: "x" },
+            matchExpressions: [{ key: "tier", operator: "In", values: ["db"] }],
+          }),
+          withSelector("none", undefined),
+        ],
+      }),
+      namespace: "apps",
+      namespaces: [],
+    });
+    const found = Object.fromEntries((await q.discover()).map((s) => [s.ref.name, s.selector]));
+    assert.deepEqual(found, { expressions: null, labels: { app: "labels" }, none: null });
+  });
+
   it("reads major versions from tags", () => {
+    assert.equal(majorOf(POSTGRES_IMAGES["17"] ?? ""), "17");
     assert.equal(majorOf("postgres:17-alpine"), "17");
     assert.equal(majorOf("registry:5000/postgres"), null);
     assert.equal(majorOf("postgres@sha256:abc"), null);
@@ -329,17 +354,17 @@ describe("the rendered workloads", () => {
   it("run each backup and restore step in one image pinned by digest, sharing /work", () => {
     const steps = (files: Record<string, string>) => stepsOf(files).map((c) => [c.name, c.image.split(/[:@]/)[0]]);
     assert.deepEqual(steps(rendered.backup), [
-      ["dump", "postgres"],
+      ["dump", "docker.io/library/postgres"],
       ["encrypt", "ghcr.io/getsops/sops"],
       ["upload", "docker.io/amazon/aws-cli"],
     ]);
     assert.deepEqual(steps(rendered.check), [
       ["fetch", "docker.io/amazon/aws-cli"],
       ["decrypt", "ghcr.io/getsops/sops"],
-      ["restore-check", "postgres"],
+      ["restore-check", "docker.io/library/postgres"],
     ]);
     for (const c of [...stepsOf(rendered.backup), ...stepsOf(rendered.check)]) {
-      if (!c.image.startsWith("postgres:")) assert.match(c.image, /@sha256:[0-9a-f]{64}$/, c.name);
+      assert.match(c.image, /@sha256:[0-9a-f]{64}$/, c.name);
       assert.ok(
         (c as { volumeMounts?: Array<{ mountPath: string }> }).volumeMounts?.some((m) => m.mountPath === "/work"),
         c.name,
@@ -372,5 +397,56 @@ describe("the rendered workloads", () => {
     assert.match(scriptOf(rendered.backup, "upload"), /\[ "\$UPLOADED" -eq 2 \]/);
     assert.match(scriptOf(rendered.backup, "upload"), /put "\$BASE\.sql\.gz\.sops\.json"/);
     assert.match(scriptOf(rendered.check, "fetch"), /\\\.sql\\\.gz\\\.sops\\\.json\$/);
+  });
+});
+
+describe("the image a new instance runs", () => {
+  const imageOf = (p: ReturnType<typeof statefulSetPostgres>, version = "17") =>
+    (
+      parse(
+        p.renderInstance({ name: "orders", version, storage: "1Gi", cpu: "250m", memory: "512Mi" })[
+          "statefulset.yaml"
+        ] ?? "",
+      ) as { spec: { template: { spec: { containers: Array<{ image: string }> } } } }
+    ).spec.template.spec.containers[0]?.image;
+  const kube = fakeKube({});
+
+  it("is the official alpine image pinned by digest, unless told otherwise", () => {
+    const image = imageOf(statefulSetPostgres({ kube, namespace: "databases", namespaces: [] }));
+    assert.match(image ?? "", /^docker\.io\/library\/postgres:17\.\d+-alpine@sha256:[0-9a-f]{64}$/);
+    assert.equal(image, POSTGRES_IMAGES["17"]);
+    for (const [v, ref] of Object.entries(POSTGRES_IMAGES)) {
+      assert.equal(majorOf(ref), v, "each pin is the version it is filed under");
+      assert.match(ref, /-alpine@/, "alpine, as before: another libc could sort text differently");
+    }
+    assert.equal(
+      imageOf(statefulSetPostgres({ kube, namespace: "databases", namespaces: [], image: "postgres" })),
+      POSTGRES_IMAGES["17"],
+      "naming the official repository keeps its pins",
+    );
+  });
+
+  it("is a tag in another repository, and a configured pin wins over both", () => {
+    const mirror = "registry.example.com/postgres";
+    assert.equal(
+      imageOf(statefulSetPostgres({ kube, namespace: "databases", namespaces: [], image: mirror })),
+      `${mirror}:17-alpine`,
+      "the official pins do not hold for another repository",
+    );
+    const pinned = `${mirror}:17.1-alpine@sha256:${"a".repeat(64)}`;
+    assert.equal(
+      imageOf(
+        statefulSetPostgres({ kube, namespace: "databases", namespaces: [], image: mirror, images: { "17": pinned } }),
+      ),
+      pinned,
+    );
+  });
+
+  it("refuses an image setting that is not pinned by digest", () => {
+    const problems = (images: unknown) => plugin.validateConfig({ namespace: "databases", images });
+    assert.deepEqual(problems({ "17": `registry.example.com/postgres:17@sha256:${"b".repeat(64)}` }), []);
+    assert.ok(problems({ "17": "registry.example.com/postgres:17-alpine" }).some((p) => /pinned by digest/.test(p)));
+    assert.ok(problems({ latest: `postgres@sha256:${"b".repeat(64)}` }).some((p) => /major version/.test(p)));
+    assert.ok(problems(["x"]).length > 0);
   });
 });

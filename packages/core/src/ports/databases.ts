@@ -38,6 +38,8 @@ export interface DatabaseState {
   ref: DatabaseRef;
   /** The Service that reaches it, when there is one. */
   service: string | null;
+  /** The labels that select its pods, for another Service in front of it; null when not plain labels. */
+  selector: Record<string, string> | null;
   image: string;
   /** The engine's major version, from the image tag when it shows one. */
   version: string | null;
@@ -130,6 +132,8 @@ export interface DatabaseProvider {
   observe(ref: DatabaseRef): Promise<DatabaseState | null>;
   /** The Secret a new instance's superuser password goes in. */
   superuserSecret(name: string): SecretKeyRef;
+  /** The labels that select a new instance's pods, for another Service in front of it. */
+  instanceSelector(name: string): Record<string, string>;
   /** Manifests for a new instance, by file name. Its password Secret is the feature's to write. */
   renderInstance(spec: DatabaseSpec): Record<string, string>;
   /** A Job that creates or updates the application's role and database; running it twice changes nothing. */

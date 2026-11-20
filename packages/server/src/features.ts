@@ -114,6 +114,7 @@ export function mountFeatures(app: Hono<Env>, features: readonly Feature[], opti
             },
           });
         }
+        if (route.noStore) c.header("cache-control", "no-store");
         if (response.status === 204 || response.body === undefined) return c.body(null, response.status as 204);
         return c.json(response.body as object, response.status as 200);
       });

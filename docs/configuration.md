@@ -513,8 +513,9 @@ costs: {}
 
 PostgreSQL for your applications, through the deploy repository: administrators
 create instances, adopt ones already running, and give an application its own
-role and database on `/databases`. Stardust never connects to a database and
-never shows a password. It generates passwords, seals them with the cipher
+role and database on `/databases`. Stardust never connects to a database, and
+shows a password only to an administrator who asks for a superuser's
+connection (audited). It generates passwords, seals them with the cipher
 (`secrets-sops-age`), and commits manifests that an engine plugin (such as
 `db-statefulset`) renders.
 
@@ -533,6 +534,13 @@ never shows a password. It generates passwords, seals them with the cipher
   instances dumps each of them, encrypts the dump to the age key, uploads it,
   reads the stored size back and prunes old dumps. It is rendered again
   whenever the instances change.
+- **Connect as the superuser**: "Show DATABASE_URL" opens the superuser
+  password sealed under `<root>/<name>/` and shows the connection URL inside
+  the cluster and, when the instance has one, from outside. Only
+  administrators can (`databases:reveal`); the answer is not cached, and each
+  showing is in the audit log as `databases.reveal` with the instance's name,
+  never the value. An adopted instance's password is in a Secret in the
+  cluster, which stardust does not read, so it is not shown.
 
 ```yaml
 databases:
@@ -549,6 +557,43 @@ databases:
 ```
 
 Point a GitOps Kustomization (with SOPS decryption) at `root`.
+
+**Addresses outside the cluster.** With `external` set, "Create an
+instance" also commits `<root>/<name>/db.service.yaml`: a LoadBalancer Service
+`<name>-db` with a fixed `clusterIP` from `clusterIPs` and one address of its
+own at the same offset in `addresses` (`.N` in both blocks, which must be one
+size), written to `addressAnnotation`. It sets `externalTrafficPolicy:
+Cluster` and `allocateLoadBalancerNodePorts: false`, and carries `labels` and
+`annotations` as given — the shape an admission policy can require of such
+Services (fixed cluster IP, one-to-one address, a forwarding mode). The
+instance's own Service inside is left alone: a cluster IP cannot change once a
+Service exists.
+
+```yaml
+databases:
+  external:
+    clusterIPs: 10.0.0.0/24 # inside the cluster's Service range
+    addresses: 10.0.8.0/24 # the load balancer's pool; the same .N as above
+    first: 10 # optional: the lowest N (default 1)
+    last: 200 # optional: the highest N (default: the block's second-last)
+    addressAnnotation: lbipam.cilium.io/ips # where the load balancer reads the address
+    labels: { example.com/ip-pool: db } # optional
+    annotations: { service.cilium.io/forwarding-mode: dsr } # optional
+```
+
+N is the smallest one between `first` and `last` that no Service under `root`
+holds in either block (its cluster IPs, its annotated, asked-for or given
+addresses). The chart gives the server no cluster-wide access, so Services
+elsewhere are not seen: reserve `first`–`last` of both blocks for stardust.
+When the server can list every Service (`list services` granted cluster-wide
+by you), it skips the addresses those hold too.
+
+An instance without one gets it from "Add an address outside" (`POST
+/api/v1/plugins/databases/databases/<name>/external`). When `<root>/<name>/`
+already holds a Service `<name>-db` (one written by hand, say), it is
+recognised as it is and only recorded; otherwise a new one is committed. For an
+adopted instance the Service selects its StatefulSet's `matchLabels`. Creating
+without one: send `"external": false`, or untick the box.
 
 **Restore checks.** Every dump is stored with a fingerprint of its source,
 taken just before it: every database's tables and their exact row counts,
@@ -592,11 +637,21 @@ Security Admission `restricted`, and each backup or restore-check step runs in
 an official image pinned by digest (postgres, SOPS, the AWS CLI) with nothing
 installed at run time.
 
+New instances run the official `postgres` Alpine image of their major version
+pinned by digest (16 and 17 are pinned), so a moved tag never changes what a
+restart runs. Only new instances: an instance's manifests are written once,
+and moving one to another image family (Debian's, say) can change how text
+sorts, so existing instances keep the image they have. To use another
+repository, set `image` (its tags are `<version>-alpine`, not pinned) or pin
+each version in `images`:
+
 ```yaml
 db-statefulset:
   namespace: stardust-databases # where new instances go
   namespaces: [apps] # optional: where else to find instances to adopt
-  image: postgres # optional: tags are <version>-alpine
+  image: registry.example.com/postgres # optional: another repository, tags <version>-alpine
+  images: # optional: pins win over image
+    "17": registry.example.com/postgres:17.12-alpine@sha256:<64 hex digits>
   versions: ["16", "17"] # optional
 ```
 
