@@ -1,5 +1,11 @@
 # stardust
 
+## 0.27.1
+
+### Patch Changes
+
+- [#128](https://github.com/henryj-dev/stardust/pull/128) [`69a5f5f`](https://github.com/henryj-dev/stardust/commit/69a5f5f9caff466af21b97cc6479b1ec4a130356) Thanks [@mack-erel](https://github.com/mack-erel)! - Creating a database instance with an address outside the cluster no longer fails when the databases root lists a directory that holds directories (such as the backups). Reading a directory from the Git deploy repository now answers "no such file", as the other repositories do, instead of failing.
+
 ## 0.27.0
 
 ### Minor Changes
