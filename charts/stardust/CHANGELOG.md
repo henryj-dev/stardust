@@ -1,5 +1,11 @@
 # stardust
 
+## 0.27.2
+
+### Patch Changes
+
+- [#130](https://github.com/henryj-dev/stardust/pull/130) [`069d397`](https://github.com/henryj-dev/stardust/commit/069d3978d3581e8caf300ba3e9753348ff00118a) Thanks [@mack-erel](https://github.com/mack-erel)! - "Add an address outside" no longer commits a second Service for a database. An adopted instance is refused (409) and the dashboard no longer offers it there, nor shows an address recorded for one: its own app's Service gives it its address. Before committing a new `<name>-db` Service, the server asks the cluster whether one of that name exists in the instance's namespace and refuses (409) when it does, since another cluster IP for the same name stops the GitOps controller's dry-run. When the cluster cannot be read, the check is skipped and logged.
+
 ## 0.27.1
 
 ### Patch Changes
