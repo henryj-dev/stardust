@@ -1,5 +1,11 @@
 # stardust
 
+## 0.27.0
+
+### Minor Changes
+
+- [#126](https://github.com/henryj-dev/stardust/pull/126) [`6fccf73`](https://github.com/henryj-dev/stardust/commit/6fccf7342e88128042113d85b238749603d85669) Thanks [@mack-erel](https://github.com/mack-erel)! - Databases get an address outside the cluster and a superuser connection. With `databases.external` set (two IPv4 blocks of one size, the annotation the load balancer reads, and optional labels and annotations), "Create an instance" also commits a LoadBalancer Service `<name>-db` with a fixed cluster IP and one address at the same offset in the other block, at the smallest offset no Service under the databases root holds; "Add an address outside" gives one to an existing instance, or recognises one already written in its directory. Administrators can show a created instance's superuser `DATABASE_URL`, inside the cluster and outside, audited as `databases.reveal` and never cached. New instances run the official PostgreSQL Alpine image pinned by digest (`db-statefulset.images` pins another repository); existing instances keep their image.
+
 ## 0.26.0
 
 ### Minor Changes
