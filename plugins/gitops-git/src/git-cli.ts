@@ -127,6 +127,8 @@ export class GitCliRepo implements RepoIO {
     await this.have(ref);
     const sha = await this.git(["rev-parse", "--verify", "-q", `${ref}:${path}`]);
     if (sha.code !== 0) return null;
+    // A directory resolves to a tree: it is not a file, as in the other repositories.
+    if ((await this.ok(["cat-file", "-t", sha.stdout.trim()])).trim() !== "blob") return null;
     const content = await this.ok(["cat-file", "blob", sha.stdout.trim()]);
     return { content, sha: sha.stdout.trim() };
   }
