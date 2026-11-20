@@ -22,6 +22,7 @@
     "@stardust/plugin-databases": "workspace:*",
     "@stardust/plugin-db-statefulset": "workspace:*",
     "@stardust/plugin-domains": "workspace:*",
+    "@stardust/plugin-gitops-git": "workspace:*",
     "@stardust/plugin-identity-oidc": "workspace:*",
     "@stardust/plugin-instances": "workspace:*",
     "@stardust/plugin-nodes": "workspace:*",

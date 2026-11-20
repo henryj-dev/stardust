@@ -248,6 +248,33 @@ export function databasesFeature(ctx: FeatureContext) {
     }
   }
 
+  /**
+   * Whether the cluster has a Service of this name already, or null when
+   * that cannot be read (no cluster access, refused, failed): then the check
+   * is skipped, and the log says so. A second Service of one name with
+   * another cluster IP stops the GitOps controller's whole dry-run.
+   */
+  async function serviceInCluster(namespace: string, name: string): Promise<boolean | null> {
+    const kube = ctx.ports.kube;
+    const skipped = (reason: string) => {
+      ctx.log.warn("databases: could not check the cluster for a Service of the same name", {
+        namespace,
+        name,
+        reason,
+      });
+      return null;
+    };
+    if (!kube) return skipped("no cluster access");
+    try {
+      const res = await kube.request("GET", `/api/v1/namespaces/${namespace}/services/${name}`);
+      if (res.status === 200) return true;
+      if (res.status === 404) return false;
+      return skipped(`the API answered ${res.status}`);
+    } catch (err) {
+      return skipped((err as Error).message);
+    }
+  }
+
   /** The files directly in a directory, with what this change writes there. */
   async function filesIn(change: RootChange, at: BoundRepo, dir: string): Promise<string[]> {
     const pending = [...change.files.keys()]
@@ -314,6 +341,12 @@ export function databasesFeature(ctx: FeatureContext) {
       throw new Refused(
         409,
         "the labels of its pods cannot be read (not plain matchLabels), so no Service can select them",
+      );
+    const serviceName = externalServiceName(instance.name);
+    if ((await serviceInCluster(instance.namespace, serviceName)) === true)
+      throw new Refused(
+        409,
+        `the cluster has a Service ${instance.namespace}/${serviceName} already, which ${dir} does not hold: stardust does not commit a second one of that name`,
       );
     const blocks = blocksOf(external);
     const used = usedOffsets(blocks, [...clusterHeld, ...(await heldUnderRoot(change, at, q, external))]);
@@ -615,16 +648,21 @@ export function databasesFeature(ctx: FeatureContext) {
     if (!external) throw new Refused(409, "addresses outside the cluster are not configured (databases.external)");
     const [row] = await db.query<InstanceRow>("SELECT * FROM databases_instances WHERE name = $1", [instanceName]);
     if (!row) throw new Refused(404, "unknown database instance");
+    // An adopted instance's manifests live with its app, outside the root: a
+    // Service of that app may give it an address outside already, which
+    // stardust cannot see. Another one would be a second address for one
+    // database, or (of the same name) a cluster IP the cluster refuses to change.
+    if (row.origin !== "created")
+      throw new Refused(
+        409,
+        `${row.name} is adopted: its own app's Service gives it an address outside the cluster, and stardust does not make one`,
+      );
     if (row.external_address)
       throw new Refused(409, `${row.name} has an address outside already: ${row.external_address}`);
     const provider = providers[row.provider];
     if (!provider) throw new Refused(409, "this instance's engine is not configured");
     // Its own Service keeps its cluster IP (which cannot change): the address outside is another Service.
-    const selector =
-      row.origin === "created"
-        ? provider.instanceSelector(row.workload)
-        : ((await provider.observe({ namespace: row.namespace, name: row.workload }).catch(() => null))?.selector ??
-          null);
+    const selector = provider.instanceSelector(row.workload);
     const clusterHeld = await clusterAddresses();
     let outside: (ExternalAddress & { recognised: boolean }) | null = null;
     const sha = await commit(
@@ -907,7 +945,12 @@ function routes(ctx: FeatureContext): Route[] {
               namespace: r.namespace,
               workload: r.workload,
               host: r.host,
-              external: r.external_address ? { address: r.external_address, clusterIP: r.external_cluster_ip } : null,
+              // An adopted instance's address is its app's: one recorded for it (before adopted
+              // instances were refused) is not shown, though allocation still counts it as held.
+              external:
+                r.origin === "created" && r.external_address
+                  ? { address: r.external_address, clusterIP: r.external_cluster_ip }
+                  : null,
               // Only a created instance's password is sealed where stardust can open it.
               connection: r.origin === "created" && Boolean(r.superuser_secret && r.superuser_key),
               version: state?.version ?? r.version,

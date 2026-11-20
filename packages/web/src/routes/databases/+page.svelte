@@ -27,7 +27,8 @@ const shown = (name: string) =>
             <code>{i.host}</code>
             {#if i.external}
               <br /><small data-external>outside: <code>{i.external.address}</code></small>
-            {:else if data.externalAddresses}
+            {:else if data.externalAddresses && i.origin === "created"}
+              <!-- An adopted instance's address outside is its own app's Service: stardust makes none. -->
               <form method="POST" action="?/external">
                 <input type="hidden" name="instance" value={i.name} />
                 <button type="submit" data-add-external>Add an address outside</button>
