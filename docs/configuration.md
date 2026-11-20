@@ -591,9 +591,15 @@ by you), it skips the addresses those hold too.
 An instance without one gets it from "Add an address outside" (`POST
 /api/v1/plugins/databases/databases/<name>/external`). When `<root>/<name>/`
 already holds a Service `<name>-db` (one written by hand, say), it is
-recognised as it is and only recorded; otherwise a new one is committed. For an
-adopted instance the Service selects its StatefulSet's `matchLabels`. Creating
-without one: send `"external": false`, or untick the box.
+recognised as it is and only recorded; otherwise a new one is committed. Before
+committing a new one it asks the cluster for a Service `<name>-db` in the
+instance's namespace (with the read access the chart gives there) and refuses
+(409) when one exists: another cluster IP for the same name would stop the
+GitOps controller's dry-run. When that cannot be read, the check is skipped and
+the server logs it. An adopted instance is refused (409) and shows no "Add an
+address outside": its manifests live with its app, whose own Service may give
+it an address already, which stardust cannot see. Creating without one: send
+`"external": false`, or untick the box.
 
 **Restore checks.** Every dump is stored with a fingerprint of its source,
 taken just before it: every database's tables and their exact row counts,

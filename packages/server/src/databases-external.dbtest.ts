@@ -59,6 +59,10 @@ const plainOld = { ...legacy, metadata: { namespace: "apps", name: "plainold" } 
 
 /** Whether this process may list every Service; the chart does not grant it. */
 let mayListServices = true;
+/** Whether it may read Services in a namespace (the chart grants it there). */
+let mayReadServices = true;
+/** Services in the cluster that the deploy repository's root does not hold. */
+const inCluster = new Set<string>();
 const kube: KubeStreamClient = {
   async stream() {
     throw new Error("not used");
@@ -73,6 +77,13 @@ const kube: KubeStreamClient = {
         spec: { type: "LoadBalancer", clusterIP: "10.96.0.1" },
       };
       return { status: 200, body: JSON.stringify({ items: [held] }) };
+    }
+    const one = /^\/api\/v1\/namespaces\/([^/]+)\/services\/([^/]+)$/.exec(path);
+    if (one) {
+      if (!mayReadServices) return { status: 403, body: "{}" };
+      if (!inCluster.has(`${one[1]}/${one[2]}`)) return { status: 404, body: "{}" };
+      const svc = { kind: "Service", metadata: { name: one[2], namespace: one[1] }, spec: { clusterIP: "10.96.0.9" } };
+      return { status: 200, body: JSON.stringify(svc) };
     }
     if (path === "/apis/apps/v1/namespaces/apps/statefulsets")
       return { status: 200, body: JSON.stringify({ items: [legacy, plainOld] }) };
@@ -189,8 +200,9 @@ describe("an address outside the cluster", () => {
     });
   });
 
-  it("without the cluster's list, still never takes an address the repository holds", async () => {
+  it("without the cluster's Services, still never takes an address the repository holds", async () => {
     mayListServices = false;
+    mayReadServices = false;
     try {
       assert.equal((await call("POST", "/databases", { name: "notes", external: false })).status, 201);
       assert.equal(files()["deploy/databases/notes/db.service.yaml"], undefined, "asked for none");
@@ -201,22 +213,64 @@ describe("an address outside the cluster", () => {
       assert.equal(((await res.json()) as { recognised: boolean }).recognised, false);
     } finally {
       mayListServices = true;
+      mayReadServices = true;
     }
     assert.equal((await call("POST", "/databases/notes/external")).status, 409, "it has one already");
   });
 
-  it("is recognised when written by hand, and kept as it is", async () => {
-    assert.equal(
-      (await call("POST", "/databases/adopt", { provider: "statefulset", namespace: "apps", workload: "legacy" }))
-        .status,
-      201,
-    );
-    const before = files()["deploy/databases/legacy/db.service.yaml"];
-    const res = await call("POST", "/databases/legacy/external");
+  it("is recognised when written by hand for an instance stardust created, and kept as it is", async () => {
+    assert.equal((await call("POST", "/databases", { name: "handmade", external: false })).status, 201);
+    const byHand = [
+      "apiVersion: v1",
+      "kind: Service",
+      "metadata:",
+      "  name: handmade-db",
+      "  namespace: databases",
+      "  annotations:",
+      "    lbipam.cilium.io/ips: 10.0.8.15",
+      "spec:",
+      "  type: LoadBalancer",
+      "  clusterIP: 10.0.0.15",
+      "  selector: { app.kubernetes.io/name: handmade }",
+      "",
+    ].join("\n");
+    repo.push({ "deploy/databases/handmade/db.service.yaml": byHand }, "by hand");
+    // Its own Service is in the cluster, as Flux applied it: that is not another one.
+    inCluster.add("databases/handmade-db");
+    const res = await call("POST", "/databases/handmade/external");
     assert.equal(res.status, 201);
     const body = (await res.json()) as { address: string; clusterIP: string; recognised: boolean };
-    assert.deepEqual([body.address, body.clusterIP, body.recognised], ["10.0.8.12", "10.0.0.12", true]);
-    assert.equal(files()["deploy/databases/legacy/db.service.yaml"], before, "not rewritten");
+    assert.deepEqual([body.address, body.clusterIP, body.recognised], ["10.0.8.15", "10.0.0.15", true]);
+    assert.equal(files()["deploy/databases/handmade/db.service.yaml"], byHand, "not rewritten");
+    assert.ok(resources("deploy/databases/handmade/kustomization.yaml").includes("db.service.yaml"));
+  });
+
+  it("is refused for an adopted instance: its app's Service gives it its address, and nothing is committed", async () => {
+    for (const workload of ["legacy", "plainold"])
+      assert.equal(
+        (await call("POST", "/databases/adopt", { provider: "statefulset", namespace: "apps", workload })).status,
+        201,
+      );
+    const before = repo.commitCount();
+    const legacyFile = files()["deploy/databases/legacy/db.service.yaml"];
+    for (const name of ["legacy", "plainold"]) {
+      const res = await call("POST", `/databases/${name}/external`);
+      assert.equal(res.status, 409, name);
+      assert.match(((await res.json()) as { error: string }).error, /adopted: its own app's Service/);
+    }
+    assert.equal(repo.commitCount(), before, "nothing committed");
+    assert.equal(files()["deploy/databases/plainold/db.service.yaml"], undefined);
+    assert.equal(files()["deploy/databases/legacy/db.service.yaml"], legacyFile);
+    const [plainold] = await db.sql<{ external_address: string | null }[]>`
+      SELECT external_address FROM databases_instances WHERE name = 'plainold'`;
+    assert.equal(plainold?.external_address, null, "nothing recorded");
+    assert.equal((await call("POST", "/databases/plainold/external", undefined, member)).status, 403);
+  });
+
+  it("is not shown for an adopted instance that has one recorded, which still counts as held", async () => {
+    // Recorded before adopted instances were refused: its app may hold it too.
+    await db.sql`UPDATE databases_instances SET external_address = '10.0.8.14', external_cluster_ip = '10.0.0.14'
+      WHERE name = 'plainold'`;
     const listing = (await (await call("GET", "/databases")).json()) as {
       instances: Array<{ name: string; external: { address: string } | null; connection: boolean }>;
       externalAddresses: boolean;
@@ -226,25 +280,33 @@ describe("an address outside the cluster", () => {
       listing.instances.map((i) => [i.name, i.external?.address ?? null, i.connection]),
       [
         ["billing", "10.0.8.13", true],
-        ["legacy", "10.0.8.12", false],
+        ["handmade", "10.0.8.15", true],
+        ["legacy", null, false],
         ["notes", "10.0.8.11", true],
         ["orders", "10.0.8.10", true],
+        ["plainold", null, false],
       ],
     );
+    assert.equal((await call("POST", "/databases", { name: "audit" })).status, 201);
+    assert.equal(service("audit").spec.clusterIP, "10.0.0.16", "past .14 (recorded) and .15 (by hand)");
   });
 
-  it("selects an adopted instance's pods by its own labels", async () => {
-    assert.equal(
-      (await call("POST", "/databases/adopt", { provider: "statefulset", namespace: "apps", workload: "plainold" }))
-        .status,
-      201,
-    );
-    assert.equal((await call("POST", "/databases/plainold/external")).status, 201);
-    const svc = service("plainold");
-    assert.equal(svc.metadata.namespace, "apps");
-    assert.deepEqual(svc.spec.selector, { app: "legacy" }, "the StatefulSet's matchLabels");
-    assert.equal(svc.spec.clusterIP, "10.0.0.14");
-    assert.equal((await call("POST", "/databases/plainold/external", undefined, member)).status, 403);
+  it("is refused when the cluster has a Service of that name the repository does not hold", async () => {
+    inCluster.add("databases/clash-db");
+    const before = repo.commitCount();
+    const res = await call("POST", "/databases", { name: "clash" });
+    assert.equal(res.status, 409);
+    assert.match(((await res.json()) as { error: string }).error, /Service databases\/clash-db already/);
+    assert.equal(repo.commitCount(), before, "nothing committed");
+    const [gone] = await db.sql`SELECT 1 FROM databases_instances WHERE name = 'clash'`;
+    assert.equal(gone, undefined, "nor recorded");
+
+    assert.equal((await call("POST", "/databases", { name: "later", external: false })).status, 201);
+    inCluster.add("databases/later-db");
+    const n = repo.commitCount();
+    assert.equal((await call("POST", "/databases/later/external")).status, 409);
+    assert.equal(repo.commitCount(), n, "nothing committed");
+    assert.equal(files()["deploy/databases/later/db.service.yaml"], undefined);
   });
 });
 

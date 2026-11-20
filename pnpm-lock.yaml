@@ -345,6 +345,9 @@ importers:
       '@stardust/plugin-domains':
         specifier: workspace:*
         version: link:../../plugins/domains
+      '@stardust/plugin-gitops-git':
+        specifier: workspace:*
+        version: link:../../plugins/gitops-git
       '@stardust/plugin-identity-oidc':
         specifier: workspace:*
         version: link:../../plugins/identity-oidc
