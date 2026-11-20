@@ -62,6 +62,8 @@ describe("GitCliRepo", () => {
     assert.equal(head, sh(other, "rev-parse", "HEAD"));
     assert.equal((await repo.readFile(`${DIR}/deployment.yaml`, head))?.content, manifest("old"));
     assert.equal(await repo.readFile(`${DIR}/missing.yaml`, head), null);
+    // A directory is not a file: null, not an error (callers walk listed names that may be directories).
+    assert.equal(await repo.readFile(DIR, head), null);
     assert.deepEqual(await repo.listDir(DIR, head), ["deployment.yaml", "kustomization.yaml"]);
     await repo.close();
   });
