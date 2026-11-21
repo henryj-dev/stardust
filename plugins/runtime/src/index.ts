@@ -4,7 +4,8 @@
  * is a commit to the deploy repository, so the GitOps controller applies it
  * and does not revert it as drift.
  *
- *   runtime: {}
+ *   runtime:
+ *     allowedClusterRoles: [system:auth-delegator]   # optional, see ./config.ts
  *
  * The server's service account needs read access to pods, pod logs, events,
  * Services and the workloads in the components' namespaces (the chart's
@@ -32,8 +33,9 @@ import {
   WorkloadEditError,
 } from "@stardust/core";
 import { parse, parseAllDocuments } from "yaml";
+import { type RuntimeSettings, settingsProblems } from "./config.ts";
 import { readWorkload } from "./live.ts";
-import { workloadRoutes } from "./settings.ts";
+import { clusterRoleRoutes, workloadRoutes } from "./settings.ts";
 
 /** Pod-template annotation a restart writes; changing it rolls the workload out. */
 export const RESTART_ANNOTATION = "stardust.dev/restarted-at";
@@ -121,7 +123,7 @@ async function readService(kube: Needs["kube"], name: string, namespace: string 
   };
 }
 
-function routes(needs: Needs): Route[] {
+function routes(needs: Needs, settings: RuntimeSettings): Route[] {
   const { kube, deployRepo, projects } = needs;
   const repo = deployRepo.repo;
 
@@ -381,6 +383,7 @@ function routes(needs: Needs): Route[] {
       },
     },
     ...workloadRoutes({ repo, component }),
+    ...clusterRoleRoutes({ repo, component, allowed: settings.allowedClusterRoles ?? [] }),
   ];
 }
 
@@ -389,10 +392,7 @@ export const plugin = definePlugin({
     name: "runtime",
     description: "Shows what a component runs, and restarts, scales, sizes and configures it through Git.",
   },
-  validateConfig(section) {
-    if (typeof section !== "object" || section === null) return ["must be a mapping"];
-    return Object.keys(section).map((key) => `unknown key "${key}"`);
-  },
+  validateConfig: settingsProblems,
   requires: ["kube", "deployRepo", "projects"],
   // The pod log page reads these; without saying so, logs-kube and logs-loki are never built.
   uses: ["logs"],
@@ -403,6 +403,11 @@ export const plugin = definePlugin({
       description: "Restart, scale, size and configure a component",
       grantedTo: "project-writers",
     },
+    {
+      id: "runtime:cluster-roles",
+      description: "Bind a cluster-wide role, from the allowed ones, to a component's service account",
+      grantedTo: "admins",
+    },
   ],
   capabilities: [
     "runtime.view",
@@ -412,6 +417,7 @@ export const plugin = definePlugin({
     "runtime.scale",
     "runtime.resources",
     "runtime.workload",
+    "runtime.cluster-roles",
   ],
-  routes: ({ ports }: FeatureContext) => routes(ports as Needs),
+  routes: ({ ports, config }: FeatureContext) => routes(ports as Needs, (config ?? {}) as RuntimeSettings),
 });
