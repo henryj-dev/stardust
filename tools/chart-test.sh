@@ -140,6 +140,19 @@ else
   bad web-regions "STARDUST_REGIONS and STARDUST_HOME_REGION are not rendered from web.regions (or appear without it)"
 fi
 
+# Behind a proxy: the web pod takes the browser's address from the header named, XFF_DEPTH with x-forwarded-for.
+xff="$(render --set web.addressHeader=x-forwarded-for --set web.xffDepth=2)"
+other="$(render --set web.addressHeader=x-real-ip)"
+if grep -A1 'name: ADDRESS_HEADER' <<<"$xff" | grep -q 'value: "x-forwarded-for"' && grep -A1 'name: XFF_DEPTH' <<<"$xff" | grep -q 'value: "2"' \
+  && grep -A1 'name: ADDRESS_HEADER' <<<"$other" | grep -q 'value: "x-real-ip"' && ! grep -q XFF_DEPTH <<<"$other" \
+  && ! grep -qE 'ADDRESS_HEADER|XFF_DEPTH' <<<"$(render)"; then
+  pass web-address-header
+else
+  bad web-address-header "ADDRESS_HEADER and XFF_DEPTH are not rendered from web.addressHeader and web.xffDepth (or appear without them)"
+fi
+badheader="$(render --set 'web.addressHeader=x forwarded' || true)"
+if grep -q "/web/addressHeader" <<<"$badheader"; then pass web-address-header-schema; else bad web-address-header-schema "a header name with a space is accepted"; fi
+
 # The databases plugins: a read-only Role per listed namespace, never Secrets.
 dbr="$(render --set 'databases.namespaces={databases,apps}')"
 dbroles="$(grep -c 'name: t-stardust-databases$' <<<"$dbr")"

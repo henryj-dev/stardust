@@ -190,7 +190,9 @@ audit:
 - Each event keeps the address the server saw, and the address and user agent
   the dashboard passes on for the browser. They are not verified. Behind a
   reverse proxy, set the dashboard's `ADDRESS_HEADER` (and `XFF_DEPTH`) so it
-  passes on the browser's address rather than the proxy's.
+  passes on the browser's address rather than the proxy's; with the chart,
+  `web.addressHeader: x-forwarded-for` (and `web.xffDepth`, default 1: the
+  address the nearest proxy added, which a browser cannot forge).
 
 ## Plugins
 
