@@ -319,5 +319,14 @@ describe("runtime", () => {
     assert.deepEqual(plugin.validateConfig({ extra: 1 }), ['unknown key "extra"']);
     assert.deepEqual(plugin.validateConfig({ allowedClusterRoles: ["system:auth-delegator"] }), []);
     assert.equal(plugin.validateConfig({ allowedClusterRoles: ["Not A Role"] }).length, 1);
+    const external = {
+      clusterIPs: "10.0.0.0/24",
+      addresses: "10.0.8.0/24",
+      addressAnnotation: "lbipam.cilium.io/ips",
+    };
+    assert.deepEqual(plugin.validateConfig({ external }), []);
+    assert.deepEqual(plugin.validateConfig({ external: { ...external, addresses: "10.0.8.0/25" } }), [
+      "external: clusterIPs and addresses must be blocks of one size: N is the same offset in each",
+    ]);
   });
 });

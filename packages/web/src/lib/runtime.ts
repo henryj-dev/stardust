@@ -89,3 +89,17 @@ export interface SecretFilesView {
   fsGroup: number | null;
   sets: Array<{ name: string; secret: string; path: string; keys: string[]; mounted: boolean }>;
 }
+
+/** A component's address outside the cluster (`GET …/address`). */
+export interface AddressView {
+  /** Whether `runtime.external` is configured. */
+  available: boolean;
+  address: {
+    service: string;
+    clusterIP: string | null;
+    address: string;
+    ports: Array<{ port: number; targetPort: number }>;
+    /** Why the cluster's address policy would refuse it, if it would. */
+    problems: string[];
+  } | null;
+}

@@ -43,6 +43,14 @@ export function repoContract(name: string, setup: (seed: Record<string, string>)
       assert.deepEqual(await f.repo.listDir("deploy/demo/api/", head), ["deployment.yaml", "kustomization.yaml"]);
     });
 
+    it("lists the directories inside a directory by name, and the root as an empty path", async () => {
+      const head = await f.repo.headSha();
+      assert.deepEqual(await f.repo.listDir("deploy/demo", head), ["api", "web"]);
+      const root = await f.repo.listDir("", head);
+      assert.ok(root.includes("deploy") && root.includes("README.md"), root.join());
+      assert.equal(await f.repo.readFile("deploy/demo", head), null, "a directory is not a file");
+    });
+
     it("commits on top of the expected head; the old commit still reads as it was", async () => {
       const before = await f.repo.headSha();
       const result = await f.repo.commit(

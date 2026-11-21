@@ -6,7 +6,14 @@
  */
 import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
-import { buildFeatures, type KubeStreamClient, type Logger, type Route, restrictedProblems } from "@stardust/core";
+import {
+  addressPolicyProblems,
+  buildFeatures,
+  type KubeStreamClient,
+  type Logger,
+  type Route,
+  restrictedProblems,
+} from "@stardust/core";
 import { GitCliRepo } from "@stardust/plugin-gitops-git";
 import { plugin } from "@stardust/plugin-runtime";
 import { parse, stringify } from "yaml";
@@ -187,5 +194,97 @@ describe("secret files in a Git deploy repository", () => {
     assert.equal((await call("DELETE", key, null, params)).status, 200);
     assert.equal(fixture.read(`${DIR}/secret-files-kek.secret.enc.yaml`), null);
     assert.doesNotMatch(fixture.read(`${DIR}/kustomization.yaml`) ?? "", /secret-files/);
+  });
+});
+
+describe("a component's address outside the cluster, in a Git deploy repository", () => {
+  const EXTERNAL = {
+    clusterIPs: "10.0.0.0/24",
+    addresses: "10.0.8.0/24",
+    first: 10,
+    last: 20,
+    addressAnnotation: "lbipam.cilium.io/ips",
+    annotations: { "service.cilium.io/forwarding-mode": "dsr" },
+  };
+  const inCluster = new Set<string>();
+  const clusterKube: KubeStreamClient = {
+    async request(_m, p) {
+      if (p === "/api/v1/services") return { status: 403, body: "{}" };
+      const one = /^\/api\/v1\/namespaces\/([^/]+)\/services\/([^/]+)$/.exec(p);
+      if (one) return { status: inCluster.has(`${one[1]}/${one[2]}`) ? 200 : 404, body: "{}" };
+      return { status: 404, body: "{}" };
+    },
+    stream: () => Promise.reject(new Error("unused")),
+  };
+  // The databases plugin recorded .11 for an instance whose Service this repository does not show.
+  const database = {
+    async query(text: string) {
+      if (text.includes("to_regclass")) return [{ t: "databases_instances" }];
+      return [{ a: "10.0.8.11", c: "10.0.0.11" }];
+    },
+    async transaction<R>(work: (tx: never) => Promise<R>) {
+      return work(this as never);
+    },
+  };
+  const call = runtimeFeature({ external: EXTERNAL }, { kube: clusterKube, database });
+  const path = "/projects/:project/components/:component/address";
+  const vip = `${DIR}/stardust-address.service.yaml`;
+  const other = (name: string, n: number) =>
+    [
+      "apiVersion: v1",
+      "kind: Service",
+      "metadata:",
+      `  name: ${name}`,
+      "  namespace: app",
+      "  annotations:",
+      `    lbipam.cilium.io/ips: 10.0.8.${n}`,
+      "spec:",
+      "  type: LoadBalancer",
+      `  clusterIP: 10.0.0.${n}`,
+      "",
+    ].join("\n");
+
+  it("takes the first N nothing holds: not another app's Service elsewhere, not a database's record", async () => {
+    // Another app's address, in a directory far from the component's.
+    fixture.push({ "clusters/one/infra/edge/vip.yaml": other("edge-vip", 10) });
+    const before = fixture.head();
+    const res = await call("POST", path, { ports: [{ port: 8080, targetPort: 8080 }] });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.notEqual(fixture.head(), before);
+    const svc = parse(fixture.read(vip) ?? "");
+    assert.equal(svc.metadata.name, "server-vip");
+    assert.equal(svc.spec.clusterIP, "10.0.0.12", ".10 the other app, .11 the database");
+    assert.equal(svc.metadata.annotations["lbipam.cilium.io/ips"], "10.0.8.12");
+    assert.deepEqual(addressPolicyProblems(svc, EXTERNAL), []);
+    assert.match(fixture.read(`${DIR}/kustomization.yaml`) ?? "", /- stardust-address.service.yaml/);
+    const view = (await call("GET", path)).body as { address: { address: string; problems: string[] } };
+    assert.deepEqual([view.address.address, view.address.problems], ["10.0.8.12", []]);
+  });
+
+  it("does not give a second address, and removes the one it gave", async () => {
+    assert.equal((await call("POST", path, { ports: [{ port: 8080 }] })).status, 409);
+    assert.equal((await call("DELETE", path)).status, 200);
+    assert.equal(fixture.read(vip), null);
+    assert.doesNotMatch(fixture.read(`${DIR}/kustomization.yaml`) ?? "", /stardust-address/);
+  });
+
+  it("refuses a name another file in the repository declares, and pushes nothing", async () => {
+    fixture.push({ "clusters/one/apps/app/old/vip.yaml": other("server-vip", 14) });
+    const before = fixture.head();
+    const res = await call("POST", path, { ports: [{ port: 8080 }] });
+    assert.equal(res.status, 409);
+    assert.match((res.body as { error: string }).error, /old\/vip.yaml declares a Service app\/server-vip/);
+    assert.equal(fixture.head(), before, "nothing pushed");
+    fixture.push({ "clusters/one/apps/app/old/vip.yaml": null });
+  });
+
+  it("refuses a name the cluster has already, and pushes nothing", async () => {
+    inCluster.add("app/server-vip");
+    const before = fixture.head();
+    const res = await call("POST", path, { ports: [{ port: 8080 }] });
+    assert.equal(res.status, 409);
+    assert.match((res.body as { error: string }).error, /the cluster has a Service app\/server-vip/);
+    assert.equal(fixture.head(), before, "nothing pushed");
+    inCluster.delete("app/server-vip");
   });
 });

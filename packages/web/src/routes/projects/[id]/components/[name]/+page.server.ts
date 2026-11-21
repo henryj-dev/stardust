@@ -1,6 +1,6 @@
 import { ApiError } from "@stardust/sdk";
 import { error, fail } from "@sveltejs/kit";
-import type { ClusterRolesView, RuntimeView, SecretFilesView, WorkloadSettingsView } from "$lib/runtime";
+import type { AddressView, ClusterRolesView, RuntimeView, SecretFilesView, WorkloadSettingsView } from "$lib/runtime";
 import { requireClient } from "$lib/server/api";
 import { readMounts } from "$lib/server/files-form";
 import { needsReauth, reauthFrom } from "$lib/server/reauth";
@@ -73,12 +73,19 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
           .get<SecretFilesView>(`${runtimePath(params.id, params.name)}/secret-files`)
           .catch(() => null)
       : null;
+    const address: AddressView | null = has("runtime.address")
+      ? await client
+          .plugin("runtime")
+          .get<AddressView>(`${runtimePath(params.id, params.name)}/address`)
+          .catch(() => null)
+      : null;
     return {
       files,
       storage,
       workload,
       clusterRoles,
       secretFiles,
+      address,
       access,
       projectId: params.id,
       component: params.name,
@@ -232,6 +239,32 @@ export const actions: Actions = {
         return fail(401, { secretFileError: "Confirm it is you: enter your password or a code, then try again." });
       const r = reason(err);
       return fail(r.status, { secretFileError: r.message });
+    }
+  },
+  // The address outside the cluster: add one (ports from the form, or the containers'), or remove it.
+  address: async ({ locals, params, request, url }) => {
+    const client = requireClient(locals, url);
+    const form = await request.formData();
+    const remove = form.get("op") === "remove";
+    const raw = String(form.get("ports") ?? "").trim();
+    const ports: Array<{ port: number; targetPort: number }> = [];
+    for (const part of raw.split(/[\s,]+/).filter(Boolean)) {
+      const m = /^(\d+)(?::(\d+))?$/.exec(part);
+      if (!m) return fail(400, { addressError: `${part} is not a port, or port:targetPort.` });
+      ports.push({ port: Number(m[1]), targetPort: Number(m[2] ?? m[1]) });
+    }
+    try {
+      const result = await client
+        .plugin("runtime")
+        .send<{ status: string; deployCommit: string | null; address?: string; clusterIP?: string }>(
+          remove ? "DELETE" : "POST",
+          `${runtimePath(params.id, params.name)}/address`,
+          remove ? undefined : ports.length > 0 ? { ports } : {},
+        );
+      return { addressSaved: { ...result, removed: remove } };
+    } catch (err) {
+      const r = reason(err);
+      return fail(r.status, { addressError: r.message });
     }
   },
   storage: async ({ locals, params, request, url }) => {

@@ -143,6 +143,56 @@ const LANDING: Record<string, string> = {
     </ul>
   {/if}
 
+  {#if data.address?.available}
+    {@const a = data.address.address}
+    <h2>Address outside the cluster</h2>
+    <p>
+      An address on the network outside the cluster for this component, for an edge proxy or another network to
+      reach it: a LoadBalancer Service with a fixed cluster IP and its own address at the same offset of the blocks
+      in <code>runtime.external</code>, which stardust picks so that no other Service in the deploy repository, no
+      database and (when it may look) nothing in the cluster holds it.
+    </p>
+    {#if a}
+      <p data-address={a.address}>
+        <code>{a.service}</code>: <strong>{a.address}</strong> (cluster IP <code>{a.clusterIP ?? "—"}</code>), ports
+        {#each a.ports as p, i (p.port)}{i > 0 ? ", " : ""}<code>{p.port}→{p.targetPort}</code>{/each}
+      </p>
+      {#if a.problems.length > 0}
+        <div role="alert" data-address-problems>
+          The cluster's address policy would refuse it:
+          <ul>{#each a.problems as p (p)}<li>{p}</li>{/each}</ul>
+        </div>
+      {/if}
+      {#if data.isAdmin}
+        <form method="POST" action="?/address" data-address-remove>
+          <input type="hidden" name="op" value="remove" />
+          <button type="submit">Remove the address</button>
+        </form>
+      {/if}
+    {:else if data.isAdmin}
+      <form method="POST" action="?/address" data-address-add>
+        <label>
+          Ports <input name="ports" placeholder="8080, or 443:8443" autocomplete="off" />
+          <small>empty: every port its containers declare</small>
+        </label>
+        <button type="submit">Give it an address</button>
+      </form>
+    {:else}
+      <p data-address-none>None.</p>
+    {/if}
+    {#if form?.addressError}
+      <p role="alert" data-address-error>{form.addressError}</p>
+    {:else if form?.addressSaved}
+      <p data-address-saved>
+        {form.addressSaved.status !== "committed"
+          ? "Nothing to change."
+          : form.addressSaved.removed
+            ? `Removed (${form.addressSaved.deployCommit?.slice(0, 7) ?? ""}).`
+            : `Committed ${form.addressSaved.deployCommit?.slice(0, 7) ?? ""}: ${form.addressSaved.address}; it is reachable once it is applied.`}
+      </p>
+    {/if}
+  {/if}
+
   {#if data.access}
     <h2>Cluster access</h2>
     <ul>
@@ -229,10 +279,16 @@ const LANDING: Record<string, string> = {
           ><input type="checkbox" name="createNamespace" /> Also create the namespace (restricted Pod Security; removed
           with the component)</label
         >
-        <label
-          ><input type="checkbox" name="expose" /> Give the Service an address outside the cluster (a LoadBalancer),
-          for an edge proxy</label
-        >
+        {#if data.address?.available}
+          <p data-scaffold-address>
+            An address outside the cluster is given in the Address section once the manifests are there.
+          </p>
+        {:else}
+          <label
+            ><input type="checkbox" name="expose" /> Give the Service an address outside the cluster (a LoadBalancer),
+            for an edge proxy</label
+          >
+        {/if}
         {#if data.access?.registryPull.available}
           <label><input type="checkbox" name="registryPull" checked /> Pull with stardust's registry login</label>
         {/if}

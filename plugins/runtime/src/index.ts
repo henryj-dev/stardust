@@ -33,6 +33,7 @@ import {
   WorkloadEditError,
 } from "@stardust/core";
 import { parse, parseAllDocuments } from "yaml";
+import { addressRoutes } from "./address.ts";
 import { type RuntimeSettings, settingsProblems } from "./config.ts";
 import { readWorkload } from "./live.ts";
 import { secretFileRoutes } from "./secret-files.ts";
@@ -52,6 +53,9 @@ interface Needs {
   logs?: Ports["logs"];
   /** Optional: seals secret files; without it they cannot be set. */
   cipher?: Ports["cipher"];
+  /** Optional: where the databases plugin records the addresses it gave out. */
+  database?: Ports["database"];
+  log: FeatureContext["log"];
 }
 
 /** The component's manifests at `at`, path → text. */
@@ -388,6 +392,14 @@ function routes(needs: Needs, settings: RuntimeSettings): Route[] {
     ...workloadRoutes({ repo, component }),
     ...clusterRoleRoutes({ repo, component, allowed: settings.allowedClusterRoles ?? [] }),
     ...secretFileRoutes({ repo, cipher: needs.cipher, component }),
+    ...addressRoutes({
+      repo,
+      component,
+      settings: settings.external,
+      kube,
+      database: needs.database,
+      log: needs.log,
+    }),
   ];
 }
 
@@ -400,7 +412,7 @@ export const plugin = definePlugin({
   requires: ["kube", "deployRepo", "projects"],
   // The pod log page reads these; without saying so, logs-kube and logs-loki are never built.
   // The cipher seals secret files.
-  uses: ["logs", "cipher"],
+  uses: ["logs", "cipher", "database"],
   permissions: [
     { id: "runtime:view", description: "See a component's workloads, pods and events", grantedTo: "project-readers" },
     {
@@ -411,6 +423,11 @@ export const plugin = definePlugin({
     {
       id: "runtime:cluster-roles",
       description: "Bind a cluster-wide role, from the allowed ones, to a component's service account",
+      grantedTo: "admins",
+    },
+    {
+      id: "runtime:address",
+      description: "Give a component an address outside the cluster, or remove it",
       grantedTo: "admins",
     },
     {
@@ -429,6 +446,8 @@ export const plugin = definePlugin({
     "runtime.workload",
     "runtime.cluster-roles",
     "runtime.secret-files",
+    "runtime.address",
   ],
-  routes: ({ ports, config }: FeatureContext) => routes(ports as Needs, (config ?? {}) as RuntimeSettings),
+  routes: ({ ports, config, log }: FeatureContext) =>
+    routes({ ...(ports as Omit<Needs, "log">), log }, (config ?? {}) as RuntimeSettings),
 });

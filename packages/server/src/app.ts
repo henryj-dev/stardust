@@ -156,6 +156,11 @@ export interface Services {
    * ClusterRole in a component's namespace for the dashboard. Optional.
    */
   runtimeGrant?: RuntimeGrant;
+  /**
+   * Components get their address outside the cluster from the runtime plugin
+   * (`runtime.external`): scaffolding then refuses a plain LoadBalancer.
+   */
+  componentAddresses?: boolean;
   /** Kept build logs, served once the cluster has cleaned a build up. Optional. */
   store?: ObjectStore;
   /** The deploy repository, for rolling a component back. Without it rollback answers 404. */
@@ -1265,6 +1270,17 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     for (const key of ["createNamespace", "expose", "registryPull", "podView"] as const) {
       if (body[key] !== undefined && typeof body[key] !== "boolean")
         return c.json({ error: `${key} must be true or false` }, 400);
+    }
+    if (body.expose === true && services.componentAddresses) {
+      // A plain LoadBalancer has no fixed cluster IP or address of its own: an admission policy that
+      // asks for them refuses it, and the GitOps controller then stops applying everything after it.
+      return c.json(
+        {
+          error:
+            "addresses outside the cluster come from runtime.external here: scaffold without expose, then add one in the component's Address section",
+        },
+        400,
+      );
     }
     const access = {
       ...(body.registryPull === true ? { registryPull: true } : {}),
