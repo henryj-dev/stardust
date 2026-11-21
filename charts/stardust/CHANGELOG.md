@@ -1,5 +1,11 @@
 # stardust
 
+## 0.29.1
+
+### Patch Changes
+
+- [#147](https://github.com/henryj-dev/stardust/pull/147) [`0de2d76`](https://github.com/henryj-dev/stardust/commit/0de2d7639c5576f6d74651102ed3aef0c65ffced) Thanks [@mack-erel](https://github.com/mack-erel)! - Sign-ins through the dashboard are recorded with the browser's address and user agent. The client's `login`, `loginCode` and `oidcCallback` sent only a content type, so every password, second-step and single sign-on attempt from the dashboard was recorded with the dashboard's own address, whatever `ADDRESS_HEADER` said.
+
 ## 0.29.0
 
 ### Minor Changes
