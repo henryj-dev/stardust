@@ -170,6 +170,16 @@
         "resources": {
           "type": "object"
         },
+        "addressHeader": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9-]+)?$",
+          "description": "The header a reverse proxy puts the browser's address in, e.g. x-forwarded-for. Empty: the address the pod sees."
+        },
+        "xffDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "With x-forwarded-for: how many trusted proxies added an entry; 1 takes the one the nearest added."
+        },
         "regions": {
           "type": "object",
           "additionalProperties": {

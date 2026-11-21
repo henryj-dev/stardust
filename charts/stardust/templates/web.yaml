@@ -36,6 +36,15 @@ spec:
             - name: STARDUST_REGIONS
               value: {{ $parts := list }}{{ range $name, $url := . }}{{ $parts = append $parts (printf "%s=%s" $name $url) }}{{ end }}{{ join "," $parts | quote }}
             {{- end }}
+            {{- with .Values.web.addressHeader }}
+            # The browser's address, for the API's audit log, from the header the proxy sets.
+            - name: ADDRESS_HEADER
+              value: {{ . | quote }}
+            {{- if eq (lower .) "x-forwarded-for" }}
+            - name: XFF_DEPTH
+              value: {{ $.Values.web.xffDepth | default 1 | quote }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.config.server.publicUrl }}
             # Where people reach the dashboard. Without it the adapter assumes https and
             # refuses every form posted over plain http as cross-site.

@@ -60,6 +60,13 @@ web:
   # e.g. { dev-ams: https://stardust-api.ams.example.com }. Include this
   # installation's own region; its server stays the home region.
   regions: {}
+  # Behind a reverse proxy the web pod sees the proxy's address, and passes that
+  # on to the API's audit log for every browser. Name the header the proxy puts
+  # the browser's address in (e.g. x-forwarded-for), and with x-forwarded-for
+  # how many proxies you trust: 1 takes the address the nearest proxy added,
+  # which a browser cannot forge. Empty: the address the pod sees.
+  addressHeader: ""
+  xffDepth: 1
 
 # Builds run as Kubernetes Jobs in this namespace. When enabled, the worker
 # gets its own service account with a token and a Role limited to Jobs,
