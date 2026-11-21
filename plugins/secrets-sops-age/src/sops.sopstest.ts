@@ -8,6 +8,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { secretKeysOf, secretSetDocument, secretValuesOf } from "@stardust/core";
 import { parse } from "yaml";
 import { decrypt, encrypt, encryptIfChanged, type SopsOptions } from "./sops.ts";
 
@@ -51,6 +52,18 @@ describe("sops with age", () => {
     assert.ok(!enc.includes("hunter2"), "the plain value is not in the ciphertext");
     const back = parse(await decrypt(enc, opts)) as { stringData: Record<string, string> };
     assert.deepEqual(back.stringData, (parse(PLAIN) as { stringData: Record<string, string> }).stringData);
+  });
+
+  it("seals binary secret files under data: bytes come back as they went in, keys stay readable", async () => {
+    const kek = Buffer.from([0, 255, 1, 254, 0x80, 0x0a, 0x0d, 0x22, 0x5c]);
+    const plain = secretSetDocument({ component: "api", namespace: "demo", name: "kek", data: { key: kek } });
+    const enc = await encrypt(plain, opts);
+    const doc = parse(enc) as { data: Record<string, string> };
+    assert.ok(doc.data.key?.startsWith("ENC["), "the value is encrypted");
+    assert.deepEqual(secretKeysOf(enc), ["key"], "the key name is read without decrypting");
+    const back = secretValuesOf(await decrypt(enc, opts));
+    assert.ok(back.key?.equals(kek), "the same bytes");
+    assert.equal((await encryptIfChanged(enc, plain, opts)).changed, false);
   });
 
   it("encrypting twice gives different ciphertext; encryptIfChanged sees that nothing changed", async () => {

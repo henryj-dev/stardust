@@ -1,8 +1,10 @@
 import { ApiError } from "@stardust/sdk";
 import { error, fail } from "@sveltejs/kit";
-import type { ClusterRolesView, RuntimeView, WorkloadSettingsView } from "$lib/runtime";
+import type { ClusterRolesView, RuntimeView, SecretFilesView, WorkloadSettingsView } from "$lib/runtime";
 import { requireClient } from "$lib/server/api";
 import { readMounts } from "$lib/server/files-form";
+import { needsReauth, reauthFrom } from "$lib/server/reauth";
+import { readSecretFileForm, SecretFileFormError } from "$lib/server/secret-file-form";
 import { readStorageForm } from "$lib/server/storage-form";
 import { readWorkloadForm, WorkloadFormError } from "$lib/server/workload-form";
 import type { Actions, PageServerLoad } from "./$types";
@@ -65,11 +67,18 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
           .get<ClusterRolesView>(`${runtimePath(params.id, params.name)}/cluster-roles`)
           .catch(() => null)
       : null;
+    const secretFiles: SecretFilesView | null = has("runtime.secret-files")
+      ? await client
+          .plugin("runtime")
+          .get<SecretFilesView>(`${runtimePath(params.id, params.name)}/secret-files`)
+          .catch(() => null)
+      : null;
     return {
       files,
       storage,
       workload,
       clusterRoles,
+      secretFiles,
       access,
       projectId: params.id,
       component: params.name,
@@ -190,6 +199,39 @@ export const actions: Actions = {
     } catch (err) {
       const r = reason(err);
       return fail(r.status, { clusterRolesError: r.message });
+    }
+  },
+  // Secret files: add (generate or upload), replace or delete one key (administrators; the server checks).
+  secretFile: async ({ locals, params, request, url }) => {
+    const client = requireClient(locals, url);
+    const form = await request.formData();
+    let req: Awaited<ReturnType<typeof readSecretFileForm>>;
+    try {
+      req = await readSecretFileForm(form);
+    } catch (err) {
+      if (err instanceof SecretFileFormError) return fail(400, { secretFileError: err.message });
+      throw err;
+    }
+    if (form.get("proof")) {
+      const problem = await reauthFrom(client, form);
+      if (problem) return fail(403, { secretFileError: problem });
+    }
+    const path = `${runtimePath(params.id, params.name)}/secret-files/${encodeURIComponent(req.set)}/keys/${encodeURIComponent(req.key)}`;
+    const method = ({ add: "POST", replace: "PUT", delete: "DELETE" } as const)[req.op];
+    try {
+      const result = await client
+        .plugin("runtime")
+        .send<{ status: string; deployCommit: string | null }>(
+          method,
+          path,
+          req.op === "delete" ? undefined : req.body,
+        );
+      return { secretFileSaved: { ...result, op: req.op, set: req.set, key: req.key } };
+    } catch (err) {
+      if (needsReauth(err))
+        return fail(401, { secretFileError: "Confirm it is you: enter your password or a code, then try again." });
+      const r = reason(err);
+      return fail(r.status, { secretFileError: r.message });
     }
   },
   storage: async ({ locals, params, request, url }) => {

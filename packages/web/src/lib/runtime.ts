@@ -81,3 +81,11 @@ export interface ClusterRolesView {
   serviceAccount: boolean;
   namespace: string | null;
 }
+
+/** A component's secret files (`GET …/secret-files`): names only, never values. */
+export interface SecretFilesView {
+  /** Whether a cipher is configured to seal them. */
+  available: boolean;
+  fsGroup: number | null;
+  sets: Array<{ name: string; secret: string; path: string; keys: string[]; mounted: boolean }>;
+}
