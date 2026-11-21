@@ -9,6 +9,7 @@ import {
   can,
   checkFileMounts,
   checkStorage,
+  checkWorkloadChange,
   commitWithCas,
   type DeployRepo,
   decideAccess,
@@ -28,6 +29,7 @@ import {
   PipelineDefError,
   type PullTarget,
   pipelineDefFromComponents,
+  planWorkload,
   type RepoAccess,
   type ResolvedTarget,
   type RuntimeGrant,
@@ -35,6 +37,8 @@ import {
   scaffoldComponent,
   TargetError,
   trustOf,
+  type WorkloadChange,
+  WorkloadEditError,
 } from "@stardust/core";
 import {
   API_TOKEN_PREFIX,
@@ -1245,8 +1249,17 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       expose?: unknown;
       registryPull?: unknown;
       podView?: unknown;
+      workload?: unknown;
     } | null;
     if (typeof body?.namespace !== "string") return c.json({ error: "namespace is required" }, 400);
+    let workload: WorkloadChange | null = null;
+    if (body.workload !== undefined) {
+      try {
+        workload = checkWorkloadChange(body.workload);
+      } catch (err) {
+        return c.json({ error: `workload: ${(err as Error).message}` }, 400);
+      }
+    }
     if (body.port !== undefined && typeof body.port !== "number")
       return c.json({ error: "port must be a number" }, 400);
     for (const key of ["createNamespace", "expose", "registryPull", "podView"] as const) {
@@ -1273,6 +1286,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     }
     let occupied = false;
     let accessError: string | null = null;
+    let written = [...files.keys()];
     let listedIn: string | null = null;
     const result = await commitWithCas(repo, async (_head, at) => {
       occupied = (await at.list(component.deployDir)).length > 0;
@@ -1280,6 +1294,27 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       const commit = new Map<string, string | null>(
         [...files].map(([name, text]) => [`${component.deployDir}/${name}`, text]),
       );
+      if (workload) {
+        // The workload settings asked for, on the scaffolded files, before the access they get.
+        const scaffoldedFiles = new Map([...commit].filter((e): e is [string, string] => typeof e[1] === "string"));
+        let planned: Map<string, string | null>;
+        try {
+          planned = planWorkload(scaffoldedFiles, {
+            dir: component.deployDir,
+            component: component.name,
+            change: workload,
+          });
+        } catch (err) {
+          if (!(err instanceof WorkloadEditError)) throw err;
+          accessError = `workload: ${err.message}`;
+          return null;
+        }
+        for (const [path, text] of planned) {
+          if (text === null) commit.delete(path);
+          else commit.set(path, text);
+        }
+        written = [...commit.keys()].map((p) => p.slice(component.deployDir.length + 1));
+      }
       if (Object.keys(access).length > 0) {
         // The directory as it will be: the scaffolded files, then the access they get.
         const scaffolded: BoundRepo = {
@@ -1331,9 +1366,15 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       action: "project.component.scaffold",
       projectId: project.id,
       target: component.name,
-      detail: { deployDir: component.deployDir, files: [...files.keys()], listedIn, deployCommit },
+      detail: {
+        deployDir: component.deployDir,
+        files: [...written],
+        listedIn,
+        deployCommit,
+        ...(workload ? { workload } : {}),
+      },
     });
-    return c.json({ deployCommit, files: [...files.keys()].map((f) => `${component.deployDir}/${f}`), listedIn }, 201);
+    return c.json({ deployCommit, files: [...written].map((f) => `${component.deployDir}/${f}`), listedIn }, 201);
   });
 
   // Deletes a project with its runs and memberships (the audit log keeps

@@ -41,6 +41,7 @@ before(async () => {
       { name: "push", pipeline: "C", context: "push", deployDir: "clusters/one/apps/pico/push" },
       { name: "loose", pipeline: "C", deployDir: "elsewhere/loose" },
       { name: "flat", pipeline: "C", deployDir: "clusters/one/plain/flat" },
+      { name: "server", pipeline: "C", deployDir: "clusters/one/apps/pico/server" },
     ],
   });
   assert.equal(put.status, 200);
@@ -78,6 +79,25 @@ describe("scaffolding", () => {
       repo.files()["clusters/one/plain/kustomization.yaml"],
       "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n",
     );
+  });
+
+  it("scaffolds with the workload settings in the same commit, its account listed beside it", async () => {
+    assert.equal((await scaffold("server", { namespace: "pico", workload: { runAsUser: 0 } })).status, 400);
+    assert.equal(repo.files()["clusters/one/apps/pico/server/deployment.yaml"], undefined, "refused before writing");
+    const commits = repo.commitCount();
+    const made = await scaffold("server", {
+      namespace: "pico",
+      port: 8080,
+      workload: { serviceAccount: true, runAsUser: 1000, runAsGroup: 1000, oneAtATime: true },
+    });
+    assert.equal(made.status, 201);
+    assert.equal(repo.commitCount(), commits + 1, "one commit");
+    const body = (await made.json()) as { files: string[] };
+    assert.ok(body.files.includes("clusters/one/apps/pico/server/stardust-serviceaccount.yaml"), body.files.join());
+    const files = repo.files();
+    assert.match(files["clusters/one/apps/pico/server/deployment.yaml"] ?? "", /serviceAccountName: server/);
+    assert.match(files["clusters/one/apps/pico/server/deployment.yaml"] ?? "", /maxSurge: 0/);
+    assert.match(files["clusters/one/apps/pico/server/kustomization.yaml"] ?? "", /- stardust-serviceaccount.yaml/);
   });
 
   it("refuses a createNamespace that is not true or false", async () => {

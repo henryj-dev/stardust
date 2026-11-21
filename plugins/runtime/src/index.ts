@@ -33,6 +33,7 @@ import {
 } from "@stardust/core";
 import { parse, parseAllDocuments } from "yaml";
 import { readWorkload } from "./live.ts";
+import { workloadRoutes } from "./settings.ts";
 
 /** Pod-template annotation a restart writes; changing it rolls the workload out. */
 export const RESTART_ANNOTATION = "stardust.dev/restarted-at";
@@ -379,13 +380,14 @@ function routes(needs: Needs): Route[] {
         );
       },
     },
+    ...workloadRoutes({ repo, component }),
   ];
 }
 
 export const plugin = definePlugin({
   manifest: {
     name: "runtime",
-    description: "Shows what a component runs, and restarts, scales and sizes it through Git.",
+    description: "Shows what a component runs, and restarts, scales, sizes and configures it through Git.",
   },
   validateConfig(section) {
     if (typeof section !== "object" || section === null) return ["must be a mapping"];
@@ -396,7 +398,11 @@ export const plugin = definePlugin({
   uses: ["logs"],
   permissions: [
     { id: "runtime:view", description: "See a component's workloads, pods and events", grantedTo: "project-readers" },
-    { id: "runtime:operate", description: "Restart, scale and size a component", grantedTo: "project-writers" },
+    {
+      id: "runtime:operate",
+      description: "Restart, scale, size and configure a component",
+      grantedTo: "project-writers",
+    },
   ],
   capabilities: [
     "runtime.view",
@@ -405,6 +411,7 @@ export const plugin = definePlugin({
     "runtime.restart",
     "runtime.scale",
     "runtime.resources",
+    "runtime.workload",
   ],
   routes: ({ ports }: FeatureContext) => routes(ports as Needs),
 });
