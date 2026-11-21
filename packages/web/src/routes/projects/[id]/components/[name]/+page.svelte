@@ -352,6 +352,45 @@ const LANDING: Record<string, string> = {
     {/if}
   {/if}
 
+  {#if data.clusterRoles && (data.clusterRoles.allowed.length > 0 || data.clusterRoles.roles.length > 0)}
+    {@const cr = data.clusterRoles}
+    <h2>Cluster roles</h2>
+    <p role="note" data-cluster-wide>
+      <strong>Cluster-wide permission.</strong> A role bound here applies to <code>{data.component}</code>'s service
+      account across the whole cluster, not only in <code>{cr.namespace ?? "its namespace"}</code>. Only the roles the
+      configuration allows (<code>runtime.allowedClusterRoles</code>) can be bound, only by an administrator, and every
+      change is in the audit log.
+    </p>
+    {#if cr.roles.length > 0}
+      <p data-cluster-roles>Bound: {#each cr.roles as r, i (r)}{i > 0 ? ", " : ""}<code>{r}</code>{/each}</p>
+    {:else}
+      <p data-cluster-roles-none>None bound.</p>
+    {/if}
+    {#if !cr.serviceAccount}
+      <p data-cluster-roles-account>Turn on its own service account in the Workload section first.</p>
+    {:else if data.isAdmin}
+      <form method="POST" action="?/clusterRoles" data-cluster-roles-form>
+        {#each [...new Set([...cr.allowed, ...cr.roles])] as r (r)}
+          <label
+            ><input type="checkbox" name="roles" value={r} checked={cr.roles.includes(r)} /> <code>{r}</code>{cr.allowed.includes(r)
+              ? ""
+              : " (no longer allowed: untick to remove)"}</label
+          >
+        {/each}
+        <button type="submit">Save cluster roles</button>
+      </form>
+    {/if}
+    {#if form?.clusterRolesError}
+      <p role="alert" data-cluster-roles-error>{form.clusterRolesError}</p>
+    {:else if form?.clusterRolesSaved}
+      <p data-cluster-roles-saved>
+        {form.clusterRolesSaved.status === "committed"
+          ? `Committed ${form.clusterRolesSaved.deployCommit?.slice(0, 7) ?? ""}; it takes effect when it is applied.`
+          : "Nothing to change."}
+      </p>
+    {/if}
+  {/if}
+
   {#if data.files}
     <h2>Files</h2>
     <p>

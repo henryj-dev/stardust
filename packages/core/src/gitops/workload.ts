@@ -23,6 +23,8 @@ import { addResource, removeResource } from "./kustomization.ts";
 
 /** The service account file stardust writes. */
 export const SERVICE_ACCOUNT_FILE = "stardust-serviceaccount.yaml";
+/** The ClusterRoleBindings of the component's service account (see gitops/cluster-roles). */
+export const CLUSTER_ROLES_FILE = "stardust-cluster-roles.yaml";
 /** Pod volumes stardust manages for writable paths start with this. */
 export const WRITABLE_VOLUME_PREFIX = "stardust-writable-";
 export const serviceAccountName = (component: string) => component;
@@ -546,6 +548,11 @@ export function planWorkload(
   }
   if (workloads === 0) throw new WorkloadEditError(`${dir} has no Deployment, StatefulSet or DaemonSet`);
 
+  if (input.change.serviceAccount === false && files.has(`${dir}/${CLUSTER_ROLES_FILE}`)) {
+    throw new WorkloadEditError(
+      `${input.component}'s service account has cluster roles bound: remove them (Cluster roles) before turning it off`,
+    );
+  }
   if (input.change.serviceAccount !== undefined) {
     const path = `${dir}/${SERVICE_ACCOUNT_FILE}`;
     const kustomization = KUSTOMIZATIONS.map((k) => `${dir}/${k}`).find((p) => files.has(p));

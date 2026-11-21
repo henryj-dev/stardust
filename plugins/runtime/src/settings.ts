@@ -6,12 +6,15 @@
  */
 import {
   type BoundRepo,
+  CLUSTER_ROLES_FILE,
   checkWorkloadChange,
   commitWithCas,
+  planClusterRoles,
   planWorkload,
   type RepoIO,
   type Route,
   type RouteResponse,
+  readClusterRoles,
   readDirectoryWorkload,
   restrictedProblems,
   type WorkloadChange,
@@ -123,6 +126,84 @@ export function workloadRoutes(input: {
             };
           });
           return answer(result, { projectId: params.project ?? "", target: c.name, detail: { ...change } });
+        } catch (err) {
+          if (err instanceof WorkloadEditError) return { status: 400, body: { error: err.message } };
+          throw err;
+        }
+      },
+    },
+  ];
+}
+
+/**
+ * ClusterRoles bound to the component's own service account. Cluster-wide,
+ * so only roles listed in `runtime.allowedClusterRoles`, and only by an
+ * administrator (`runtime:cluster-roles`); every change is audited.
+ */
+export function clusterRoleRoutes(input: {
+  repo: RepoIO;
+  component: (params: Readonly<Record<string, string>>) => Promise<ComponentRef | null>;
+  allowed: readonly string[];
+}): Route[] {
+  const { repo, component, allowed } = input;
+  const path = "/projects/:project/components/:component/cluster-roles";
+  return [
+    {
+      method: "GET",
+      path,
+      permission: "runtime:view",
+      async handle({ params }) {
+        const c = await component(params);
+        if (!c) return { status: 404, body: { error: "unknown component" } };
+        const dir = dirOf(c);
+        const files = await readDir(await atHead(repo), dir);
+        const { settings } = readDirectoryWorkload(files, c.name);
+        const ns = settings ? workloadNamespace(files, dir) : null;
+        return {
+          status: 200,
+          body: {
+            allowed: [...allowed],
+            roles: readClusterRoles(files.get(`${dir}/${CLUSTER_ROLES_FILE}`) ?? ""),
+            serviceAccount: settings?.serviceAccount === true,
+            namespace: typeof ns === "string" ? ns : null,
+          },
+        };
+      },
+    },
+    {
+      method: "PUT",
+      path,
+      permission: "runtime:cluster-roles",
+      audit: "runtime.cluster-roles",
+      async handle({ params, body, user }) {
+        const c = await component(params);
+        if (!c) return { status: 404, body: { error: "unknown component" } };
+        const roles = (body as { roles?: unknown } | null)?.roles;
+        if (!Array.isArray(roles) || roles.some((r) => typeof r !== "string"))
+          return { status: 400, body: { error: "roles must be a list of ClusterRole names" } };
+        const refused = roles.filter((r) => !allowed.includes(r));
+        if (refused.length > 0) {
+          return {
+            status: 400,
+            body: {
+              error: `${refused.join(", ")} ${refused.length === 1 ? "is" : "are"} not in runtime.allowedClusterRoles${
+                allowed.length === 0 ? ", which lists none" : ` (${allowed.join(", ")})`
+              }`,
+            },
+          };
+        }
+        const want = [...new Set(roles as string[])].sort();
+        const dir = dirOf(c);
+        try {
+          const result = await commitWithCas(repo, async (_head, at) => {
+            const files = planClusterRoles(await readDir(at, dir), { dir, component: c.name, roles: want });
+            if (files.size === 0) return null;
+            return {
+              files,
+              message: `chore(${params.project}/${c.name}): cluster roles — ${want.length > 0 ? want.join(", ") : "none"}\n\nCluster-wide. By ${user.username}.`,
+            };
+          });
+          return answer(result, { projectId: params.project ?? "", target: c.name, detail: { roles: want } });
         } catch (err) {
           if (err instanceof WorkloadEditError) return { status: 400, body: { error: err.message } };
           throw err;

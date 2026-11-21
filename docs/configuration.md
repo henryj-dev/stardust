@@ -422,6 +422,31 @@ standard would refuse the pods, if it would. Scaffolding takes the same
 settings as `"workload": {…}`. Changes are audited as `runtime.workload`,
 with the field names.
 
+#### Cluster roles
+
+Some apps need a cluster-wide permission for their own service account, for
+example `system:auth-delegator` to check their callers' tokens with a
+TokenReview. List the ClusterRoles that may be bound:
+
+```yaml
+runtime:
+  allowedClusterRoles: [system:auth-delegator]
+```
+
+The component's page then has a **Cluster roles** section, marked as a
+cluster-wide permission (`GET`/`PUT
+/api/v1/plugins/runtime/projects/<p>/components/<c>/cluster-roles` with
+`{"roles": [...]}`). Only administrators change it (the permission
+`runtime:cluster-roles`), only roles in the list are accepted, and every
+change is audited as `runtime.cluster-roles`. The component must run as its
+own service account (Workload section), which cannot be turned off while a
+role is bound. The bindings are written to `stardust-cluster-roles.yaml`
+(one ClusterRoleBinding per role, named
+`stardust-<namespace>-<component>-<role>`) and listed in the kustomization,
+so withdrawing the component removes them. The GitOps controller applies
+them, so it must be allowed to create ClusterRoleBindings and to bind those
+roles; stardust's own service account gets no new permission.
+
 ### `logs-kube` and `logs-loki`
 
 Pod logs on a component's page, through the runtime plugin. `logs-kube` reads
