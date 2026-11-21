@@ -126,3 +126,24 @@ describe("workload settings in a Git deploy repository", () => {
     assert.deepEqual([s.serviceAccount, s.writablePaths, s.oneAtATime], [true, ["/tmp"], true]);
   });
 });
+
+describe("cluster roles in a Git deploy repository", () => {
+  const call = runtimeFeature({ allowedClusterRoles: ["system:auth-delegator"] });
+  const path = "/projects/:project/components/:component/cluster-roles";
+
+  it("commits the binding with its list entry, refuses a role not allowed, and pushes nothing then", async () => {
+    const before = fixture.head();
+    assert.equal((await call("PUT", path, { roles: ["cluster-admin"] })).status, 400);
+    assert.equal(fixture.head(), before, "nothing pushed");
+    const res = await call("PUT", path, { roles: ["system:auth-delegator"] });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const crb = parse(fixture.read(`${DIR}/stardust-cluster-roles.yaml`) ?? "");
+    assert.deepEqual(crb.subjects, [{ kind: "ServiceAccount", name: "server", namespace: "app" }]);
+    assert.match(fixture.read(`${DIR}/kustomization.yaml`) ?? "", /- stardust-cluster-roles.yaml/);
+    const off = await call("PUT", "/projects/:project/components/:component/workload", { serviceAccount: false });
+    assert.equal(off.status, 400, "the account stays while a role is bound to it");
+    assert.equal((await call("PUT", path, { roles: [] })).status, 200);
+    assert.equal(fixture.read(`${DIR}/stardust-cluster-roles.yaml`), null);
+    assert.doesNotMatch(fixture.read(`${DIR}/kustomization.yaml`) ?? "", /stardust-cluster-roles/);
+  });
+});

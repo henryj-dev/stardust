@@ -111,7 +111,7 @@ const source = (kind: "live" | "history") => ({
   },
 });
 
-function setup(withLogs = true) {
+function setup(withLogs = true, config: Record<string, unknown> = {}) {
   const repo = new MemoryRepo({
     [`${DIR}/deployment.yaml`]: DEPLOYMENT,
     [`${DIR}/service.yaml`]:
@@ -125,7 +125,7 @@ function setup(withLogs = true) {
   const logs = withLogs ? { kube: source("live"), loki: source("history") } : undefined;
   const [feature] = buildFeatures(
     [plugin],
-    { runtime: {} },
+    { runtime: config },
     { kube, deployRepo: { repo }, projects, ...(logs ? { logs } : {}) },
     quiet,
     "test",
@@ -288,8 +288,36 @@ describe("runtime", () => {
     assert.equal(repo.commitCount(), 1);
   });
 
+  it("binds only allowed cluster roles, only to the component's own account, as an administrator", async () => {
+    const { repo, route, call } = setup(true, { allowedClusterRoles: ["system:auth-delegator"] });
+    const put = route("PUT", "/projects/:project/components/:component/cluster-roles");
+    assert.equal(put.permission, "runtime:cluster-roles");
+    assert.equal(plugin.permissions?.find((p) => p.id === put.permission)?.grantedTo, "admins");
+    assert.equal(put.audit, "runtime.cluster-roles");
+    const refused = await call(put, params, { roles: ["cluster-admin"] });
+    assert.equal(refused.status, 400);
+    assert.match((refused.body as { error: string }).error, /not in runtime.allowedClusterRoles/);
+    const noAccount = await call(put, params, { roles: ["system:auth-delegator"] });
+    assert.equal(noAccount.status, 400, "the component's own account comes first");
+    assert.equal(repo.commitCount(), 0);
+    await call(route("PUT", "/projects/:project/components/:component/workload"), params, { serviceAccount: true });
+    const bound = await call(put, params, { roles: ["system:auth-delegator"] });
+    assert.equal(bound.status, 200, JSON.stringify(bound.body));
+    assert.deepEqual(bound.audit?.detail, { roles: ["system:auth-delegator"] });
+    assert.match(repo.files()[`${DIR}/kustomization.yaml`] ?? "", /- stardust-cluster-roles.yaml/);
+    const view = await call(route("GET", "/projects/:project/components/:component/cluster-roles"), params);
+    assert.deepEqual(view.body, {
+      allowed: ["system:auth-delegator"],
+      roles: ["system:auth-delegator"],
+      serviceAccount: true,
+      namespace: "demo",
+    });
+  });
+
   it("needs the Kubernetes API, the deploy repository and the projects", () => {
     assert.deepEqual(plugin.requires, ["kube", "deployRepo", "projects"]);
     assert.deepEqual(plugin.validateConfig({ extra: 1 }), ['unknown key "extra"']);
+    assert.deepEqual(plugin.validateConfig({ allowedClusterRoles: ["system:auth-delegator"] }), []);
+    assert.equal(plugin.validateConfig({ allowedClusterRoles: ["Not A Role"] }).length, 1);
   });
 });

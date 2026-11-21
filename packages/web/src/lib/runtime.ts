@@ -72,3 +72,12 @@ export interface WorkloadSettingsView {
   /** Why a namespace enforcing the restricted Pod Security standard would refuse the pods. */
   podSecurity: string[];
 }
+
+/** ClusterRoles bound to a component's own service account (`GET …/cluster-roles`). */
+export interface ClusterRolesView {
+  /** The roles the configuration allows (`runtime.allowedClusterRoles`). */
+  allowed: string[];
+  roles: string[];
+  serviceAccount: boolean;
+  namespace: string | null;
+}

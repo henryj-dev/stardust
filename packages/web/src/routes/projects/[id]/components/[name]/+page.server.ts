@@ -1,6 +1,6 @@
 import { ApiError } from "@stardust/sdk";
 import { error, fail } from "@sveltejs/kit";
-import type { RuntimeView, WorkloadSettingsView } from "$lib/runtime";
+import type { ClusterRolesView, RuntimeView, WorkloadSettingsView } from "$lib/runtime";
 import { requireClient } from "$lib/server/api";
 import { readMounts } from "$lib/server/files-form";
 import { readStorageForm } from "$lib/server/storage-form";
@@ -59,10 +59,17 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
           .get<WorkloadSettingsView>(`${runtimePath(params.id, params.name)}/workload`)
           .catch(() => null)
       : null;
+    const clusterRoles: ClusterRolesView | null = has("runtime.cluster-roles")
+      ? await client
+          .plugin("runtime")
+          .get<ClusterRolesView>(`${runtimePath(params.id, params.name)}/cluster-roles`)
+          .catch(() => null)
+      : null;
     return {
       files,
       storage,
       workload,
+      clusterRoles,
       access,
       projectId: params.id,
       component: params.name,
@@ -165,6 +172,24 @@ export const actions: Actions = {
     } catch (err) {
       const r = reason(err);
       return fail(r.status, { workloadError: r.message });
+    }
+  },
+  // Cluster-wide roles for the component's own account: exactly the ticked ones (administrators; the server checks).
+  clusterRoles: async ({ locals, params, request, url }) => {
+    const client = requireClient(locals, url);
+    const roles = (await request.formData()).getAll("roles").map(String);
+    try {
+      const result = await client
+        .plugin("runtime")
+        .send<{ status: string; deployCommit: string | null }>(
+          "PUT",
+          `${runtimePath(params.id, params.name)}/cluster-roles`,
+          { roles },
+        );
+      return { clusterRolesSaved: result };
+    } catch (err) {
+      const r = reason(err);
+      return fail(r.status, { clusterRolesError: r.message });
     }
   },
   storage: async ({ locals, params, request, url }) => {
