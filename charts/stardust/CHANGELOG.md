@@ -1,5 +1,13 @@
 # stardust
 
+## 0.29.0
+
+### Minor Changes
+
+- [#144](https://github.com/henryj-dev/stardust/pull/144) [`5ed0341`](https://github.com/henryj-dev/stardust/commit/5ed03410b0cf85cf3ad32455341d6e002befbae0) Thanks [@mack-erel](https://github.com/mack-erel)! - The ports of a component's address outside the cluster can be changed in place: "Change the ports" on the component's page (`PUT /api/v1/plugins/runtime/projects/<p>/components/<c>/address/ports`, `{"ports": [{"port": 443, "targetPort": 8443}]}`, or no body for every port its containers declare) rewrites only the Service's ports, keeping its name, cluster IP and address, so nothing that routes to it has to change. Audited as `runtime.address.ports`. Giving the same port twice, when adding an address or changing its ports, is refused: the API server would refuse the Service and stop the GitOps controller.
+
+- [#146](https://github.com/henryj-dev/stardust/pull/146) [`b4b06a0`](https://github.com/henryj-dev/stardust/commit/b4b06a0901a64b8d2fb807456248bbeacdf9b1e3) Thanks [@mack-erel](https://github.com/mack-erel)! - The chart sets the web pod's `ADDRESS_HEADER` and `XFF_DEPTH` from `web.addressHeader` and `web.xffDepth` (default 1). Behind a reverse proxy the dashboard otherwise passes the proxy's address to the audit log for every browser sign-in and action.
+
 ## 0.28.2
 
 ### Patch Changes
