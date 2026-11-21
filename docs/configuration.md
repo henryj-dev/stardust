@@ -520,8 +520,13 @@ already, when a manifest in the scanned directories declares a Service of the
 same name and namespace, or when the cluster has one (read with the access the
 chart gives in the namespace; when that cannot be read, the check is skipped
 and logged): a second Service of one name with another cluster IP stops the
-GitOps controller. `DELETE` on the same path removes it. Both are audited
-(`runtime.address.add`, `runtime.address.remove`).
+GitOps controller. "Change the ports" (`PUT …/address/ports`, the same body;
+without one, every port its containers declare) rewrites only the Service's
+ports: its name, cluster IP and address stay, so an edge proxy or a static
+route to it need not change. A port given twice is refused (400): the API
+server would refuse the Service. `DELETE` on the address removes it. All three
+are audited (`runtime.address.add`, `runtime.address.ports`,
+`runtime.address.remove`).
 
 With `runtime.external` set, scaffolding refuses `"expose": true` (a plain
 LoadBalancer, which such a policy refuses, and a refused object stops the

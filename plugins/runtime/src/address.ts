@@ -60,13 +60,17 @@ function portsOf(files: ReadonlyMap<string, string>, component: string, body: un
   if (asked !== undefined) {
     if (!Array.isArray(asked) || asked.length === 0 || asked.length > 16)
       throw new Refused(400, "ports must be a list of { port, targetPort }");
-    return asked.map((p, i) => {
+    const mapped = asked.map((p, i) => {
       const { port, targetPort = port } = (p ?? {}) as { port?: unknown; targetPort?: unknown };
       for (const v of [port, targetPort])
         if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 65535)
           throw new Refused(400, `ports.${i} must be 1-65535`);
       return { name: `p${port}`, port: port as number, targetPort: targetPort as number };
     });
+    const twice = mapped.find((p, i) => mapped.findIndex((q) => q.port === p.port) !== i);
+    // Two entries for one port make the API server refuse the Service, which stops the GitOps controller.
+    if (twice) throw new Refused(400, `port ${twice.port} is given twice`);
+    return mapped;
   }
   const found = new Set<number>();
   for (const file of new Set(findWorkloads(files).map((w) => w.file))) {
@@ -258,6 +262,60 @@ export function addressRoutes(input: {
           });
           if (res.status === 200 && picked) res.body = { ...(res.body as object), ...(picked as object) };
           return res;
+        } catch (err) {
+          if (err instanceof Refused) return { status: err.status, body: { error: err.message } };
+          if (err instanceof WorkloadEditError) return { status: 400, body: { error: err.message } };
+          throw err;
+        }
+      },
+    },
+    {
+      // Changes only the ports: the Service keeps its name, cluster IP and address, so nothing
+      // that already routes to it (an edge proxy, a static route) has to change.
+      method: "PUT",
+      path: `${path}/ports`,
+      permission: "runtime:address",
+      audit: "runtime.address.ports",
+      async handle({ params, body, user }) {
+        const c = await component(params);
+        if (!c) return { status: 404, body: { error: "unknown component" } };
+        const dir = dirOf(c);
+        const name = addressServiceName(c.name);
+        let changed: { from: unknown; to: unknown } | null = null;
+        try {
+          const result = await commitWithCas(repo, async (_head, at) => {
+            const files = await readDir(at, dir);
+            const file = `${dir}/${ADDRESS_FILE}`;
+            const text = files.get(file);
+            if (text === undefined) throw new Refused(404, `${c.name} has no address outside (${file})`);
+            const ports = portsOf(files, c.name, body);
+            const docs = parseAllDocuments(text);
+            const doc = docs.find((d) => {
+              const o =
+                d.errors.length === 0 ? (d.toJS() as { kind?: string; metadata?: { name?: string } } | null) : null;
+              return o?.kind === "Service" && o.metadata?.name === name;
+            });
+            if (!doc || !("setIn" in doc)) throw new Refused(409, `${file} does not declare the Service ${name}`);
+            const before = (doc.toJS() as { spec?: { ports?: Array<{ port: number; targetPort: number }> } }).spec
+              ?.ports;
+            const next = ports.map((p) => ({ name: p.name, port: p.port, targetPort: p.targetPort, protocol: "TCP" }));
+            if (JSON.stringify(before ?? null) === JSON.stringify(next)) return null;
+            doc.setIn(["spec", "ports"], doc.createNode(next));
+            const out = docs.map((d) => d.toString({ lineWidth: 0 })).join("---\n");
+            changed = {
+              from: (before ?? []).map((p) => ({ port: p.port, targetPort: p.targetPort })),
+              to: ports.map((p) => ({ port: p.port, targetPort: p.targetPort })),
+            };
+            return {
+              files: new Map<string, string | null>([[file, out]]),
+              message: `chore(${params.project}/${c.name}): ports of the address outside\n\nBy ${user.username}.`,
+            };
+          });
+          return answer(result, {
+            projectId: params.project ?? "",
+            target: c.name,
+            detail: { service: name, ...(changed ?? {}) },
+          });
         } catch (err) {
           if (err instanceof Refused) return { status: err.status, body: { error: err.message } };
           if (err instanceof WorkloadEditError) return { status: 400, body: { error: err.message } };

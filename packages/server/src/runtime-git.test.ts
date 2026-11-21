@@ -262,11 +262,43 @@ describe("a component's address outside the cluster, in a Git deploy repository"
     assert.deepEqual([view.address.address, view.address.problems], ["10.0.8.12", []]);
   });
 
+  it("changes only the ports: the same name, cluster IP and address", async () => {
+    const before = parse(fixture.read(vip) ?? "");
+    const res = await call("PUT", `${path}/ports`, { ports: [{ port: 443, targetPort: 8443 }, { port: 9000 }] });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal((res.body as { status: string }).status, "committed");
+    const after = parse(fixture.read(vip) ?? "");
+    assert.equal(after.spec.clusterIP, before.spec.clusterIP);
+    assert.equal(
+      after.metadata.annotations["lbipam.cilium.io/ips"],
+      before.metadata.annotations["lbipam.cilium.io/ips"],
+    );
+    assert.deepEqual(
+      after.spec.ports.map((p: { port: number; targetPort: number }) => [p.port, p.targetPort]),
+      [
+        [443, 8443],
+        [9000, 9000],
+      ],
+    );
+    assert.deepEqual(addressPolicyProblems(after, EXTERNAL), [], "still the shape the policy admits");
+    const again = await call("PUT", `${path}/ports`, { ports: [{ port: 443, targetPort: 8443 }, { port: 9000 }] });
+    assert.equal((again.body as { status: string }).status, "up-to-date");
+    const head = fixture.head();
+    const twice = await call("PUT", `${path}/ports`, { ports: [{ port: 443 }, { port: 443, targetPort: 8443 }] });
+    assert.equal(twice.status, 400);
+    assert.match((twice.body as { error: string }).error, /port 443 is given twice/);
+    assert.equal(fixture.head(), head, "nothing pushed");
+  });
+
   it("does not give a second address, and removes the one it gave", async () => {
     assert.equal((await call("POST", path, { ports: [{ port: 8080 }] })).status, 409);
     assert.equal((await call("DELETE", path)).status, 200);
     assert.equal(fixture.read(vip), null);
     assert.doesNotMatch(fixture.read(`${DIR}/kustomization.yaml`) ?? "", /stardust-address/);
+  });
+
+  it("has no ports to change without an address", async () => {
+    assert.equal((await call("PUT", `${path}/ports`, { ports: [{ port: 8080 }] })).status, 404);
   });
 
   it("refuses a name another file in the repository declares, and pushes nothing", async () => {

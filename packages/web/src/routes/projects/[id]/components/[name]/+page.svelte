@@ -164,6 +164,20 @@ const LANDING: Record<string, string> = {
         </div>
       {/if}
       {#if data.isAdmin}
+        <form method="POST" action="?/address" data-address-ports>
+          <input type="hidden" name="op" value="ports" />
+          <label>
+            Ports
+            <input
+              name="ports"
+              value={a.ports.map((p) => (p.port === p.targetPort ? `${p.port}` : `${p.port}:${p.targetPort}`)).join(", ")}
+              placeholder="8080, or 443:8443"
+              autocomplete="off"
+            />
+            <small>the address and cluster IP stay; empty: every port its containers declare</small>
+          </label>
+          <button type="submit">Change the ports</button>
+        </form>
         <form method="POST" action="?/address" data-address-remove>
           <input type="hidden" name="op" value="remove" />
           <button type="submit">Remove the address</button>
@@ -188,6 +202,8 @@ const LANDING: Record<string, string> = {
           ? "Nothing to change."
           : form.addressSaved.removed
             ? `Removed (${form.addressSaved.deployCommit?.slice(0, 7) ?? ""}).`
+            : form.addressSaved.portsOnly
+              ? `Ports committed ${form.addressSaved.deployCommit?.slice(0, 7) ?? ""}, at the same address; they change once it is applied.`
             : `Committed ${form.addressSaved.deployCommit?.slice(0, 7) ?? ""}: ${form.addressSaved.address}; it is reachable once it is applied.`}
       </p>
     {/if}

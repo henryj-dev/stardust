@@ -241,11 +241,14 @@ export const actions: Actions = {
       return fail(r.status, { secretFileError: r.message });
     }
   },
-  // The address outside the cluster: add one (ports from the form, or the containers'), or remove it.
+  // The address outside the cluster: add one (ports from the form, or the containers'), change its
+  // ports (the same address and cluster IP), or remove it.
   address: async ({ locals, params, request, url }) => {
     const client = requireClient(locals, url);
     const form = await request.formData();
-    const remove = form.get("op") === "remove";
+    const op = String(form.get("op") ?? "add");
+    const remove = op === "remove";
+    const portsOnly = op === "ports";
     const raw = String(form.get("ports") ?? "").trim();
     const ports: Array<{ port: number; targetPort: number }> = [];
     for (const part of raw.split(/[\s,]+/).filter(Boolean)) {
@@ -257,11 +260,11 @@ export const actions: Actions = {
       const result = await client
         .plugin("runtime")
         .send<{ status: string; deployCommit: string | null; address?: string; clusterIP?: string }>(
-          remove ? "DELETE" : "POST",
-          `${runtimePath(params.id, params.name)}/address`,
+          remove ? "DELETE" : portsOnly ? "PUT" : "POST",
+          `${runtimePath(params.id, params.name)}/address${portsOnly ? "/ports" : ""}`,
           remove ? undefined : ports.length > 0 ? { ports } : {},
         );
-      return { addressSaved: { ...result, removed: remove } };
+      return { addressSaved: { ...result, removed: remove, portsOnly } };
     } catch (err) {
       const r = reason(err);
       return fail(r.status, { addressError: r.message });
