@@ -184,11 +184,15 @@ export class MemoryRepo implements RepoIO {
   }
 
   async listDir(path: string, ref: string): Promise<string[]> {
-    const prefix = `${path.replace(/\/$/, "")}/`;
-    return [...this.at(ref).files.keys()]
-      .filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes("/"))
-      .map((p) => p.slice(prefix.length))
-      .sort();
+    // As Git lists a tree: the files and the directories directly inside; "" is the root.
+    const dir = path.replace(/\/$/, "");
+    const prefix = dir ? `${dir}/` : "";
+    const names = new Set<string>();
+    for (const p of this.at(ref).files.keys()) {
+      if (!p.startsWith(prefix)) continue;
+      names.add(p.slice(prefix.length).split("/")[0] as string);
+    }
+    return [...names].sort();
   }
 
   async commit(changes: PendingCommit, message: string, expectedHead: string): Promise<CommitResult> {

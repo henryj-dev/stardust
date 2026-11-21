@@ -216,4 +216,33 @@ describe("an address outside the cluster, in a Git deploy repository", () => {
     const listed = parse(remoteFile("deploy/databases/notes/kustomization.yaml") ?? "") as { resources: string[] };
     assert.ok(listed.resources.includes("db.service.yaml"));
   });
+  it("skips an N an app's own Service holds anywhere in the repository, not only under the root", async () => {
+    git(hand, "pull", "-q", "origin", "main");
+    write(
+      "clusters/one/apps/shop/vip.yaml",
+      [
+        "apiVersion: v1",
+        "kind: Service",
+        "metadata:",
+        "  name: shop-vip",
+        "  namespace: apps",
+        "  annotations:",
+        "    lbipam.cilium.io/ips: 10.0.8.11",
+        "spec:",
+        "  type: LoadBalancer",
+        "  clusterIP: 10.0.0.11",
+        "",
+      ].join("\n"),
+    );
+    git(hand, "add", "-A");
+    git(hand, "commit", "-q", "-m", "an app's address, by hand");
+    git(hand, "push", "-q", "origin", "main");
+    const res = await call("POST", "/databases", { name: "ledger" });
+    assert.equal(res.status, 201);
+    assert.equal(
+      clusterIP("deploy/databases/ledger/db.service.yaml"),
+      "10.0.0.13",
+      ".10 orders, .11 the app, .12 notes",
+    );
+  });
 });

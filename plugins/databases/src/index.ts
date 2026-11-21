@@ -19,6 +19,7 @@
  *       addressAnnotation: lbipam.cilium.io/ips
  *       labels: { example.com/pool: db }
  *       annotations: { service.cilium.io/forwarding-mode: dsr }
+ *       scan: [""]                #   where held addresses are read (default: the whole repository)
  *
  * Point a GitOps Kustomization at `root`. The storage credentials Secret
  * (`access-key-id`, `secret-access-key`) must exist in each namespace that is
@@ -32,6 +33,7 @@ import {
   type Database,
   definePlugin,
   type FeatureContext,
+  heldInRepository,
   isKubeName,
   isSqlName,
   listResources,
@@ -349,7 +351,14 @@ export function databasesFeature(ctx: FeatureContext) {
         `the cluster has a Service ${instance.namespace}/${serviceName} already, which ${dir} does not hold: stardust does not commit a second one of that name`,
       );
     const blocks = blocksOf(external);
-    const used = usedOffsets(blocks, [...clusterHeld, ...(await heldUnderRoot(change, at, q, external))]);
+    // Every Service in the deploy repository counts, not only those under the root: an app's
+    // own (or a component's address outside) may hold an N in the same blocks.
+    const inRepository = await heldInRepository(at, external.scan ?? [""], external.addressAnnotation);
+    const used = usedOffsets(blocks, [
+      ...clusterHeld,
+      ...inRepository.addresses,
+      ...(await heldUnderRoot(change, at, q, external)),
+    ]);
     const n = pickOffset(blocks, used);
     if (n === null)
       throw new Refused(
