@@ -447,6 +447,41 @@ so withdrawing the component removes them. The GitOps controller applies
 them, so it must be allowed to create ClusterRoleBindings and to bind those
 roles; stardust's own service account gets no new permission.
 
+#### Secret files
+
+Some secrets are read from disk and are not environment variables: a key of
+32 random bytes, a binary keystore. The env page's secrets cannot hold them
+(their Secret is read whole with `envFrom`, and takes UTF-8 text). The
+component's page has a **Secret files** section for these (needs
+`secrets-sops-age`; changes are an administrator's, the permission
+`runtime:secrets`):
+
+- each **set** is a Secret of its own, `<component>-files-<set>`, sealed with
+  SOPS in `secret-files-<set>.secret.enc.yaml` and listed in the
+  kustomization. It is never in `envFrom`.
+- it is mounted read-only at `/run/secrets/<set>/<key>`, one file per key,
+  mode 0440: readable through the pod's `fsGroup`, which must be set
+  (Workload section) before a set is added.
+- a value is **generated** by stardust (`{"generate": {"bytes": 32,
+  "encoding": "raw"}}`, 16 to 4096 bytes, raw, base64 or hex), so it never
+  passes through a person, or **uploaded** (`{"value": "<base64>"}`, at most
+  256 KiB, binary is fine). It is never shown, returned or logged; only set
+  and key names are.
+
+```text
+POST   /api/v1/plugins/runtime/projects/<p>/components/<c>/secret-files/<set>/keys/<key>   add (409 if it exists)
+PUT    …/secret-files/<set>/keys/<key>                                                       replace (a recent sign-in)
+DELETE …/secret-files/<set>/keys/<key>                                                       delete (a recent sign-in)
+GET    …/secret-files                                                                        sets, keys and paths
+```
+
+Adding never overwrites a key; replacing or deleting one loses the old value
+for good, so the page asks for a confirmation and a recent sign-in. Deleting
+the last key of a set removes its file, its mount and its list entry. Each
+change is one commit, audited as `runtime.secret-files.add`, `.replace` or
+`.delete` with the set and key names (and how many bytes were generated or
+uploaded).
+
 ### `logs-kube` and `logs-loki`
 
 Pod logs on a component's page, through the runtime plugin. `logs-kube` reads

@@ -391,6 +391,84 @@ const LANDING: Record<string, string> = {
     {/if}
   {/if}
 
+  {#if data.secretFiles}
+    {@const sf = data.secretFiles}
+    <h2>Secret files</h2>
+    <p>
+      Secrets read from disk that are not environment variables, such as a 32-byte key. Each set is a Secret of its
+      own, sealed in the deploy repository, mounted read-only at <code>/run/secrets/&lt;set&gt;/&lt;key&gt;</code>
+      (mode 0440, readable through the pod's fsGroup). stardust can generate a value, so it never passes through a
+      person; values are never shown.
+    </p>
+    {#if !sf.available}
+      <p data-secret-files-off>No cipher is configured (<code>secrets-sops-age</code>), so secret files cannot be sealed.</p>
+    {/if}
+    {#if sf.fsGroup === null}
+      <p role="alert" data-secret-files-fsgroup>Set fsGroup in the Workload section first: the files are readable by their group only.</p>
+    {/if}
+    {#if sf.sets.length > 0}
+      <table data-secret-sets>
+        <thead><tr><th>File</th><th>Secret</th><th></th></tr></thead>
+        <tbody>
+          {#each sf.sets as s (s.name)}
+            {#each s.keys as k (k)}
+              <tr data-secret-key={`${s.name}/${k}`}>
+                <td><code>{s.path}/{k}</code>{s.mounted ? "" : " (not mounted)"}</td>
+                <td><code>{s.secret}</code></td>
+                <td>
+                  {#if data.isAdmin}
+                    <details>
+                      <summary>Replace or delete</summary>
+                      <form method="POST" action="?/secretFile">
+                        <input type="hidden" name="set" value={s.name} />
+                        <input type="hidden" name="key" value={k} />
+                        <label><input type="radio" name="op" value="replace" checked /> Replace with
+                          <input name="bytes" type="number" min="16" max="4096" value="32" size="5" aria-label="Bytes" /> new random bytes</label>
+                        <label><input type="radio" name="op" value="delete" /> Delete</label>
+                        <label><input type="checkbox" name="confirm" /> I understand the current value is gone for good</label>
+                        <label>Your password, or a code (when you signed in more than a few minutes ago)
+                          <input name="proof" type="password" autocomplete="current-password" /></label>
+                        <button type="submit">Apply</button>
+                      </form>
+                    </details>
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          {/each}
+        </tbody>
+      </table>
+    {:else}
+      <p data-secret-files-none>None yet.</p>
+    {/if}
+    {#if data.isAdmin && sf.available}
+      <form method="POST" action="?/secretFile" enctype="multipart/form-data" data-secret-file-add>
+        <input type="hidden" name="op" value="add" />
+        <label>Set <input name="set" required pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?" placeholder="kek" size="10" autocomplete="off" /></label>
+        <label>Key (file name) <input name="key" required pattern="[A-Za-z0-9._-]+" placeholder="key" size="12" autocomplete="off" /></label>
+        <label><input type="radio" name="source" value="generate" checked /> Generate
+          <input name="bytes" type="number" min="16" max="4096" value="32" size="5" aria-label="Bytes" /> random bytes as
+          <select name="encoding" aria-label="Encoding">
+            <option value="raw">raw bytes</option>
+            <option value="base64">base64 text</option>
+            <option value="hex">hex text</option>
+          </select></label
+        >
+        <label><input type="radio" name="source" value="upload" /> Upload a file <input type="file" name="file" /></label>
+        <button type="submit">Add secret file</button>
+      </form>
+    {/if}
+    {#if form?.secretFileError}
+      <p role="alert" data-secret-file-error>{form.secretFileError}</p>
+    {:else if form?.secretFileSaved}
+      <p data-secret-file-saved>
+        {form.secretFileSaved.status === "committed"
+          ? `${form.secretFileSaved.set}/${form.secretFileSaved.key}: committed ${form.secretFileSaved.deployCommit?.slice(0, 7) ?? ""}; it takes effect when it is applied.`
+          : "Nothing to change."}
+      </p>
+    {/if}
+  {/if}
+
   {#if data.files}
     <h2>Files</h2>
     <p>

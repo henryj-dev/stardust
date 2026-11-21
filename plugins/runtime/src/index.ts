@@ -35,6 +35,7 @@ import {
 import { parse, parseAllDocuments } from "yaml";
 import { type RuntimeSettings, settingsProblems } from "./config.ts";
 import { readWorkload } from "./live.ts";
+import { secretFileRoutes } from "./secret-files.ts";
 import { clusterRoleRoutes, workloadRoutes } from "./settings.ts";
 
 /** Pod-template annotation a restart writes; changing it rolls the workload out. */
@@ -49,6 +50,8 @@ interface Needs {
   projects: NonNullable<Ports["projects"]>;
   /** Optional: without a source of a kind, that kind of log answers 404. */
   logs?: Ports["logs"];
+  /** Optional: seals secret files; without it they cannot be set. */
+  cipher?: Ports["cipher"];
 }
 
 /** The component's manifests at `at`, path → text. */
@@ -384,6 +387,7 @@ function routes(needs: Needs, settings: RuntimeSettings): Route[] {
     },
     ...workloadRoutes({ repo, component }),
     ...clusterRoleRoutes({ repo, component, allowed: settings.allowedClusterRoles ?? [] }),
+    ...secretFileRoutes({ repo, cipher: needs.cipher, component }),
   ];
 }
 
@@ -395,7 +399,8 @@ export const plugin = definePlugin({
   validateConfig: settingsProblems,
   requires: ["kube", "deployRepo", "projects"],
   // The pod log page reads these; without saying so, logs-kube and logs-loki are never built.
-  uses: ["logs"],
+  // The cipher seals secret files.
+  uses: ["logs", "cipher"],
   permissions: [
     { id: "runtime:view", description: "See a component's workloads, pods and events", grantedTo: "project-readers" },
     {
@@ -408,6 +413,11 @@ export const plugin = definePlugin({
       description: "Bind a cluster-wide role, from the allowed ones, to a component's service account",
       grantedTo: "admins",
     },
+    {
+      id: "runtime:secrets",
+      description: "Generate, upload, replace and delete a component's secret files",
+      grantedTo: "admins",
+    },
   ],
   capabilities: [
     "runtime.view",
@@ -418,6 +428,7 @@ export const plugin = definePlugin({
     "runtime.resources",
     "runtime.workload",
     "runtime.cluster-roles",
+    "runtime.secret-files",
   ],
   routes: ({ ports, config }: FeatureContext) => routes(ports as Needs, (config ?? {}) as RuntimeSettings),
 });

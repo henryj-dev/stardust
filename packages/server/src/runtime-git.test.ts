@@ -9,7 +9,7 @@ import { after, describe, it } from "node:test";
 import { buildFeatures, type KubeStreamClient, type Logger, type Route, restrictedProblems } from "@stardust/core";
 import { GitCliRepo } from "@stardust/plugin-gitops-git";
 import { plugin } from "@stardust/plugin-runtime";
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
 import { gitFixture } from "./git-testing.ts";
 
 const quiet: Logger = { debug() {}, info() {}, warn() {}, error() {} };
@@ -70,9 +70,9 @@ function runtimeFeature(config: Record<string, unknown> = {}, extra: Record<stri
     if (!r) throw new Error(`no route ${method} ${path}`);
     return r as Route;
   };
-  return (method: string, path: string, body: unknown = null) =>
+  return (method: string, path: string, body: unknown = null, params: Record<string, string> = {}) =>
     route(method, path).handle({
-      params: { project: "app", component: "server" },
+      params: { project: "app", component: "server", ...params },
       query: new URLSearchParams(),
       body,
       user: { id: "u", username: "admin", isAdmin: true },
@@ -145,5 +145,47 @@ describe("cluster roles in a Git deploy repository", () => {
     assert.equal((await call("PUT", path, { roles: [] })).status, 200);
     assert.equal(fixture.read(`${DIR}/stardust-cluster-roles.yaml`), null);
     assert.doesNotMatch(fixture.read(`${DIR}/kustomization.yaml`) ?? "", /stardust-cluster-roles/);
+  });
+});
+
+describe("secret files in a Git deploy repository", () => {
+  // Like SOPS: values under data sealed, keys in clear.
+  const seal = (v: string) => `ENC[${Buffer.from(v).toString("hex")}]`;
+  const cipher = {
+    async decrypt(document: string) {
+      const { sops: _s, ...doc } = parse(document) as { sops?: unknown; data?: Record<string, string> };
+      const data = Object.fromEntries(
+        Object.entries(doc.data ?? {}).map(([k, v]) => [k, Buffer.from(v.slice(4, -1), "hex").toString()]),
+      );
+      return stringify({ ...doc, data });
+    },
+    async encryptIfChanged(_current: string | null, plain: string) {
+      const doc = parse(plain) as { data?: Record<string, string> };
+      const data = Object.fromEntries(Object.entries(doc.data ?? {}).map(([k, v]) => [k, seal(v)]));
+      return { changed: true, document: stringify({ ...doc, data, sops: { version: "fake" } }) };
+    },
+    revisionKey: "k",
+  };
+  const call = runtimeFeature({}, { cipher });
+  const key = "/projects/:project/components/:component/secret-files/:set/keys/:key";
+  const params = { set: "kek", key: "key" };
+
+  it("commits a generated key sealed, mounted and listed, as one commit", async () => {
+    const before = fixture.head();
+    const res = await call("POST", key, { generate: { bytes: 32 } }, params);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.notEqual(fixture.head(), before);
+    const sealed = parse(fixture.read(`${DIR}/secret-files-kek.secret.enc.yaml`) ?? "");
+    assert.match(sealed.data.key, /^ENC\[/);
+    assert.equal(sealed.metadata.namespace, "app");
+    const deployment = fixture.read(`${DIR}/deployment.yaml`) ?? "";
+    assert.deepEqual(restrictedProblems(deployment), []);
+    assert.match(deployment, /mountPath: \/run\/secrets\/kek/);
+    assert.match(fixture.read(`${DIR}/kustomization.yaml`) ?? "", /- secret-files-kek.secret.enc.yaml/);
+    const again = await call("POST", key, { generate: { bytes: 32 } }, params);
+    assert.equal(again.status, 409, "an existing key is not overwritten by adding it");
+    assert.equal((await call("DELETE", key, null, params)).status, 200);
+    assert.equal(fixture.read(`${DIR}/secret-files-kek.secret.enc.yaml`), null);
+    assert.doesNotMatch(fixture.read(`${DIR}/kustomization.yaml`) ?? "", /secret-files/);
   });
 });
