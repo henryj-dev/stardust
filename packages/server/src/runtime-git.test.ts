@@ -201,6 +201,7 @@ describe("a component's address outside the cluster, in a Git deploy repository"
   const EXTERNAL = {
     clusterIPs: "10.0.0.0/24",
     addresses: "10.0.8.0/24",
+    reserved: [],
     first: 10,
     last: 20,
     addressAnnotation: "lbipam.cilium.io/ips",

@@ -17,6 +17,7 @@ import {
 const SETTINGS: ExternalSettings = {
   clusterIPs: "10.0.0.0/21",
   addresses: "10.0.8.0/21",
+  reserved: [],
   addressAnnotation: "lbipam.cilium.io/ips",
   labels: { "example.com/ip-block": "db" },
   annotations: { "service.cilium.io/forwarding-mode": "dsr" },

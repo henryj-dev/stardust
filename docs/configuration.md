@@ -497,6 +497,7 @@ runtime:
     addresses: 10.0.8.0/24 # the load balancer's pool; the same .N as above
     first: 10 # optional: the lowest N (default 1)
     last: 200 # optional: the highest N (default: the block's second-last)
+    reserved: [1, 10] # optional: offsets never given out (default [1, 10]; [] for none)
     addressAnnotation: lbipam.cilium.io/ips # where the load balancer reads the address
     labels: { example.com/ip-pool: apps } # optional, on every such Service
     annotations: { service.cilium.io/forwarding-mode: dsr } # optional, on every such Service
@@ -736,11 +737,21 @@ databases:
     addresses: 10.0.8.0/24 # the load balancer's pool; the same .N as above
     first: 10 # optional: the lowest N (default 1)
     last: 200 # optional: the highest N (default: the block's second-last)
+    reserved: [1, 10] # optional: offsets never given out (default [1, 10]; [] for none)
     addressAnnotation: lbipam.cilium.io/ips # where the load balancer reads the address
     labels: { example.com/ip-pool: db } # optional
     annotations: { service.cilium.io/forwarding-mode: dsr } # optional
     scan: [""] # optional: directories of the deploy repository read for held addresses ("" is all of it)
 ```
+
+Offsets in `reserved` are never given out, and neither are the block's first and
+last address. The default `[1, 10]` is for a block that starts the cluster's
+Service range: Kubernetes holds `.1` for `default/kubernetes`, and the cluster
+DNS is usually `.10`. Neither is in any deploy repository, and stardust may
+not be allowed to list the cluster's Services, so nothing else tells it they
+are taken; a Service committed with one of them is refused by the API server
+and stops the GitOps controller's apply. Set `reserved: []` for a block that
+does not start the range.
 
 N is the smallest one between `first` and `last` that no Service in the deploy
 repository holds in either block (its cluster IPs, its annotated, asked-for or

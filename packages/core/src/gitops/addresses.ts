@@ -24,6 +24,13 @@ export interface AddressSettings {
   /** The lowest and highest N to give out (default: 1 to the block's second-last). */
   first?: number;
   last?: number;
+  /**
+   * Offsets never given out (default [1, 10]): for a block that starts the
+   * cluster's Service range, Kubernetes holds .1 for `default/kubernetes` and
+   * the cluster DNS is usually .10, and neither is in any deploy repository.
+   * The block's first and last address are never given out either way.
+   */
+  reserved?: number[];
   /** The annotation the load balancer reads its address from, e.g. lbipam.cilium.io/ips. */
   addressAnnotation: string;
   /** Labels and annotations every such Service carries, e.g. the one that picks its address pool. */
@@ -43,7 +50,12 @@ export interface Blocks {
   outside: { base: number; size: number };
   first: number;
   last: number;
+  /** Offsets never given out: the settings' `reserved`, and the block's first and last. */
+  reserved: ReadonlySet<number>;
 }
+
+/** What `reserved` is when the settings leave it out. */
+export const DEFAULT_RESERVED: readonly number[] = [1, 10];
 
 export interface FixedAddress {
   clusterIP: string | null;
@@ -93,7 +105,17 @@ export function addressSettingsProblems(s: unknown): string[] {
   const problems: string[] = [];
   for (const key of Object.keys(e))
     if (
-      !["clusterIPs", "addresses", "first", "last", "addressAnnotation", "labels", "annotations", "scan"].includes(key)
+      ![
+        "clusterIPs",
+        "addresses",
+        "first",
+        "last",
+        "reserved",
+        "addressAnnotation",
+        "labels",
+        "annotations",
+        "scan",
+      ].includes(key)
     )
       problems.push(`unknown key "${key}"`);
   const cluster = block(e.clusterIPs);
@@ -111,6 +133,12 @@ export function addressSettingsProblems(s: unknown): string[] {
       problems.push("first and last must be whole numbers");
     else if ((first as number) > (last as number) || (last as number) > cluster.size - 1)
       problems.push(`first and last must be within the block: 0 to ${cluster.size - 1}, first not above last`);
+    if (
+      e.reserved !== undefined &&
+      (!Array.isArray(e.reserved) ||
+        e.reserved.some((n) => !Number.isInteger(n) || (n as number) < 0 || (n as number) > cluster.size - 1))
+    )
+      problems.push(`reserved must be a list of offsets within the block: 0 to ${cluster.size - 1}`);
   }
   if (typeof e.addressAnnotation !== "string" || !isKey(e.addressAnnotation))
     problems.push("addressAnnotation must name the annotation the load balancer reads, e.g. lbipam.cilium.io/ips");
@@ -139,7 +167,8 @@ export function blocksOf(s: AddressSettings): Blocks {
   const cluster = block(s.clusterIPs);
   const outside = block(s.addresses);
   if (typeof cluster === "string" || typeof outside === "string") throw new Error("invalid address settings");
-  return { cluster, outside, first: s.first ?? 1, last: s.last ?? cluster.size - 2 };
+  const reserved = new Set([0, cluster.size - 1, ...(s.reserved ?? DEFAULT_RESERVED)]);
+  return { cluster, outside, first: s.first ?? 1, last: s.last ?? cluster.size - 2, reserved };
 }
 
 /** The two addresses at offset N. */
@@ -159,9 +188,9 @@ export function usedOffsets(b: Blocks, ips: Iterable<string>): Set<number> {
   return used;
 }
 
-/** The smallest free N, or null when every one is taken. */
+/** The smallest free N that is not reserved, or null when every one is taken. */
 export function pickOffset(b: Blocks, used: ReadonlySet<number>): number | null {
-  for (let n = b.first; n <= b.last; n++) if (!used.has(n)) return n;
+  for (let n = b.first; n <= b.last; n++) if (!used.has(n) && !b.reserved.has(n)) return n;
   return null;
 }
 
