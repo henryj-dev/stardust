@@ -582,7 +582,7 @@ export function createClient(options: ClientOptions): Client {
     async login(username, password) {
       const res = await doFetch(`${base}/api/v1/auth/login`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...headers(), "content-type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
       if (res.status === 401 || res.status === 429 || res.status === 403) {
@@ -602,7 +602,7 @@ export function createClient(options: ClientOptions): Client {
     async loginCode(challenge, code) {
       const res = await doFetch(`${base}/api/v1/auth/login/totp`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...headers(), "content-type": "application/json" },
         body: JSON.stringify({ challenge, code }),
       });
       if (res.status === 401) {
@@ -695,7 +695,7 @@ export function createClient(options: ClientOptions): Client {
     async oidcCallback(query, state) {
       const res = await doFetch(`${base}/api/v1/auth/oidc/callback`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...headers(), "content-type": "application/json" },
         body: JSON.stringify({ query, state }),
       });
       if (res.status === 401 || res.status === 403) {

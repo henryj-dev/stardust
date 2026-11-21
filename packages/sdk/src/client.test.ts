@@ -401,3 +401,32 @@ it("reads and sets a component's access, and reseals pull Secrets", async () => 
     (err: Error) => err.message === "podView must be true or false",
   );
 });
+
+it("passes on the browser's address and agent when signing in, for the audit log", async () => {
+  // Signing in is where the address matters most, and these three calls sent only content-type:
+  // every sign-in through the dashboard was recorded with the dashboard's own address.
+  const seen: Array<{ path: string; xff: string | null; ua: string | null; type: string | null }> = [];
+  const client = createClient({
+    baseUrl: "http://api.test",
+    forward: { forwardedFor: "192.0.2.7", userAgent: "test-browser" },
+    fetch: async (input, init) => {
+      const h = new Headers(init?.headers);
+      seen.push({
+        path: new URL(String(input)).pathname,
+        xff: h.get("x-forwarded-for"),
+        ua: h.get("user-agent"),
+        type: h.get("content-type"),
+      });
+      return Response.json({ error: "no" }, { status: 401 });
+    },
+  });
+  await client.login("someone", "wrong");
+  await client.loginCode("challenge", "000000");
+  await client.oidcCallback("code=x&state=y", "y").catch(() => undefined);
+  assert.deepEqual(
+    seen.map((s) => s.path),
+    ["/api/v1/auth/login", "/api/v1/auth/login/totp", "/api/v1/auth/oidc/callback"],
+  );
+  for (const s of seen)
+    assert.deepEqual([s.xff, s.ua, s.type], ["192.0.2.7", "test-browser", "application/json"], s.path);
+});
