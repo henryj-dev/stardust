@@ -8,6 +8,7 @@ import {
   addressSettingsProblems,
   blocksOf,
   heldInRepository,
+  pickOffset,
   renderLoadBalancer,
   servicesIn,
 } from "./addresses.ts";
@@ -15,6 +16,7 @@ import {
 const SETTINGS: AddressSettings = {
   clusterIPs: "10.0.0.0/24",
   addresses: "10.0.8.0/24",
+  reserved: [],
   first: 10,
   last: 20,
   addressAnnotation: "lbipam.cilium.io/ips",
@@ -91,4 +93,41 @@ it("takes scan as directories of the repository only", () => {
   assert.deepEqual(addressSettingsProblems({ ...SETTINGS, scan: ["clusters/one", ""] }), []);
   assert.equal(addressSettingsProblems({ ...SETTINGS, scan: ["/etc"] }).length, 1);
   assert.equal(addressSettingsProblems({ ...SETTINGS, scan: ["a/../b"] }).length, 1);
+});
+
+it("never gives out what Kubernetes holds at the start of the Service range, nor the block's ends", () => {
+  // A block starting the Service range, default first, the cluster not listable:
+  // .1 (default/kubernetes) was given out and the GitOps controller's apply stopped.
+  const b = blocksOf({
+    clusterIPs: "10.96.0.0/20",
+    addresses: "10.96.32.0/20",
+    addressAnnotation: SETTINGS.addressAnnotation,
+  });
+  assert.equal(pickOffset(b, new Set()), 2, ".1 is default/kubernetes");
+  assert.equal(pickOffset(b, new Set([2, 3, 4, 5, 6, 7, 8, 9])), 11, ".10 is the cluster DNS");
+  const own = blocksOf({ ...SETTINGS, first: 1, last: 5, reserved: [2] });
+  assert.equal(pickOffset(own, new Set()), 1, "reserved replaces the default");
+  assert.equal(pickOffset(own, new Set([1])), 3);
+  const ends = blocksOf({
+    ...SETTINGS,
+    clusterIPs: "10.0.0.0/30",
+    addresses: "10.0.8.0/30",
+    first: 0,
+    last: 3,
+    reserved: [],
+  });
+  assert.equal(
+    pickOffset(ends, new Set([1, 2])),
+    null,
+    "network and broadcast stay out even when the settings allow them",
+  );
+});
+
+it("refuses reserved offsets outside the block", () => {
+  assert.deepEqual(addressSettingsProblems({ ...SETTINGS, reserved: [1, 10] }), []);
+  for (const reserved of [[256], [-1], [1.5], "1"])
+    assert.ok(
+      addressSettingsProblems({ ...SETTINGS, reserved }).some((p) => /reserved/.test(p)),
+      JSON.stringify(reserved),
+    );
 });

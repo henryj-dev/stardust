@@ -115,8 +115,15 @@ export function addressRoutes(input: {
   const inCluster = async (annotation: string): Promise<string[]> => {
     try {
       const res = await kube.request("GET", "/api/v1/services");
-      return res.status === 200 ? servicesInList(res.body).flatMap((o) => addressesOf(o, annotation)) : [];
-    } catch {
+      if (res.status === 200) return servicesInList(res.body).flatMap((o) => addressesOf(o, annotation));
+      log.warn("runtime: could not list the cluster's Services; picking from the repository and records only", {
+        reason: `the API answered ${res.status}`,
+      });
+      return [];
+    } catch (err) {
+      log.warn("runtime: could not list the cluster's Services; picking from the repository and records only", {
+        reason: (err as Error).message,
+      });
       return [];
     }
   };
