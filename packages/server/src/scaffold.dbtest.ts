@@ -100,6 +100,26 @@ describe("scaffolding", () => {
     assert.match(files["clusters/one/apps/pico/server/kustomization.yaml"] ?? "", /- stardust-serviceaccount.yaml/);
   });
 
+  it("refuses a plain LoadBalancer where components get their address from runtime.external", async () => {
+    const strict = createApp(
+      { version: "test" },
+      {
+        sql: db.sql,
+        deployRepo: { repo },
+        images: { repository: (p, c) => `registry.example.com/${p}/${c}` },
+        resolveTarget: async () => ({ ref: "refs/heads/main", sha: "a".repeat(40) }),
+        componentAddresses: true,
+      },
+    );
+    const res = await strict.request("/api/v1/projects/pico/components/loose/scaffold", {
+      method: "POST",
+      headers: admin,
+      body: JSON.stringify({ namespace: "pico", port: 8080, expose: true }),
+    });
+    assert.equal(res.status, 400);
+    assert.match(((await res.json()) as { error: string }).error, /runtime.external/);
+  });
+
   it("refuses a createNamespace that is not true or false", async () => {
     assert.equal((await scaffold("push", { namespace: "pico", createNamespace: "yes" })).status, 400);
   });

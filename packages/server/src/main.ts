@@ -122,6 +122,11 @@ if (ports.source) {
     ...buildLogServices(),
     ...envServices(),
     ...runtimeGrantServices(),
+    ...(typeof config.plugins.runtime === "object" &&
+    config.plugins.runtime !== null &&
+    "external" in config.plugins.runtime
+      ? { componentAddresses: true }
+      : {}),
   };
 } else {
   console.warn("source-github is not configured: only /healthz is served");

@@ -135,12 +135,14 @@ export class GitCliRepo implements RepoIO {
 
   async listDir(path: string, ref: string): Promise<string[]> {
     await this.have(ref);
-    const out = await this.git(["ls-tree", "--name-only", ref, `${path.replace(/\/$/, "")}/`]);
+    const dir = path.replace(/\/$/, "");
+    // "" is the root: ls-tree then takes no path.
+    const out = await this.git(["ls-tree", "--name-only", ref, ...(dir ? [`${dir}/`] : [])]);
     if (out.code !== 0) return [];
     return out.stdout
       .split("\n")
       .filter(Boolean)
-      .map((p) => p.slice(path.replace(/\/$/, "").length + 1))
+      .map((p) => (dir ? p.slice(dir.length + 1) : p))
       .sort();
   }
 

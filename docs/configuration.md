@@ -482,6 +482,51 @@ change is one commit, audited as `runtime.secret-files.add`, `.replace` or
 `.delete` with the set and key names (and how many bytes were generated or
 uploaded).
 
+#### An address outside the cluster
+
+A component can get an address on the network outside the cluster (for an
+edge proxy, or another network) in the shape an admission policy can require
+of LoadBalancer Services: a fixed cluster IP, exactly one address of its own
+at the same offset N in a second block, a forwarding mode such as DSR, no node
+ports. Configure the blocks:
+
+```yaml
+runtime:
+  external:
+    clusterIPs: 10.0.0.0/24 # inside the cluster's Service range
+    addresses: 10.0.8.0/24 # the load balancer's pool; the same .N as above
+    first: 10 # optional: the lowest N (default 1)
+    last: 200 # optional: the highest N (default: the block's second-last)
+    addressAnnotation: lbipam.cilium.io/ips # where the load balancer reads the address
+    labels: { example.com/ip-pool: apps } # optional, on every such Service
+    annotations: { service.cilium.io/forwarding-mode: dsr } # optional, on every such Service
+    scan: [""] # optional: directories read for held addresses ("" is the whole repository)
+```
+
+The component's page then has an **Address outside the cluster** section.
+"Give it an address" (administrators, the permission `runtime:address`;
+`POST /api/v1/plugins/runtime/projects/<p>/components/<c>/address` with an
+optional `{"ports": [{"port": 443, "targetPort": 8443}]}`, by default every
+port its containers declare) commits a Service `<component>-vip` in
+`stardust-address.service.yaml`, listed in the kustomization, selecting the
+workload's pods. N is the smallest one nothing holds: no Service in any
+manifest below `scan` (so an app's own address elsewhere in the repository
+counts), no address the `databases` plugin recorded, and, when the server may
+list every Service, nothing in the cluster. Give `runtime.external` and
+`databases.external` the same blocks and scan, or blocks of their own; both
+read each other's Services. It is refused (409) when the component has one
+already, when a manifest in the scanned directories declares a Service of the
+same name and namespace, or when the cluster has one (read with the access the
+chart gives in the namespace; when that cannot be read, the check is skipped
+and logged): a second Service of one name with another cluster IP stops the
+GitOps controller. `DELETE` on the same path removes it. Both are audited
+(`runtime.address.add`, `runtime.address.remove`).
+
+With `runtime.external` set, scaffolding refuses `"expose": true` (a plain
+LoadBalancer, which such a policy refuses, and a refused object stops the
+GitOps controller): scaffold without it, then give the component its address
+here. The page hides the box.
+
 ### `logs-kube` and `logs-loki`
 
 Pod logs on a component's page, through the runtime plugin. `logs-kube` reads
@@ -694,14 +739,20 @@ databases:
     addressAnnotation: lbipam.cilium.io/ips # where the load balancer reads the address
     labels: { example.com/ip-pool: db } # optional
     annotations: { service.cilium.io/forwarding-mode: dsr } # optional
+    scan: [""] # optional: directories of the deploy repository read for held addresses ("" is all of it)
 ```
 
-N is the smallest one between `first` and `last` that no Service under `root`
-holds in either block (its cluster IPs, its annotated, asked-for or given
-addresses). The chart gives the server no cluster-wide access, so Services
-elsewhere are not seen: reserve `first`–`last` of both blocks for stardust.
-When the server can list every Service (`list services` granted cluster-wide
-by you), it skips the addresses those hold too.
+N is the smallest one between `first` and `last` that no Service in the deploy
+repository holds in either block (its cluster IPs, its annotated, asked-for or
+given addresses): every manifest below the `scan` directories (default the
+whole repository; sealed `.enc.yaml` files are not read), not only those under
+`root`, so an app's own Service or a component's address outside (`runtime`)
+is not given out twice. Narrow `scan` to the directories the cluster applies
+from when the repository is large. The chart gives the server no cluster-wide
+access, so Services that are in no scanned manifest are not seen: reserve
+`first`–`last` of both blocks for stardust. When the server can list every
+Service (`list services` granted cluster-wide by you), it skips the addresses
+those hold too.
 
 An instance without one gets it from "Add an address outside" (`POST
 /api/v1/plugins/databases/databases/<name>/external`). When `<root>/<name>/`
