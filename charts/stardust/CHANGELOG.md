@@ -1,5 +1,15 @@
 # stardust
 
+## 0.28.1
+
+### Patch Changes
+
+- [#140](https://github.com/henryj-dev/stardust/pull/140) [`79505d3`](https://github.com/henryj-dev/stardust/commit/79505d33c7b1e932114085eba708cea5355e8fd5) Thanks [@mack-erel](https://github.com/mack-erel)! - Signing in with OpenID Connect works again: the sign-in button and signing
+  out of a single sign-on session send the browser to the identity provider, and
+  SvelteKit 3 refuses a redirect to another origin unless it is marked external,
+  so both ended in a 500. They now go through one helper that marks the address
+  external and follows only http(s) addresses.
+
 ## 0.28.0
 
 ### Minor Changes
