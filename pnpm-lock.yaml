@@ -357,6 +357,9 @@ importers:
       '@stardust/plugin-nodes':
         specifier: workspace:*
         version: link:../../plugins/nodes
+      '@stardust/plugin-runtime':
+        specifier: workspace:*
+        version: link:../../plugins/runtime
       '@stardust/plugin-secrets-sops-age':
         specifier: workspace:*
         version: link:../../plugins/secrets-sops-age

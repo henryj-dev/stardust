@@ -257,6 +257,37 @@ describe("runtime", () => {
     assert.match((res.body as { error: string }).error, /no live log source is enabled/);
   });
 
+  it("reads and sets the workload settings in one commit, audited by field", async () => {
+    const { repo, route, call } = setup();
+    const get = route("GET", "/projects/:project/components/:component/workload");
+    const put = route("PUT", "/projects/:project/components/:component/workload");
+    const before = (await call(get, params)).body as { settings: { serviceAccount: boolean }; podSecurity: string[] };
+    assert.equal(before.settings.serviceAccount, false);
+    assert.ok(
+      before.podSecurity.some((p) => /runAsNonRoot/.test(p)),
+      "the test Deployment says nothing of it",
+    );
+    const res = await call(put, params, {
+      serviceAccount: true,
+      runAsUser: 1000,
+      probes: { readiness: { path: "/readyz", port: 8080 } },
+    });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(repo.commitCount(), 1, "the account, the Deployment and the list in one commit");
+    const files = repo.files();
+    assert.match(files[`${DIR}/stardust-serviceaccount.yaml`] ?? "", /namespace: demo/);
+    assert.match(files[`${DIR}/kustomization.yaml`] ?? "", /- stardust-serviceaccount.yaml/);
+    assert.match(files[`${DIR}/deployment.yaml`] ?? "", /serviceAccountName: api/);
+    assert.equal(res.audit?.target, "api");
+    assert.deepEqual(Object.keys(res.audit?.detail ?? {}).sort(), ["probes", "runAsUser", "serviceAccount"]);
+    const again = await call(put, params, { serviceAccount: true });
+    assert.equal((again.body as { status: string }).status, "up-to-date");
+    assert.equal((await call(put, params, { runAsUser: 0 })).status, 400);
+    assert.equal((await call(put, params, {})).status, 400);
+    assert.equal((await call(put, { ...params, component: "nope" }, { runAsUser: 1 })).status, 404);
+    assert.equal(repo.commitCount(), 1);
+  });
+
   it("needs the Kubernetes API, the deploy repository and the projects", () => {
     assert.deepEqual(plugin.requires, ["kube", "deployRepo", "projects"]);
     assert.deepEqual(plugin.validateConfig({ extra: 1 }), ['unknown key "extra"']);

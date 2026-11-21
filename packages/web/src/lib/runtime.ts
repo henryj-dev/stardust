@@ -44,3 +44,31 @@ export interface ServiceView {
   external?: string | null;
   error?: string;
 }
+
+export interface HttpProbeView {
+  path: string;
+  port: number;
+  periodSeconds?: number;
+  failureThreshold?: number;
+}
+
+/** A component's workload settings (`GET …/workload` of the runtime plugin). */
+export interface WorkloadSettingsView {
+  namespace: string | null;
+  workloads: number;
+  settings: {
+    serviceAccount: boolean;
+    tokenMounted: boolean;
+    probes: Record<"startup" | "readiness" | "liveness", HttpProbeView | null>;
+    otherProbes: Array<"startup" | "readiness" | "liveness">;
+    readOnlyRootFilesystem: boolean;
+    writablePaths: string[];
+    runAsUser: number | null;
+    runAsGroup: number | null;
+    fsGroup: number | null;
+    oneAtATime: boolean;
+    recreate: boolean;
+  } | null;
+  /** Why a namespace enforcing the restricted Pod Security standard would refuse the pods. */
+  podSecurity: string[];
+}

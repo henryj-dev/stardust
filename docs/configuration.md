@@ -367,6 +367,61 @@ namespace needs no chart change. Viewers of a project see it; maintainers
 change it. The page also shows the component's Services, and for a
 LoadBalancer the address an edge proxy sends its traffic to.
 
+#### Workload settings
+
+The component's page has a **Workload** section (`GET`/`PUT
+/api/v1/plugins/runtime/projects/<p>/components/<c>/workload`, maintainers)
+that sets how the pods run, as one commit to the component's manifests. Only
+what it manages changes; other fields, volumes and comments stay. Each field
+of the body is optional, and one left out is left as it is:
+
+```json
+{
+  "serviceAccount": true,
+  "probes": {
+    "startup": { "path": "/healthz", "port": 8080 },
+    "readiness": { "path": "/readyz", "port": 8080 },
+    "liveness": { "path": "/healthz", "port": 8080 }
+  },
+  "readOnlyRootFilesystem": true,
+  "writablePaths": ["/tmp"],
+  "runAsUser": 1000,
+  "runAsGroup": 1000,
+  "fsGroup": 1000,
+  "oneAtATime": true
+}
+```
+
+- `serviceAccount`: on, the pods run as their own ServiceAccount
+  `<component>` (written to `stardust-serviceaccount.yaml` and listed in the
+  kustomization) with a token mounted, for an app that calls the Kubernetes
+  API. Off, the file goes and the pods get no token
+  (`automountServiceAccountToken: false`). A ServiceAccount of that name
+  declared by hand in the directory is used instead of writing one.
+- `probes`: HTTP GET probes on the component's container; `null` removes one.
+  `periodSeconds` (default 10) and `failureThreshold` (30 for startup, so a
+  start may take 5 minutes, for example while migrations run; 3 otherwise)
+  are optional. A probe written by hand in another form (exec, TCP) is shown
+  and kept until one is set here.
+- `readOnlyRootFilesystem` with `writablePaths`: each path is an emptyDir
+  volume (`stardust-writable-…`).
+- `runAsUser`, `runAsGroup`, `fsGroup`: numeric ids on the pod; `null` removes
+  one. User 0 is refused. An image whose `USER` is a name cannot pass the
+  restricted Pod Security standard (`runAsNonRoot` cannot be checked) without
+  `runAsUser`.
+- `oneAtATime`: a Deployment rolls `RollingUpdate` with `maxSurge: 0,
+  maxUnavailable: 1`: only one pod runs, so the app is briefly unreachable
+  while it is replaced. stardust never switches a Deployment to `Recreate`
+  (a live Deployment with RollingUpdate defaults refuses that change, and a
+  GitOps controller that cannot apply one object stops applying the rest);
+  one already set to Recreate by hand is kept. It cannot be turned off while
+  the workload mounts a claim.
+
+The section also lists why a namespace enforcing the restricted Pod Security
+standard would refuse the pods, if it would. Scaffolding takes the same
+settings as `"workload": {…}`. Changes are audited as `runtime.workload`,
+with the field names.
+
 ### `logs-kube` and `logs-loki`
 
 Pod logs on a component's page, through the runtime plugin. `logs-kube` reads

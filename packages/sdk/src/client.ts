@@ -414,6 +414,13 @@ export interface Client {
       registryPull?: boolean;
       /** A RoleBinding that lets the dashboard read the namespace. */
       podView?: boolean;
+      /**
+       * Workload settings for the Deployment, as the runtime plugin's
+       * `PUT …/workload` takes them: serviceAccount, probes,
+       * readOnlyRootFilesystem, writablePaths, runAsUser, runAsGroup,
+       * fsGroup, oneAtATime.
+       */
+      workload?: Record<string, unknown>;
     },
   ): Promise<{ deployCommit: string | null; files: string[]; listedIn: string | null }>;
   /** Cancels a job that has not finished. ApiError 409 when it already has. */

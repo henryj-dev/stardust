@@ -1,9 +1,10 @@
 import { ApiError } from "@stardust/sdk";
 import { error, fail } from "@sveltejs/kit";
-import type { RuntimeView } from "$lib/runtime";
+import type { RuntimeView, WorkloadSettingsView } from "$lib/runtime";
 import { requireClient } from "$lib/server/api";
 import { readMounts } from "$lib/server/files-form";
 import { readStorageForm } from "$lib/server/storage-form";
+import { readWorkloadForm, WorkloadFormError } from "$lib/server/workload-form";
 import type { Actions, PageServerLoad } from "./$types";
 
 interface EnvLanding {
@@ -51,9 +52,17 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       if (err instanceof ApiError && err.status === 404) return null;
       throw err;
     });
+    // How the pods run: the runtime plugin's workload settings, when it is enabled.
+    const workload: WorkloadSettingsView | null = has("runtime.workload")
+      ? await client
+          .plugin("runtime")
+          .get<WorkloadSettingsView>(`${runtimePath(params.id, params.name)}/workload`)
+          .catch(() => null)
+      : null;
     return {
       files,
       storage,
+      workload,
       access,
       projectId: params.id,
       component: params.name,
@@ -132,6 +141,30 @@ export const actions: Actions = {
     } catch (err) {
       const r = reason(err);
       return fail(r.status, { filesError: r.message });
+    }
+  },
+  // The Workload section: every field it shows, as one commit. The server checks write access.
+  workload: async ({ locals, params, request, url }) => {
+    const client = requireClient(locals, url);
+    let change: ReturnType<typeof readWorkloadForm>;
+    try {
+      change = readWorkloadForm(await request.formData());
+    } catch (err) {
+      if (err instanceof WorkloadFormError) return fail(400, { workloadError: err.message });
+      throw err;
+    }
+    try {
+      const result = await client
+        .plugin("runtime")
+        .send<{ status: string; deployCommit: string | null }>(
+          "PUT",
+          `${runtimePath(params.id, params.name)}/workload`,
+          change,
+        );
+      return { workloadSaved: result };
+    } catch (err) {
+      const r = reason(err);
+      return fail(r.status, { workloadError: r.message });
     }
   },
   storage: async ({ locals, params, request, url }) => {

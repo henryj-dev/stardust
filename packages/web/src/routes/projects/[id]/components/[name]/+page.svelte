@@ -256,6 +256,102 @@ const LANDING: Record<string, string> = {
     {/if}
   {/if}
 
+  {#if data.workload?.settings}
+    {@const w = data.workload.settings}
+    <h2>Workload</h2>
+    <p>
+      How this component's pods run. Saving commits every field below to its manifests in one commit; it takes effect
+      when it is applied. Fields stardust does not manage are left as they are.
+    </p>
+    {#if data.workload.podSecurity.length > 0}
+      <div role="alert" data-pod-security>
+        A namespace enforcing the restricted Pod Security standard would refuse these pods:
+        <ul>
+          {#each data.workload.podSecurity as p (p)}<li>{p}</li>{/each}
+        </ul>
+      </div>
+    {:else}
+      <p data-pod-security-ok>The pods meet the restricted Pod Security standard.</p>
+    {/if}
+    <form method="POST" action="?/workload" data-workload-form>
+      <fieldset>
+        <legend>Service account</legend>
+        <label
+          ><input type="checkbox" name="serviceAccount" checked={w.serviceAccount} /> Run as its own service account
+          <code>{data.component}</code> with a token mounted (for an app that calls the Kubernetes API, such as a
+          TokenReview)</label
+        >
+        <small>Off: the pod gets no service account token ({w.tokenMounted ? "it gets one now" : "it gets none now"}).</small>
+      </fieldset>
+      <fieldset>
+        <legend>Probes (HTTP GET)</legend>
+        <table>
+          <thead><tr><th>Probe</th><th>Path</th><th>Port</th></tr></thead>
+          <tbody>
+            {#each [["startup", "Startup: holds the others back until it passes (5 minutes by default), e.g. during migrations"], ["readiness", "Readiness: sends traffic only while it passes"], ["liveness", "Liveness: restarts the container when it fails"]] as const as [kind, hint] (kind)}
+              {@const p = w.probes[kind]}
+              <tr data-probe={kind}>
+                <td>{hint}</td>
+                <td>
+                  <input name={`probes.${kind}.path`} value={p?.path ?? ""} placeholder="/healthz" aria-label={`${kind} probe path`} autocomplete="off" />
+                  {#if w.otherProbes.includes(kind)}
+                    <input type="hidden" name={`probes.${kind}.other`} value="1" />
+                    <br /><small data-probe-other>set by hand in another form; kept unless you fill these in</small>
+                  {/if}
+                </td>
+                <td><input name={`probes.${kind}.port`} value={p?.port ?? ""} size="6" inputmode="numeric" aria-label={`${kind} probe port`} /></td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+        <small>Empty path and port: no probe.</small>
+      </fieldset>
+      <fieldset>
+        <legend>Filesystem</legend>
+        <label
+          ><input type="checkbox" name="readOnlyRootFilesystem" checked={w.readOnlyRootFilesystem} /> Read-only root
+          filesystem</label
+        >
+        <label>
+          Paths it may write to (an empty directory each, one per line):
+          <textarea name="writablePaths" rows="2" placeholder="/tmp">{w.writablePaths.join("\n")}</textarea>
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>User and group</legend>
+        <label>runAsUser <input name="runAsUser" value={w.runAsUser ?? ""} size="7" inputmode="numeric" placeholder="1000" /></label>
+        <label>runAsGroup <input name="runAsGroup" value={w.runAsGroup ?? ""} size="7" inputmode="numeric" placeholder="1000" /></label>
+        <label>fsGroup <input name="fsGroup" value={w.fsGroup ?? ""} size="7" inputmode="numeric" placeholder="1000" /></label>
+        <small>
+          Numeric ids. An image whose USER is a name cannot pass the restricted Pod Security standard without them.
+          Empty: not set.
+        </small>
+      </fieldset>
+      <fieldset>
+        <legend>Rollout</legend>
+        {#if w.recreate}
+          <p data-recreate>This Deployment uses <code>Recreate</code>, set by hand; it is kept as it is.</p>
+        {:else}
+          <label
+            ><input type="checkbox" name="oneAtATime" checked={w.oneAtATime} /> One pod at a time — only one runs,
+            so it is briefly unreachable while it is replaced</label
+          >
+          <small>For an app that must not run twice at once. The old pod stops before the new one starts.</small>
+        {/if}
+      </fieldset>
+      <button type="submit">Save workload</button>
+    </form>
+    {#if form?.workloadError}
+      <p role="alert" data-workload-error>{form.workloadError}</p>
+    {:else if form?.workloadSaved}
+      <p data-workload-saved>
+        {form.workloadSaved.status === "committed"
+          ? `Committed ${form.workloadSaved.deployCommit?.slice(0, 7) ?? ""}; it takes effect when it is applied.`
+          : "Nothing to change."}
+      </p>
+    {/if}
+  {/if}
+
   {#if data.files}
     <h2>Files</h2>
     <p>
