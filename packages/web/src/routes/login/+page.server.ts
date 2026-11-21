@@ -1,6 +1,7 @@
 import { ApiError } from "@stardust/sdk";
 import { fail, redirect } from "@sveltejs/kit";
 import { apiClient, LOGIN_ERROR_COOKIE, OIDC_NEXT_COOKIE, OIDC_STATE_COOKIE, setSession } from "$lib/server/api";
+import { redirectToProvider } from "$lib/server/provider-redirect";
 import { safeNext } from "$lib/server/safe-next";
 import type { Actions, PageServerLoad } from "./$types";
 
@@ -103,6 +104,6 @@ export const actions: Actions = {
       secure: url.protocol === "https:",
       maxAge: 600,
     });
-    redirect(303, providerUrl);
+    redirectToProvider(providerUrl);
   },
 };

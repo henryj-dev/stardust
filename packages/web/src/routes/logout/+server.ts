@@ -1,5 +1,6 @@
 import { redirect } from "@sveltejs/kit";
 import { apiClient, SESSION_COOKIE } from "$lib/server/api";
+import { redirectToProvider } from "$lib/server/provider-redirect";
 import type { RequestHandler } from "./$types";
 
 export const POST: RequestHandler = async ({ cookies, locals }) => {
@@ -11,5 +12,6 @@ export const POST: RequestHandler = async ({ cookies, locals }) => {
     : {};
   cookies.delete(SESSION_COOKIE, { path: "/" });
   // A single sign-on session is ended at the provider too, which sends the browser back to /login.
-  redirect(303, ended.redirect ?? "/login");
+  if (ended.redirect) redirectToProvider(ended.redirect);
+  redirect(303, "/login");
 };
