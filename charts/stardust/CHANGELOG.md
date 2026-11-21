@@ -1,5 +1,45 @@
 # stardust
 
+## 0.28.0
+
+### Minor Changes
+
+- [#137](https://github.com/henryj-dev/stardust/pull/137) [`827b988`](https://github.com/henryj-dev/stardust/commit/827b98860592d29d53ae9970c70ffcf656d7da63) Thanks [@mack-erel](https://github.com/mack-erel)! - An administrator can bind a cluster-wide role to a component's own service
+  account from its page (Cluster roles), for example `system:auth-delegator`
+  for an app that checks tokens with a TokenReview. Only roles listed in
+  `runtime.allowedClusterRoles` are accepted, and every change is audited.
+
+- [#139](https://github.com/henryj-dev/stardust/pull/139) [`c26a185`](https://github.com/henryj-dev/stardust/commit/c26a185a76cf7ff77ef0266e6b187b1584af7a1c) Thanks [@mack-erel](https://github.com/mack-erel)! - A component can get an address outside the cluster from its page: a
+  LoadBalancer Service `<component>-vip` with a fixed cluster IP and one address
+  at the same offset of the blocks in `runtime.external`, carrying the
+  configured labels and annotations (such as DSR). The offset is picked so that
+  no Service anywhere in the deploy repository, no database's address and
+  (when it can be listed) nothing in the cluster holds it, and a Service of the
+  same name is refused. With `runtime.external` set, scaffolding no longer
+  commits a plain LoadBalancer.
+
+- [#138](https://github.com/henryj-dev/stardust/pull/138) [`590fa42`](https://github.com/henryj-dev/stardust/commit/590fa4284b26895f9267c1db6f6aa5e1c1e31e19) Thanks [@mack-erel](https://github.com/mack-erel)! - A component's page has a Secret files section: secrets read from disk that
+  are not environment variables, such as a 32-byte key. stardust generates the
+  value (or takes an uploaded file, binary included), seals it with SOPS in a
+  Secret of its own that is never read with `envFrom`, and mounts it read-only
+  at `/run/secrets/<set>/<key>` (0440, through the pod's fsGroup). Values are
+  never shown; administrators only, audited.
+
+- [#132](https://github.com/henryj-dev/stardust/pull/132) [`940367e`](https://github.com/henryj-dev/stardust/commit/940367ee36e9efccd3946140793db321bdd4a69a) Thanks [@mack-erel](https://github.com/mack-erel)! - A component's page has a Workload section: its own service account with a
+  token (or no token), HTTP startup, readiness and liveness probes, a read-only
+  root filesystem with writable paths, numeric user and group ids, and rolling
+  one pod at a time (`maxSurge: 0`, never `Recreate`). Each save is one commit
+  to the component's manifests, and the section says why a namespace enforcing
+  the restricted Pod Security standard would refuse the pods. Scaffolding takes
+  the same settings.
+
+### Patch Changes
+
+- [#139](https://github.com/henryj-dev/stardust/pull/139) [`c26a185`](https://github.com/henryj-dev/stardust/commit/c26a185a76cf7ff77ef0266e6b187b1584af7a1c) Thanks [@mack-erel](https://github.com/mack-erel)! - A database's address outside the cluster no longer takes an N that a Service
+  elsewhere in the deploy repository holds (an app's own, or a component's):
+  every manifest below `databases.external.scan` (default the whole repository)
+  counts, not only those under the databases root.
+
 ## 0.27.2
 
 ### Patch Changes
