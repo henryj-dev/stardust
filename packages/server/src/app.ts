@@ -360,7 +360,18 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
         action: "auth.login.failed",
         actor: { kind: "anonymous", userId: null, name: null },
         target: identity.subject,
-        detail: { via: "oidc", reason: result.reason, issuer: identity.issuer },
+        // Who the provider says this is, so an administrator can tell whom to let in.
+        // The log is administrators' own; these are what the person's provider shows anyway.
+        detail: {
+          via: "oidc",
+          reason: result.reason,
+          issuer: identity.issuer,
+          claimed: {
+            username: identity.username?.slice(0, 200) ?? null,
+            email: identity.email?.slice(0, 200) ?? null,
+            name: identity.name?.slice(0, 200) ?? null,
+          },
+        },
       });
       const message = {
         "no-account": "there is no stardust account for you; ask an administrator",
@@ -748,25 +759,49 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     return c.json({ ok: true });
   });
 
+  /**
+   * An OpenID identity an administrator gives: `{subject}` names someone of the
+   * provider stardust signs in with (the issuer is filled in), `{issuer, subject}`
+   * any. A string is why it cannot be used.
+   */
+  const identityOf = async (o: unknown): Promise<{ issuer: string; subject: string } | string> => {
+    const v = o as { issuer?: unknown; subject?: unknown } | null;
+    if (typeof v?.subject !== "string" || v.subject === "" || v.subject.length > 255)
+      return "oidc must be {subject} or {issuer, subject}";
+    if (v.issuer !== undefined) {
+      if (typeof v.issuer !== "string" || v.issuer === "") return "oidc.issuer must be text";
+      return { issuer: v.issuer, subject: v.subject };
+    }
+    if (!services.oidc) return "OpenID sign-in is not configured: give oidc.issuer";
+    return { issuer: (await services.oidc.client()).issuer, subject: v.subject };
+  };
+
   app.post("/api/v1/users", async (c) => {
     const denied = await deny(c, "admin");
     if (denied) return denied;
     const body = (await c.req.json().catch(() => null)) as {
       username?: unknown;
+      displayName?: unknown;
       password?: unknown;
       isAdmin?: unknown;
-      oidc?: { issuer?: unknown; subject?: unknown };
+      oidc?: unknown;
     } | null;
-    const oidc =
-      typeof body?.oidc?.issuer === "string" && typeof body.oidc.subject === "string"
-        ? { issuer: body.oidc.issuer, subject: body.oidc.subject }
-        : undefined;
-    if (typeof body?.username !== "string" || (typeof body.password !== "string" && !oidc)) {
-      return c.json({ error: "username and a password or an oidc identity are required" }, 400);
+    // Without a password or an identity the account waits for an invitation link.
+    if (typeof body?.username !== "string") return c.json({ error: "username is required" }, 400);
+    if (body.password !== undefined && typeof body.password !== "string")
+      return c.json({ error: "password must be text" }, 400);
+    if (body.displayName !== undefined && (typeof body.displayName !== "string" || body.displayName.length > 200))
+      return c.json({ error: "displayName must be text of at most 200 characters" }, 400);
+    let oidc: { issuer: string; subject: string } | undefined;
+    if (body.oidc !== undefined && body.oidc !== null) {
+      const id = await identityOf(body.oidc);
+      if (typeof id === "string") return c.json({ error: id }, 400);
+      oidc = id;
     }
     try {
       const user = await createUser(globalSql, {
         username: body.username,
+        ...(typeof body.displayName === "string" ? { displayName: body.displayName } : {}),
         ...(typeof body.password === "string" ? { password: body.password } : {}),
         ...(oidc ? { oidc } : {}),
         isAdmin: body.isAdmin === true,
@@ -806,11 +841,12 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       change.displayName = body.displayName;
     }
     if (body.oidc !== undefined) {
-      const o = body.oidc as { issuer?: unknown; subject?: unknown } | null;
-      if (o === null) change.oidc = null;
-      else if (typeof o?.issuer === "string" && o.issuer !== "" && typeof o.subject === "string" && o.subject !== "")
-        change.oidc = { issuer: o.issuer, subject: o.subject };
-      else return c.json({ error: "oidc must be {issuer, subject} or null" }, 400);
+      if (body.oidc === null) change.oidc = null;
+      else {
+        const id = await identityOf(body.oidc);
+        if (typeof id === "string") return c.json({ error: `${id}, or null` }, 400);
+        change.oidc = id;
+      }
     }
     const result = await updateUser(globalSql, c.req.param("username"), change);
     if (!result.ok) {

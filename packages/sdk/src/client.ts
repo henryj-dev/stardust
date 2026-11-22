@@ -495,9 +495,29 @@ export interface Client {
   /** Every account, with roles (administrators). */
   users(): Promise<UserView[]>;
   /** Creates an account; without a password, invite it with a link. Administrators. */
-  createUser(input: { username: string; displayName?: string; isAdmin?: boolean; password?: string }): Promise<void>;
+  /**
+   * Adds a user. Without a password or an identity the account waits for an
+   * invitation link (`issueLink`); with `oidc` the person signs in through the
+   * provider (`{subject}` names someone of the server's own provider).
+   */
+  createUser(input: {
+    username: string;
+    displayName?: string;
+    isAdmin?: boolean;
+    password?: string;
+    oidc?: { subject: string; issuer?: string };
+  }): Promise<void>;
   /** Changes an account (administrators). ApiError 409 when it would leave no administrator. */
-  updateUser(username: string, change: { isAdmin?: boolean; disabled?: boolean; displayName?: string }): Promise<void>;
+  /** `oidc` links an identity (`{subject}` for the server's own provider), null unlinks it. */
+  updateUser(
+    username: string,
+    change: {
+      isAdmin?: boolean;
+      disabled?: boolean;
+      displayName?: string;
+      oidc?: { subject: string; issuer?: string } | null;
+    },
+  ): Promise<void>;
   /** A one-time link for someone to set their password. The token is shown only here. Administrators. */
   issueLink(username: string, purpose: "invite" | "reset"): Promise<{ token: string; path: string; expiresAt: string }>;
   /** Ends every session and API token of an account (administrators). */

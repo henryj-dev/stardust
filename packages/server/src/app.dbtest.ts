@@ -149,6 +149,20 @@ describe("sign-in and permissions", () => {
     const short = await app.request("/api/v1/users", json({ username: "dev2", password: "short" }, admin));
     assert.equal(short.status, 400);
     assert.match(((await short.json()) as { error: string }).error, /at least 12/);
+    // The dashboard adds an account and then issues its invitation link: no password, no identity.
+    const invited = await app.request("/api/v1/users", json({ username: "newbie", displayName: "New Bie" }, admin));
+    assert.equal(invited.status, 201, await invited.clone().text());
+    const listed = (await (await app.request("/api/v1/users", { headers: admin })).json()) as {
+      users: { username: string; displayName: string; hasPassword: boolean; oidc: unknown }[];
+    };
+    const newbie = listed.users.find((u) => u.username === "newbie");
+    assert.deepEqual([newbie?.displayName, newbie?.hasPassword, newbie?.oidc], ["New Bie", false, null]);
+    const noName = await app.request("/api/v1/users", json({ displayName: "x" }, admin));
+    assert.equal(noName.status, 400);
+    // A subject alone names someone of the server's own provider; without one configured it is refused.
+    const noProvider = await app.request("/api/v1/users", json({ username: "ssoless", oidc: { subject: "s" } }, admin));
+    assert.equal(noProvider.status, 400);
+    assert.match(((await noProvider.json()) as { error: string }).error, /not configured/);
     const role = await app.request("/api/v1/projects/demo/members/dev", {
       ...json({ role: "owner" }, admin),
       method: "PUT",
