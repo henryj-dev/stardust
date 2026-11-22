@@ -177,6 +177,54 @@ describe("OpenID sign-in", () => {
     assert.equal((await signIn(app, person("gus-sub"))).status, 403);
   });
 
+  it("an administrator's choice on the dashboard takes precedence over autoCreate in the configuration, until cleared", async () => {
+    await createUser(db.sql, { username: "setter", password: "correct horse battery", isAdmin: true });
+    const session = await passwordSignIn(db.sql, "setter", "correct horse battery");
+    assert.ok(session.ok);
+    const admin = { authorization: `Bearer ${session.token}`, "content-type": "application/json" };
+    const put = (app: App, body: unknown) =>
+      app.request("/api/v1/auth/settings", { method: "PUT", headers: admin, body: JSON.stringify(body) });
+    const view = async (app: App) =>
+      (
+        (await (await app.request("/api/v1/auth/settings", { headers: admin })).json()) as {
+          oidc: { autoCreate: { effective: boolean; configured: boolean; set: boolean | null } };
+        }
+      ).oidc.autoCreate;
+
+    const creating = await appWith({}, true);
+    assert.deepEqual(await view(creating), { effective: true, configured: true, set: null });
+    assert.equal((await put(creating, { autoCreate: false })).status, 200);
+    assert.deepEqual(await view(creating), { effective: false, configured: true, set: false });
+    const away = await signIn(creating, person("hal"));
+    assert.equal(away.status, 403);
+    assert.match(away.body.error ?? "", /no stardust account/);
+    const [changed] = (await listAudit(db.sql, { action: "auth.settings.update", limit: 1 })).events;
+    assert.deepEqual(changed?.detail, { autoCreate: { from: null, to: false } });
+    assert.equal(changed?.actor.name, "setter");
+
+    // Cleared, the configuration applies again; set on, it creates even where the configuration says not to.
+    assert.equal((await put(creating, { autoCreate: null })).status, 200);
+    assert.equal((await signIn(creating, person("hal"))).status, 200);
+    const refusing = await appWith({}, false);
+    assert.equal((await signIn(refusing, person("ivy"))).status, 403);
+    assert.equal((await put(refusing, { autoCreate: true })).status, 200);
+    assert.equal((await signIn(refusing, person("ivy"))).status, 200);
+
+    // Bad input is refused, and nothing but an administrator may change it.
+    assert.equal((await put(refusing, { autoCreate: "yes" })).status, 400);
+    assert.equal((await put(refusing, { other: true })).status, 400);
+    await createUser(db.sql, { username: "plainuser", password: "correct horse battery" });
+    const plain = await passwordSignIn(db.sql, "plainuser", "correct horse battery");
+    assert.ok(plain.ok);
+    const asPlain = await refusing.request("/api/v1/auth/settings", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${plain.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ autoCreate: false }),
+    });
+    assert.equal(asPlain.status, 403);
+    assert.equal((await put(refusing, { autoCreate: null })).status, 200);
+  });
+
   it("applies allowedGroups, and adminGroups follows the provider at every sign-in", async () => {
     const app = await appWith({ allowedGroups: ["dev"], adminGroups: ["platform"] });
     assert.equal((await signIn(app, person("frank", { groups: ["sales"] }))).status, 403);

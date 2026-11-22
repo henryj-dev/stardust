@@ -11,7 +11,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const users = await client.users();
   // Single sign-on attempts turned away for want of an account: whom an administrator may let in.
   const failed = await client.audit({ action: "auth.login.failed", limit: 200 }).catch(() => ({ events: [] }));
-  return { users, waiting: signInRequests(failed.events, users), me: locals.user.username };
+  const signIn = await client.signInSettings().catch(() => null);
+  return { users, waiting: signInRequests(failed.events, users), signIn, me: locals.user.username };
 };
 
 /** The server's reason for a refusal it explains (4xx); anything else is an error page. */
@@ -94,6 +95,19 @@ export const actions: Actions = {
     try {
       await client.updateUser(username, { oidc: unlink ? null : { subject } });
       return { updated: username };
+    } catch (err) {
+      return refused(err);
+    }
+  },
+  // Whether a first single sign-on creates an account: on, off, or as stardust.yaml says.
+  signInSettings: async ({ locals, request, url }) => {
+    const client = requireClient(locals, url);
+    const v = String((await request.formData()).get("autoCreate") ?? "");
+    const autoCreate = v === "on" ? true : v === "off" ? false : v === "config" ? null : undefined;
+    if (autoCreate === undefined) return fail(400, { error: "Choose on, off, or as configured." });
+    try {
+      await client.putSignInSettings({ autoCreate });
+      return { signInSaved: true };
     } catch (err) {
       return refused(err);
     }
