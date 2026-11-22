@@ -1,19 +1,20 @@
 <script lang="ts">
-import AuditTable from "$lib/components/AuditTable.svelte";
+import AuditTable from "$lib/components/audit/AuditTable.svelte";
+import ProjectNav from "$lib/components/ProjectNav.svelte";
 
 let { data } = $props();
 </script>
 
 <svelte:head>
-  <title>Audit log · stardust</title>
+  <title>Audit · {data.projectId} · stardust</title>
 </svelte:head>
 
 <main>
-  <h1>Audit log</h1>
+  <div class="page-head"><h1>{data.projectId}</h1></div>
+  <ProjectNav projectId={data.projectId} current="audit" isAdmin={data.user?.isAdmin === true} />
   <form method="GET" class="toolbar" data-audit-filter>
     <label>Who <input name="actor" value={data.filter.actor ?? ""} placeholder="username" /></label>
-    <label>Action <input name="action" value={data.filter.action ?? ""} placeholder="project, auth.login…" /></label>
-    <label>Project <input name="project" value={data.filter.project ?? ""} /></label>
+    <label>Action <input name="action" value={data.filter.action ?? ""} placeholder="run, project…" /></label>
     <label>From (UTC) <input type="datetime-local" name="since" value={data.filter.since?.replace(/Z$/, "") ?? ""} /></label>
     <label>Until (UTC) <input type="datetime-local" name="until" value={data.filter.until?.replace(/Z$/, "") ?? ""} /></label>
     <button type="submit">Show</button>
@@ -21,5 +22,5 @@ let { data } = $props();
   {#if data.problem}
     <p role="alert" data-audit-problem>{data.problem}</p>
   {/if}
-  <AuditTable linkEvents events={data.events} older={data.older} showProject={true} />
+  <AuditTable events={data.events} older={data.older} showProject={false} />
 </main>
