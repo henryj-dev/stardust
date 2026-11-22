@@ -134,6 +134,12 @@ web:
   Optional `mfa: { requireAmr: [otp] }` refuses a sign-in whose `amr` claim
   lacks any of the listed values, so the provider's second step is required.
 
+  Administrators can change `autoCreate` on the Users page (**Single sign-on**:
+  create one, turn them away, or as the configuration says;
+  `GET`/`PUT /api/v1/auth/settings` `{"autoCreate": true | false | null}`,
+  audited as `auth.settings.update`). A choice made there takes precedence
+  over `stardust.yaml` until it is set back to "as the configuration says".
+
   Without `autoCreate`, someone the provider signs in who has no account is
   turned away, and the Users page lists them under **Waiting to be let in**
   with what the provider said (username, email, name — kept in the audit log's

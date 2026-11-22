@@ -310,6 +310,17 @@ export interface UserView {
   roles: Array<{ projectId: string; role: "maintainer" | "viewer" }>;
 }
 
+/** How people sign in: what administrators set over the configuration. */
+export interface SignInSettingsView {
+  /** Null when single sign-on is not configured. */
+  oidc: {
+    /** Create an account at a first sign-in: in force, from the configuration, and as set here (null: not set). */
+    autoCreate: { effective: boolean; configured: boolean; set: boolean | null };
+  } | null;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
 export interface SessionInfo {
   id: string;
   via: "password" | "oidc";
@@ -539,6 +550,10 @@ export interface Client {
   createToken(name: string, expiresInDays: number | null): Promise<{ id: string; token: string }>;
   /** Revokes one of one's own tokens; ApiError 404 for an unknown one. */
   revokeToken(id: string): Promise<void>;
+  /** Sign-in settings (administrators). */
+  signInSettings(): Promise<SignInSettingsView>;
+  /** Sets sign-in settings over the configuration; null follows the configuration again. Administrators. */
+  putSignInSettings(change: { autoCreate: boolean | null }): Promise<SignInSettingsView>;
   /** One project's audit log (its maintainers and administrators). */
   projectAudit(projectId: string, filter?: Omit<AuditFilter, "project">): Promise<AuditPage>;
 }
@@ -982,6 +997,21 @@ export function createClient(options: ClientOptions): Client {
         const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
         throw new ApiError(res.status, error || `DELETE ${path} failed: ${res.status}`);
       }
+    },
+    signInSettings() {
+      return read<SignInSettingsView>("/api/v1/auth/settings");
+    },
+    async putSignInSettings(change) {
+      const res = await doFetch(`${base}/api/v1/auth/settings`, {
+        method: "PUT",
+        headers: { ...headers(), "content-type": "application/json" },
+        body: JSON.stringify(change),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({ error: "" }))) as { error?: string };
+        throw new ApiError(res.status, error || `PUT /api/v1/auth/settings failed: ${res.status}`);
+      }
+      return (await res.json()) as SignInSettingsView;
     },
     audit(filter = {}) {
       return read<AuditPage>(`/api/v1/audit${queryOf({ ...filter })}`);

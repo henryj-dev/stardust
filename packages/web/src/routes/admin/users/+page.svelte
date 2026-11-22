@@ -45,6 +45,35 @@ const suggest = (r: { username: string | null; email: string | null }) =>
     <p data-created>Added <strong>{form.created.username}</strong>: they sign in through single sign-on.</p>
   {/if}
 
+  {#if data.signIn?.oidc}
+    {@const ac = data.signIn.oidc.autoCreate}
+    <h2>Single sign-on</h2>
+    <form method="POST" action="?/signInSettings" data-sign-in-settings>
+      <fieldset>
+        <legend>When someone the provider signs in has no account here</legend>
+        <label>
+          <input type="radio" name="autoCreate" value="on" checked={ac.set === true} />
+          Create one (a member; they see projects once added to them)
+        </label>
+        <label>
+          <input type="radio" name="autoCreate" value="off" checked={ac.set === false} />
+          Turn them away: they wait below to be let in
+        </label>
+        <label>
+          <input type="radio" name="autoCreate" value="config" checked={ac.set === null} />
+          As the configuration says ({ac.configured ? "create one" : "turn them away"})
+        </label>
+      </fieldset>
+      <p data-auto-create={ac.effective ? "on" : "off"}>
+        Now: {ac.effective ? "an account is created" : "they are turned away"}{data.signIn.updatedBy
+          ? ` · last changed by ${data.signIn.updatedBy}`
+          : ""}.
+      </p>
+      <button type="submit">Save</button>
+    </form>
+    {#if form?.signInSaved}<p data-sign-in-saved>Saved: it applies to the next sign-in.</p>{/if}
+  {/if}
+
   {#if data.waiting.length > 0}
     <h2>Waiting to be let in</h2>
     <p>

@@ -84,6 +84,8 @@ export type { StartRun } from "./runs.ts";
 export { advanceRun, startRun } from "./runs.ts";
 export type { CoreTableScope } from "./scopes.ts";
 export { TABLE_SCOPES } from "./scopes.ts";
+export type { SignInSettings } from "./sign-in-settings.ts";
+export { getSignInSettings, setSignInSettings } from "./sign-in-settings.ts";
 export { guardStore, purgeGuards, sagaStore } from "./stores.ts";
 export type { TotpStatus } from "./totp.ts";
 export {

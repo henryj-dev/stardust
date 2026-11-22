@@ -63,6 +63,7 @@ import {
   endSession,
   getAuditEvent,
   getProject,
+  getSignInSettings,
   guardStore,
   issueAccountLink,
   latestRuns,
@@ -87,6 +88,7 @@ import {
   savePendingLogin,
   sessionFreshness,
   setProjectRole,
+  setSignInSettings,
   signInWithIdentity,
   signOut,
   startChallenge,
@@ -348,8 +350,10 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       });
       return c.json({ error: "your account is not allowed to use stardust" }, 403);
     }
+    // An administrator's choice on the dashboard takes precedence over stardust.yaml.
+    const autoCreate = (await getSignInSettings(globalSql)).autoCreate ?? oidc.autoCreate;
     const result = await signInWithIdentity(globalSql, identity, {
-      autoCreate: oidc.autoCreate,
+      autoCreate,
       isAdmin: oidc.rules.adminGroups ? access.isAdmin : null,
       sid: identity.sid ?? null,
       ...(identity.idToken ? { idToken: identity.idToken } : {}),
@@ -775,6 +779,45 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     if (!services.oidc) return "OpenID sign-in is not configured: give oidc.issuer";
     return { issuer: (await services.oidc.client()).issuer, subject: v.subject };
   };
+
+  // How people sign in, as administrators set it here over stardust.yaml.
+  const signInSettingsView = async () => {
+    const saved = await getSignInSettings(globalSql);
+    return {
+      oidc: services.oidc
+        ? {
+            autoCreate: {
+              effective: saved.autoCreate ?? services.oidc.autoCreate,
+              configured: services.oidc.autoCreate,
+              set: saved.autoCreate,
+            },
+          }
+        : null,
+      updatedAt: saved.updatedAt,
+      updatedBy: saved.updatedBy,
+    };
+  };
+  app.get("/api/v1/auth/settings", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    return c.json(await signInSettingsView());
+  });
+  app.put("/api/v1/auth/settings", async (c) => {
+    const denied = await deny(c, "admin");
+    if (denied) return denied;
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object") return c.json({ error: "a JSON object is required" }, 400);
+    for (const key of Object.keys(body))
+      if (key !== "autoCreate") return c.json({ error: `unknown setting "${key}"` }, 400);
+    if (!("autoCreate" in body)) return c.json({ error: "nothing to change" }, 400);
+    if (body.autoCreate !== null && typeof body.autoCreate !== "boolean")
+      return c.json({ error: "autoCreate must be true, false, or null to follow the configuration" }, 400);
+    if (!services.oidc) return c.json({ error: "OpenID sign-in is not configured" }, 409);
+    const before = (await getSignInSettings(globalSql)).autoCreate;
+    await setSignInSettings(globalSql, { autoCreate: body.autoCreate as boolean | null }, c.get("user").username);
+    await audit(c, { action: "auth.settings.update", detail: { autoCreate: { from: before, to: body.autoCreate } } });
+    return c.json(await signInSettingsView());
+  });
 
   app.post("/api/v1/users", async (c) => {
     const denied = await deny(c, "admin");
