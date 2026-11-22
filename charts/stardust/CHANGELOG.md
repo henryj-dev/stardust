@@ -1,5 +1,11 @@
 # stardust
 
+## 0.31.0
+
+### Minor Changes
+
+- [#151](https://github.com/henryj-dev/stardust/pull/151) [`4d070f9`](https://github.com/henryj-dev/stardust/commit/4d070f9d4d0a32cdb7f11c613229eb1fe216d0bc) Thanks [@mack-erel](https://github.com/mack-erel)! - Administrators choose on the Users page whether a first single sign-on creates an account: create one, turn them away (they then wait on the same page to be let in), or as `stardust.yaml` says. The choice is kept in the database (migration `0016_sign_in_settings`), takes precedence over `identity-oidc.autoCreate` until set back, and is audited as `auth.settings.update`. API: `GET`/`PUT /api/v1/auth/settings`.
+
 ## 0.30.0
 
 ### Minor Changes
