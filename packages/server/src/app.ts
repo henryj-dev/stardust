@@ -766,18 +766,28 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
   /**
    * An OpenID identity an administrator gives: `{subject}` names someone of the
    * provider stardust signs in with (the issuer is filled in), `{issuer, subject}`
-   * any. A string is why it cannot be used.
+   * any. Otherwise why it cannot be used, and the status to answer with.
    */
-  const identityOf = async (o: unknown): Promise<{ issuer: string; subject: string } | string> => {
+  type Refusal = { error: string; status: 400 | 502 };
+  const identityOf = async (o: unknown): Promise<{ issuer: string; subject: string } | Refusal> => {
     const v = o as { issuer?: unknown; subject?: unknown } | null;
     if (typeof v?.subject !== "string" || v.subject === "" || v.subject.length > 255)
-      return "oidc must be {subject} or {issuer, subject}";
+      return { error: "oidc must be {subject} or {issuer, subject}", status: 400 };
     if (v.issuer !== undefined) {
-      if (typeof v.issuer !== "string" || v.issuer === "") return "oidc.issuer must be text";
+      if (typeof v.issuer !== "string" || v.issuer === "") return { error: "oidc.issuer must be text", status: 400 };
       return { issuer: v.issuer, subject: v.subject };
     }
-    if (!services.oidc) return "OpenID sign-in is not configured: give oidc.issuer";
-    return { issuer: (await services.oidc.client()).issuer, subject: v.subject };
+    if (!services.oidc) return { error: "OpenID sign-in is not configured: give oidc.issuer", status: 400 };
+    try {
+      return { issuer: (await services.oidc.client()).issuer, subject: v.subject };
+    } catch (err) {
+      // The issuer comes from the provider's discovery document; without it, say so rather than fail.
+      log.warn("could not reach the identity provider for its issuer", { error: (err as Error).message });
+      return {
+        error: "the identity provider cannot be reached to name its issuer: give oidc.issuer, or try again",
+        status: 502,
+      };
+    }
   };
 
   // How people sign in, as administrators set it here over stardust.yaml.
@@ -838,7 +848,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
     let oidc: { issuer: string; subject: string } | undefined;
     if (body.oidc !== undefined && body.oidc !== null) {
       const id = await identityOf(body.oidc);
-      if (typeof id === "string") return c.json({ error: id }, 400);
+      if ("error" in id) return c.json({ error: id.error }, id.status);
       oidc = id;
     }
     try {
@@ -887,7 +897,7 @@ export function createApp(info: AppInfo, services?: Services): Hono<Env> {
       if (body.oidc === null) change.oidc = null;
       else {
         const id = await identityOf(body.oidc);
-        if (typeof id === "string") return c.json({ error: `${id}, or null` }, 400);
+        if ("error" in id) return c.json({ error: id.error }, id.status);
         change.oidc = id;
       }
     }

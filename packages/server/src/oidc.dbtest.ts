@@ -225,6 +225,40 @@ describe("OpenID sign-in", () => {
     assert.equal((await put(refusing, { autoCreate: null })).status, 200);
   });
 
+  it("when the provider cannot be reached, a subject alone is refused with the reason, and one with its issuer still works", async () => {
+    const down = createApp(
+      { version: "test" },
+      {
+        sql: db.sql,
+        resolveTarget: async () => {
+          throw new Error("not used here");
+        },
+        oidc: {
+          client: async () => {
+            throw new Error("getaddrinfo ENOTFOUND");
+          },
+          redirectUri: REDIRECT,
+          displayName: "Test SSO",
+          rules: {},
+          autoCreate: false,
+        },
+      },
+    );
+    await createUser(db.sql, { username: "offline-admin", password: "correct horse battery", isAdmin: true });
+    const session = await passwordSignIn(db.sql, "offline-admin", "correct horse battery");
+    assert.ok(session.ok);
+    const create = (oidc: unknown, username: string) =>
+      down.request("/api/v1/users", {
+        method: "POST",
+        headers: { authorization: `Bearer ${session.token}`, "content-type": "application/json" },
+        body: JSON.stringify({ username, oidc }),
+      });
+    const alone = await create({ subject: "s-down" }, "jo");
+    assert.equal(alone.status, 502);
+    assert.match(((await alone.json()) as { error: string }).error, /cannot be reached/);
+    assert.equal((await create({ subject: "s-down", issuer: "https://id.example.com" }, "jo")).status, 201);
+  });
+
   it("applies allowedGroups, and adminGroups follows the provider at every sign-in", async () => {
     const app = await appWith({ allowedGroups: ["dev"], adminGroups: ["platform"] });
     assert.equal((await signIn(app, person("frank", { groups: ["sales"] }))).status, 403);

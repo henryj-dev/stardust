@@ -5,7 +5,9 @@ import PageHeader from "$lib/components/layout/PageHeader.svelte";
 import Button from "$lib/components/ui/Button.svelte";
 import TextField from "$lib/components/ui/TextField.svelte";
 import CreateUserDialog from "$lib/components/users/CreateUserDialog.svelte";
+import SignInSettings from "$lib/components/users/SignInSettings.svelte";
 import UserList from "$lib/components/users/UserList.svelte";
+import WaitingList from "$lib/components/users/WaitingList.svelte";
 
 let { data, form } = $props();
 const createError = $derived(page.url.searchParams.has("/create") && form?.error && !form.reauth ? form.error : null);
@@ -15,7 +17,7 @@ const createError = $derived(page.url.searchParams.has("/create") && form?.error
 
 <PageContainer>
   <PageHeader title="Users">
-    {#snippet actions()}<CreateUserDialog error={createError} />{/snippet}
+    {#snippet actions()}<CreateUserDialog error={createError} sso={data.sso} />{/snippet}
   </PageHeader>
 
   {#if form?.error && !createError}
@@ -37,7 +39,11 @@ const createError = $derived(page.url.searchParams.has("/create") && form?.error
     </div>
   {:else if form?.ended}
     <p data-ended class="mb-5 text-sm text-[#44454a]">{form.ended.username}: ended {form.ended.sessions} session(s) and {form.ended.tokens} API token(s).</p>
+  {:else if form?.created}
+    <p data-created class="mb-5 text-sm text-[#287345]">Added <strong>{form.created.username}</strong>: they sign in through single sign-on.</p>
   {/if}
 
-  <UserList users={data.users} me={data.me} />
+  {#if data.signIn?.oidc}<SignInSettings settings={data.signIn} saved={form?.signInSaved === true} />{/if}
+  <WaitingList waiting={data.waiting} users={data.users} />
+  <UserList users={data.users} me={data.me} sso={data.sso} />
 </PageContainer>
