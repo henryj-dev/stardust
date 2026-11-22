@@ -2,12 +2,16 @@ import { ApiError } from "@stardust/sdk";
 import { error, fail } from "@sveltejs/kit";
 import { requireClient } from "$lib/server/api";
 import { needsReauth, reauthFrom } from "$lib/server/reauth";
+import { signInRequests } from "$lib/server/sign-in-requests";
 import type { Actions, PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ locals, url }) => {
   const client = requireClient(locals, url);
   if (!locals.user?.isAdmin) error(403, "Administrators only.");
-  return { users: await client.users(), me: locals.user.username };
+  const users = await client.users();
+  // Single sign-on attempts turned away for want of an account: whom an administrator may let in.
+  const failed = await client.audit({ action: "auth.login.failed", limit: 200 }).catch(() => ({ events: [] }));
+  return { users, waiting: signInRequests(failed.events, users), me: locals.user.username };
 };
 
 /** The server's reason for a refusal it explains (4xx); anything else is an error page. */
@@ -36,12 +40,16 @@ export const actions: Actions = {
     const client = requireClient(locals, url);
     const form = await request.formData();
     const username = String(form.get("username") ?? "").trim();
+    const subject = String(form.get("subject") ?? "").trim();
     try {
       await client.createUser({
         username,
         displayName: String(form.get("displayName") ?? ""),
         isAdmin: form.get("isAdmin") === "on",
+        ...(subject ? { oidc: { subject } } : {}),
       });
+      // Someone who signs in through the provider needs no password, so no invitation.
+      if (subject) return { created: { username, sso: true } };
       // A new local account has no password: hand it an invitation right away.
       const link = await client.issueLink(username, "invite");
       return { link: { username, url: `${url.origin}${link.path}`, expiresAt: link.expiresAt } };
@@ -70,6 +78,21 @@ export const actions: Actions = {
     if (form.has("disabled")) change.disabled = form.get("disabled") === "true";
     try {
       await client.updateUser(username, change);
+      return { updated: username };
+    } catch (err) {
+      return refused(err);
+    }
+  },
+  // Single sign-on for an existing account: link the person the provider names, or unlink.
+  sso: async ({ locals, request, url }) => {
+    const client = requireClient(locals, url);
+    const form = await request.formData();
+    const username = String(form.get("username") ?? "");
+    const subject = String(form.get("subject") ?? "").trim();
+    const unlink = form.get("op") === "unlink";
+    if (!unlink && !subject) return fail(400, { error: "Give the person's single sign-on subject." });
+    try {
+      await client.updateUser(username, { oidc: unlink ? null : { subject } });
       return { updated: username };
     } catch (err) {
       return refused(err);

@@ -134,6 +134,16 @@ web:
   Optional `mfa: { requireAmr: [otp] }` refuses a sign-in whose `amr` claim
   lacks any of the listed values, so the provider's second step is required.
 
+  Without `autoCreate`, someone the provider signs in who has no account is
+  turned away, and the Users page lists them under **Waiting to be let in**
+  with what the provider said (username, email, name — kept in the audit log's
+  `auth.login.failed` event): give them an account, or link them to one that
+  exists. Each account's row also links or unlinks single sign-on by the
+  person's subject, and **Add a user** takes a subject in place of an
+  invitation. Through the API, `POST /api/v1/users` and
+  `PATCH /api/v1/users/<name>` take `oidc: {subject}` for the server's own
+  provider (`{issuer, subject}` for another; `null` unlinks).
+
   Sessions follow the provider's both ways. Signing out of stardust sends the
   browser on to the provider's `end_session_endpoint` (register
   `<server.publicUrl>/login` as a post-logout redirect URI). For the other

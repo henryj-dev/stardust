@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import type { AccessRules } from "@stardust/core";
-import { createUser } from "@stardust/db";
+import { createUser, listAudit, signIn as passwordSignIn } from "@stardust/db";
 import { createTestDb, type TestDb } from "@stardust/db/testing";
 import { createOidc } from "@stardust/plugin-identity-oidc";
 import { FakeProvider, type Issued } from "@stardust/plugin-identity-oidc/testing";
@@ -137,6 +137,44 @@ describe("OpenID sign-in", () => {
     const linked = await signIn(app, { claims: { sub: "erin-sub", preferred_username: "whatever" } });
     assert.equal(linked.status, 200);
     assert.equal(linked.body.user?.username, "erin");
+  });
+
+  it("an administrator lets in someone who was turned away: what the provider said is kept, a subject alone links them", async () => {
+    const app = await appWith({}, false);
+    const refused = await signIn(
+      app,
+      person("fay-sub", { preferred_username: "fay", email: "fay@example.com", name: "Fay" }),
+    );
+    assert.equal(refused.status, 403);
+    const [event] = (await listAudit(db.sql, { action: "auth.login.failed", limit: 1 })).events;
+    assert.equal(event?.target, "fay-sub");
+    assert.deepEqual(event?.detail, {
+      via: "oidc",
+      reason: "no-account",
+      issuer: idp.issuer,
+      claimed: { username: "fay", email: "fay@example.com", name: "Fay" },
+    });
+    await createUser(db.sql, { username: "root", password: "correct horse battery", isAdmin: true });
+    const session = await passwordSignIn(db.sql, "root", "correct horse battery");
+    assert.ok(session.ok);
+    const admin = { authorization: `Bearer ${session.token}`, "content-type": "application/json" };
+    const created = await app.request("/api/v1/users", {
+      method: "POST",
+      headers: admin,
+      body: JSON.stringify({ username: "fay", displayName: "Fay", oidc: { subject: "fay-sub" } }),
+    });
+    assert.equal(created.status, 201, await created.clone().text());
+    const back = await signIn(app, person("fay-sub", { preferred_username: "whatever" }));
+    assert.equal(back.status, 200);
+    assert.equal(back.body.user?.username, "fay");
+    // Linking an existing account by subject alone works the same way, and unlinking turns them away again.
+    await createUser(db.sql, { username: "gus", password: "correct horse battery" });
+    const patch = (body: unknown) =>
+      app.request("/api/v1/users/gus", { method: "PATCH", headers: admin, body: JSON.stringify(body) });
+    assert.equal((await patch({ oidc: { subject: "gus-sub" } })).status, 200);
+    assert.equal((await signIn(app, person("gus-sub"))).body.user?.username, "gus");
+    assert.equal((await patch({ oidc: null })).status, 200);
+    assert.equal((await signIn(app, person("gus-sub"))).status, 403);
   });
 
   it("applies allowedGroups, and adminGroups follows the provider at every sign-in", async () => {
