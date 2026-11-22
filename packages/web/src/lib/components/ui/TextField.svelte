@@ -2,8 +2,21 @@
 import Input from "./Input.svelte";
 
 let {
-  id, label, name, type = "text", autocomplete, value = "", inputmode,
-  required = false, disabled = false, hint, error, placeholder, minlength, maxlength, pattern,
+  id,
+  label,
+  name,
+  type = "text",
+  autocomplete,
+  value = "",
+  inputmode,
+  required = false,
+  disabled = false,
+  hint,
+  error,
+  placeholder,
+  minlength,
+  maxlength,
+  pattern,
 }: {
   id: string;
   label: string;

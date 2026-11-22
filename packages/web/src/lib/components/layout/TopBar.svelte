@@ -1,14 +1,23 @@
 <script lang="ts">
-import { page } from "$app/state";
 import { Menu } from "@lucide/svelte";
+import { page } from "$app/state";
+
 let { menuOpen, toggleMenu }: { menuOpen: boolean; toggleMenu: () => void } = $props();
 const title = $derived.by(() => {
   const path = page.url.pathname;
-  if (path.startsWith('/admin/users')) return 'Users';
-  if (path.startsWith('/admin/audit')) return 'Audit log';
-  if (path.startsWith('/admin/projects') || path.startsWith('/projects') || path === '/') return 'Projects';
-  const names: Record<string, string> = { domains: 'Domains', nodes: 'Nodes', databases: 'Databases', instances: 'Instances', 'cloud-audit': 'Cloud audit', 'upstream-images': 'Upstream images', account: 'Account' };
-  return names[path.split('/')[1] ?? ''] ?? 'Workspace';
+  if (path.startsWith("/admin/users")) return "Users";
+  if (path.startsWith("/admin/audit")) return "Audit log";
+  if (path.startsWith("/admin/projects") || path.startsWith("/projects") || path === "/") return "Projects";
+  const names: Record<string, string> = {
+    domains: "Domains",
+    nodes: "Nodes",
+    databases: "Databases",
+    instances: "Instances",
+    "cloud-audit": "Cloud audit",
+    "upstream-images": "Upstream images",
+    account: "Account",
+  };
+  return names[path.split("/")[1] ?? ""] ?? "Workspace";
 });
 </script>
 

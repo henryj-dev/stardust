@@ -2,7 +2,12 @@
 import type { Snippet } from "svelte";
 import Sidebar from "./Sidebar.svelte";
 import TopBar from "./TopBar.svelte";
-let { user, capabilities, children }: {
+
+let {
+  user,
+  capabilities,
+  children,
+}: {
   user: { username: string; displayName: string | null; isAdmin: boolean };
   capabilities: string[];
   children: Snippet;

@@ -1,7 +1,13 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
 import { getTabsContext } from "./context";
-let { value, disabled = false, children, class: className = "" }: {
+
+let {
+  value,
+  disabled = false,
+  children,
+  class: className = "",
+}: {
   value: string;
   disabled?: boolean;
   children: Snippet;
@@ -18,7 +24,12 @@ function navigate(event: KeyboardEvent) {
   const triggers = Array.from(list?.querySelectorAll<HTMLButtonElement>('[role="tab"]:not(:disabled)') ?? []);
   const current = triggers.indexOf(event.currentTarget as HTMLButtonElement);
   if (!triggers.length || current < 0) return;
-  const index = event.key === "Home" ? 0 : event.key === "End" ? triggers.length - 1 : (current + (event.key === forward ? 1 : -1) + triggers.length) % triggers.length;
+  const index =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? triggers.length - 1
+        : (current + (event.key === forward ? 1 : -1) + triggers.length) % triggers.length;
   event.preventDefault();
   triggers[index]?.focus();
 }

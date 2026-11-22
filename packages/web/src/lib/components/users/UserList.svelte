@@ -1,6 +1,7 @@
 <script lang="ts">
 import type { PageData } from "../../../routes/(app)/admin/users/$types";
 import UserActions from "./UserActions.svelte";
+
 let { users, me }: { users: PageData["users"]; me: string } = $props();
 </script>
 

@@ -1,6 +1,7 @@
 <script lang="ts">
 import { Plus } from "@lucide/svelte";
 import PageHeader from "$lib/components/layout/PageHeader.svelte";
+
 let { isAdmin }: { isAdmin: boolean } = $props();
 </script>
 

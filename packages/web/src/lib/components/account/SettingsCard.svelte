@@ -1,6 +1,8 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
-let { id, title, description, children }: { id: string; title: string; description: string; children: Snippet } = $props();
+
+let { id, title, description, children }: { id: string; title: string; description: string; children: Snippet } =
+  $props();
 </script>
 
 <section {id} class="settings-card m-0 scroll-mt-6 rounded-none border-0 bg-transparent px-0 py-2 md:px-0">

@@ -1,9 +1,9 @@
 <script lang="ts">
+import { Activity, AlignLeft, CalendarDays, Crosshair, Folder, Globe, UserRound } from "@lucide/svelte";
 import type { AuditEventView } from "@stardust/sdk";
 import { createTable, FlexRender } from "@tanstack/svelte-table";
-import { CalendarDays, UserRound, Activity, Folder, Crosshair, AlignLeft, Globe } from "@lucide/svelte";
-import { auditColumns, auditTableFeatures } from "./columns";
 import AuditActionBadge from "./AuditActionBadge.svelte";
+import { auditColumns, auditTableFeatures } from "./columns";
 
 let {
   events,
@@ -12,14 +12,26 @@ let {
   linkEvents = false,
 }: { events: AuditEventView[]; older: string | null; showProject: boolean; linkEvents?: boolean } = $props();
 
-const headerIcons = { at: CalendarDays, actor: UserRound, action: Activity, projectId: Folder, target: Crosshair, detail: AlignLeft, from: Globe };
+const headerIcons = {
+  at: CalendarDays,
+  actor: UserRound,
+  action: Activity,
+  projectId: Folder,
+  target: Crosshair,
+  detail: AlignLeft,
+  from: Globe,
+};
 
 const columns = $derived(auditColumns(showProject));
 
 const table = createTable({
   features: auditTableFeatures,
-  get data() { return events; },
-  get columns() { return columns; },
+  get data() {
+    return events;
+  },
+  get columns() {
+    return columns;
+  },
   getRowId: (event) => event.id,
 });
 </script>

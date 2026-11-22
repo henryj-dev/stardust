@@ -1,6 +1,7 @@
 <script lang="ts">
 import { MoreHorizontal } from "@lucide/svelte";
 import type { PageData } from "../../../routes/(app)/admin/users/$types";
+
 let { user, me }: { user: PageData["users"][number]; me: string } = $props();
 const menuId = $props.id();
 let trigger: HTMLButtonElement;

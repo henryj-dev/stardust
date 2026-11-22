@@ -1,9 +1,13 @@
 <script lang="ts">
+import { Database, FileText, Globe, LayoutGrid, Monitor, Server, ShieldCheck, Users } from "@lucide/svelte";
 import { page } from "$app/state";
-import { LayoutGrid, Users, Globe, Server, Database, Monitor, FileText, ShieldCheck } from "@lucide/svelte";
 import AccountMenu from "./AccountMenu.svelte";
 
-let { user, capabilities, onNavigate }: {
+let {
+  user,
+  capabilities,
+  onNavigate,
+}: {
   user: { username: string; displayName: string | null; isAdmin: boolean };
   capabilities: string[];
   onNavigate: () => void;
@@ -12,15 +16,54 @@ let { user, capabilities, onNavigate }: {
 const items = $derived([
   { label: "Projects", href: "/", icon: LayoutGrid, hook: "", show: true },
   { label: "Users", href: "/admin/users", icon: Users, hook: "users", show: user.isAdmin },
-  { label: "Domains", href: "/domains", icon: Globe, hook: "domains", show: user.isAdmin && capabilities.includes("domains.list") },
-  { label: "Nodes", href: "/nodes", icon: Server, hook: "nodes", show: user.isAdmin && capabilities.includes("nodes.list") },
-  { label: "Databases", href: "/databases", icon: Database, hook: "databases", show: user.isAdmin && capabilities.includes("databases.list") },
-  { label: "Instances", href: "/instances", icon: Monitor, hook: "instances", show: user.isAdmin && capabilities.includes("instances.list") },
-  { label: "Cloud audit", href: "/cloud-audit", icon: FileText, hook: "cloud-audit", show: user.isAdmin && capabilities.includes("cloud-audit.findings") },
-  { label: "Upstream images", href: "/upstream-images", icon: ShieldCheck, hook: "upstream-images", show: user.isAdmin && capabilities.includes("upstream-images.checks") },
+  {
+    label: "Domains",
+    href: "/domains",
+    icon: Globe,
+    hook: "domains",
+    show: user.isAdmin && capabilities.includes("domains.list"),
+  },
+  {
+    label: "Nodes",
+    href: "/nodes",
+    icon: Server,
+    hook: "nodes",
+    show: user.isAdmin && capabilities.includes("nodes.list"),
+  },
+  {
+    label: "Databases",
+    href: "/databases",
+    icon: Database,
+    hook: "databases",
+    show: user.isAdmin && capabilities.includes("databases.list"),
+  },
+  {
+    label: "Instances",
+    href: "/instances",
+    icon: Monitor,
+    hook: "instances",
+    show: user.isAdmin && capabilities.includes("instances.list"),
+  },
+  {
+    label: "Cloud audit",
+    href: "/cloud-audit",
+    icon: FileText,
+    hook: "cloud-audit",
+    show: user.isAdmin && capabilities.includes("cloud-audit.findings"),
+  },
+  {
+    label: "Upstream images",
+    href: "/upstream-images",
+    icon: ShieldCheck,
+    hook: "upstream-images",
+    show: user.isAdmin && capabilities.includes("upstream-images.checks"),
+  },
   { label: "Audit log", href: "/admin/audit", icon: FileText, hook: "audit", show: user.isAdmin },
 ]);
-const isCurrent = (href: string) => href === "/" ? page.url.pathname === "/" || page.url.pathname.startsWith("/projects/") : page.url.pathname === href || page.url.pathname.startsWith(`${href}/`);
+const isCurrent = (href: string) =>
+  href === "/"
+    ? page.url.pathname === "/" || page.url.pathname.startsWith("/projects/")
+    : page.url.pathname === href || page.url.pathname.startsWith(`${href}/`);
 </script>
 
 <aside class="flex h-full min-h-0 flex-col bg-[#f8f8f8] px-3 py-4 text-[#252525]">

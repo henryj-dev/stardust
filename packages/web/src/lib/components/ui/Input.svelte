@@ -1,7 +1,19 @@
 <script lang="ts">
 let {
-  id, name, type = "text", autocomplete, value = "", inputmode,
-  required = false, disabled = false, invalid = false, describedby, placeholder, minlength, maxlength, pattern,
+  id,
+  name,
+  type = "text",
+  autocomplete,
+  value = "",
+  inputmode,
+  required = false,
+  disabled = false,
+  invalid = false,
+  describedby,
+  placeholder,
+  minlength,
+  maxlength,
+  pattern,
 }: {
   id: string;
   name: string;

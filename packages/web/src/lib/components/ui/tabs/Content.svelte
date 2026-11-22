@@ -1,6 +1,7 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
 import { getTabsContext } from "./context";
+
 let { value, children, class: className = "" }: { value: string; children: Snippet; class?: string } = $props();
 const tabs = getTabsContext();
 </script>

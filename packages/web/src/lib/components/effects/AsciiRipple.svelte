@@ -4,8 +4,10 @@ import { onMount } from "svelte";
 let canvas: HTMLCanvasElement;
 
 onMount(() => {
-  const context = canvas.getContext("2d");
-  if (!context) return;
+  const found = canvas.getContext("2d");
+  if (!found) return;
+  // Typed without null, so the drawing functions below need no assertions.
+  const context: CanvasRenderingContext2D = found;
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
   const ripples: { x: number; y: number; time: number }[] = [];
@@ -20,16 +22,17 @@ onMount(() => {
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = width * ratio;
     canvas.height = height * ratio;
-    context!.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
   }
 
   function draw(now: number) {
-    context!.clearRect(0, 0, width, height);
-    context!.font = "12px ui-monospace, SFMono-Regular, monospace";
-    context!.textAlign = "center";
-    context!.textBaseline = "middle";
+    context.clearRect(0, 0, width, height);
+    context.font = "12px ui-monospace, SFMono-Regular, monospace";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
     for (let i = ripples.length - 1; i >= 0; i--) {
-      const ripple = ripples[i]!;
+      const ripple = ripples[i];
+      if (!ripple) continue;
       const progress = (now - ripple.time) / 1100;
       if (progress >= 1) {
         ripples.splice(i, 1);
@@ -43,8 +46,8 @@ onMount(() => {
           const distance = Math.hypot(x - ripple.x, y - ripple.y);
           const intensity = Math.max(0, 1 - Math.abs(distance - radius) / 22);
           if (intensity < 0.1) continue;
-          context!.fillStyle = `rgba(71, 85, 105, ${fade * intensity})`;
-          context!.fillText(intensity > 0.7 ? "+" : intensity > 0.35 ? ":" : ".", x, y);
+          context.fillStyle = `rgba(71, 85, 105, ${fade * intensity})`;
+          context.fillText(intensity > 0.7 ? "+" : intensity > 0.35 ? ":" : ".", x, y);
         }
       }
     }
@@ -66,7 +69,7 @@ onMount(() => {
     ripples.length = 0;
     cancelAnimationFrame(frame);
     frame = 0;
-    context!.clearRect(0, 0, width, height);
+    context.clearRect(0, 0, width, height);
   }
 
   resize();

@@ -8,7 +8,7 @@ import CreateUserDialog from "$lib/components/users/CreateUserDialog.svelte";
 import UserList from "$lib/components/users/UserList.svelte";
 
 let { data, form } = $props();
-const createError = $derived(page.url.searchParams.has('/create') && form?.error && !form.reauth ? form.error : null);
+const createError = $derived(page.url.searchParams.has("/create") && form?.error && !form.reauth ? form.error : null);
 </script>
 
 <svelte:head><title>Users · stardust</title></svelte:head>

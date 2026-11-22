@@ -1,7 +1,7 @@
 <script lang="ts">
+import AuditTable from "$lib/components/audit/AuditTable.svelte";
 import PageContainer from "$lib/components/layout/PageContainer.svelte";
 import PageHeader from "$lib/components/layout/PageHeader.svelte";
-import AuditTable from "$lib/components/audit/AuditTable.svelte";
 
 let { data } = $props();
 </script>

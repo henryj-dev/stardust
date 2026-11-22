@@ -1,12 +1,16 @@
 <script lang="ts">
-import PageContainer from "$lib/components/layout/PageContainer.svelte";
 import { Search } from "@lucide/svelte";
+import PageContainer from "$lib/components/layout/PageContainer.svelte";
 import EmptyProjects from "$lib/components/projects/EmptyProjects.svelte";
 import ProjectHeader from "$lib/components/projects/ProjectHeader.svelte";
 
 let { data } = $props();
 let search = $state("");
-const filtered = $derived(data.projects.filter((project) => `${project.name} ${project.githubRepo ?? ""}`.toLowerCase().includes(search.trim().toLowerCase())));
+const filtered = $derived(
+  data.projects.filter((project) =>
+    `${project.name} ${project.githubRepo ?? ""}`.toLowerCase().includes(search.trim().toLowerCase()),
+  ),
+);
 </script>
 
 <svelte:head><title>Projects · stardust</title></svelte:head>

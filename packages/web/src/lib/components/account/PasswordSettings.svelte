@@ -1,8 +1,9 @@
 <script lang="ts">
-import SettingsCard from "./SettingsCard.svelte";
 import Button from "$lib/components/ui/Button.svelte";
 import TextField from "$lib/components/ui/TextField.svelte";
 import type { ActionData } from "../../../routes/(app)/account/$types";
+import SettingsCard from "./SettingsCard.svelte";
+
 let { form }: { form: ActionData | null } = $props();
 </script>
 

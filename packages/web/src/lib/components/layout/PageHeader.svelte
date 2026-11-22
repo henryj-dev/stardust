@@ -1,6 +1,12 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
-let { title, description, actions, divider = false }: { title: string; description?: string; actions?: Snippet; divider?: boolean } = $props();
+
+let {
+  title,
+  description,
+  actions,
+  divider = false,
+}: { title: string; description?: string; actions?: Snippet; divider?: boolean } = $props();
 </script>
 
 <div class="mb-6 flex flex-wrap items-start justify-between gap-4 {divider ? 'border-b border-[#eaeaec] pb-4' : ''}">

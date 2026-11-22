@@ -1,6 +1,13 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
-let { id, name, label, disabled = false, children }: { id: string; name: string; label: string; disabled?: boolean; children: Snippet } = $props();
+
+let {
+  id,
+  name,
+  label,
+  disabled = false,
+  children,
+}: { id: string; name: string; label: string; disabled?: boolean; children: Snippet } = $props();
 </script>
 
 <div class="grid gap-1.5">

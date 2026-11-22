@@ -1,14 +1,14 @@
 <script lang="ts">
-import PageContainer from "$lib/components/layout/PageContainer.svelte";
-import PageHeader from "$lib/components/layout/PageHeader.svelte";
+import { KeyRound, KeySquare, Monitor, ShieldCheck } from "@lucide/svelte";
 import { onMount } from "svelte";
 import { goto } from "$app/navigation";
-import * as Tabs from "$lib/components/ui/tabs";
-import { KeyRound, ShieldCheck, Monitor, KeySquare } from "@lucide/svelte";
 import PasswordSettings from "$lib/components/account/PasswordSettings.svelte";
-import TwoFactorSettings from "$lib/components/account/TwoFactorSettings.svelte";
 import SessionSettings from "$lib/components/account/SessionSettings.svelte";
 import TokenSettings from "$lib/components/account/TokenSettings.svelte";
+import TwoFactorSettings from "$lib/components/account/TwoFactorSettings.svelte";
+import PageContainer from "$lib/components/layout/PageContainer.svelte";
+import PageHeader from "$lib/components/layout/PageHeader.svelte";
+import * as Tabs from "$lib/components/ui/tabs";
 
 let { data, form } = $props();
 const sections = [
@@ -28,13 +28,13 @@ function initialSection(): SectionId {
 let active = $state<SectionId>(initialSection());
 function syncSection() {
   const id = window.location.hash.slice(1);
-  active = sections.some((section) => section.id === id) ? id as SectionId : "password";
+  active = sections.some((section) => section.id === id) ? (id as SectionId) : "password";
 }
 let orientation = $state<"horizontal" | "vertical">("horizontal");
 onMount(() => {
   if (window.location.hash) syncSection();
   const wide = window.matchMedia("(min-width: 768px)");
-  const syncOrientation = () => orientation = wide.matches ? "vertical" : "horizontal";
+  const syncOrientation = () => (orientation = wide.matches ? "vertical" : "horizontal");
   syncOrientation();
   wide.addEventListener("change", syncOrientation);
   return () => wide.removeEventListener("change", syncOrientation);

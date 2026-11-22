@@ -1,11 +1,14 @@
 <script lang="ts">
-import { onMount } from "svelte";
 import { Plus, X } from "@lucide/svelte";
+import { onMount } from "svelte";
 import Button from "$lib/components/ui/Button.svelte";
 import TextField from "$lib/components/ui/TextField.svelte";
+
 let { error = null }: { error?: string | null } = $props();
 let dialog: HTMLDialogElement;
-onMount(() => { if (error) dialog.showModal(); });
+onMount(() => {
+  if (error) dialog.showModal();
+});
 </script>
 
 <Button size="compact" fullWidth={false} onclick={() => dialog.showModal()}><Plus size={16} aria-hidden="true" /> <span class="ml-2">Add user</span></Button>

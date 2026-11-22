@@ -1,7 +1,10 @@
 <script lang="ts">
 import { ChevronDown, LogOut, UserRound } from "@lucide/svelte";
 
-let { user, onNavigate }: {
+let {
+  user,
+  onNavigate,
+}: {
   user: { username: string; displayName: string | null; isAdmin: boolean };
   onNavigate: () => void;
 } = $props();

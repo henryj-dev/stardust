@@ -1,7 +1,16 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
 
-let { children, variant = "primary", type = "button", size = "regular", fullWidth = true, disabled = false, onclick, class: className = "" }: {
+let {
+  children,
+  variant = "primary",
+  type = "button",
+  size = "regular",
+  fullWidth = true,
+  disabled = false,
+  onclick,
+  class: className = "",
+}: {
   children: Snippet;
   variant?: "primary" | "secondary" | "danger";
   type?: "button" | "submit";

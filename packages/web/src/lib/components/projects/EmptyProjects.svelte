@@ -1,5 +1,6 @@
 <script lang="ts">
 import { Folder } from "@lucide/svelte";
+
 let { isAdmin, searching }: { isAdmin: boolean; searching: boolean } = $props();
 </script>
 

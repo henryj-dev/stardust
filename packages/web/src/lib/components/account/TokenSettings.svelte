@@ -1,9 +1,10 @@
 <script lang="ts">
-import SettingsCard from "./SettingsCard.svelte";
 import Button from "$lib/components/ui/Button.svelte";
-import TextField from "$lib/components/ui/TextField.svelte";
 import SelectField from "$lib/components/ui/SelectField.svelte";
-import type { PageData, ActionData } from "../../../routes/(app)/account/$types";
+import TextField from "$lib/components/ui/TextField.svelte";
+import type { ActionData, PageData } from "../../../routes/(app)/account/$types";
+import SettingsCard from "./SettingsCard.svelte";
+
 let { data, form }: { data: PageData; form: ActionData | null } = $props();
 const time = (iso: string) => new Date(iso).toLocaleString();
 const ended = (iso: string) => new Date(iso).getTime() <= Date.now();
