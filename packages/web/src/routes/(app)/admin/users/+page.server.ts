@@ -42,12 +42,14 @@ export const actions: Actions = {
     const form = await request.formData();
     const username = String(form.get("username") ?? "").trim();
     const subject = String(form.get("subject") ?? "").trim();
+    // A person from the waiting list comes with the issuer the audit log recorded.
+    const issuer = String(form.get("issuer") ?? "").trim();
     try {
       await client.createUser({
         username,
         displayName: String(form.get("displayName") ?? ""),
         isAdmin: form.get("isAdmin") === "on",
-        ...(subject ? { oidc: { subject } } : {}),
+        ...(subject ? { oidc: { subject, ...(issuer ? { issuer } : {}) } } : {}),
       });
       // Someone who signs in through the provider needs no password, so no invitation.
       if (subject) return { created: { username, sso: true } };
@@ -91,9 +93,10 @@ export const actions: Actions = {
     const username = String(form.get("username") ?? "");
     const subject = String(form.get("subject") ?? "").trim();
     const unlink = form.get("op") === "unlink";
+    const issuer = String(form.get("issuer") ?? "").trim();
     if (!unlink && !subject) return fail(400, { error: "Give the person's single sign-on subject." });
     try {
-      await client.updateUser(username, { oidc: unlink ? null : { subject } });
+      await client.updateUser(username, { oidc: unlink ? null : { subject, ...(issuer ? { issuer } : {}) } });
       return { updated: username };
     } catch (err) {
       return refused(err);
